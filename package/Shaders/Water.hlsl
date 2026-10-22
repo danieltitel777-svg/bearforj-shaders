@@ -1476,6 +1476,8 @@ PS_OUTPUT main(PS_INPUT input)
 		float reflectionWeight = specularFraction * surfaceMul;
 		waterOpacity = max(lerp(diffuseOutput.refractionMul, 1.0, reflectionWeight), 1e-3);
 		finalColorPreFog = (diffuseOutput.refractionDiffuseColor * (diffuseOutput.refractionMul * (1.0 - reflectionWeight)) + specularColor * reflectionWeight + sunColor * (sunMul * surfaceMul)) / waterOpacity;
+		float shoreFoam = saturate(1.0 - distanceMul.w * 5.0) * saturate(normal.z);
+		finalColorPreFog = lerp(finalColorPreFog, float3(0.62, 0.66, 0.68), shoreFoam * 0.35);
 	} else {
 		finalColorPreFog = lerp(diffuseOutput.refractionDiffuseColor, specularColor, specularFraction) + sunColor * depthControl.w;
 	}
