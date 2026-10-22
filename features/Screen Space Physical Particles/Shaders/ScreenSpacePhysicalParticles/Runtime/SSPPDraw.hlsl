@@ -29,6 +29,20 @@ VSOut main(uint vid : SV_VertexID)
 	Particle p = Particles[pid];
 	o.Kind = p.Kind & 0xFFu;
 	o.Sprite = (p.Kind >> SSPP_SPRITE_SHIFT) & 0xFFu;
+	// 0.6.5.1: no explicit cell -> pick the closest atlas cell from the type id (SSPP_TYPES.md).
+	// Cells (1-based): 1 rain 2 snow 3 leaf 4 narrow leaf 5 needle 6 twig 7 spark 8 ember 9 ash
+	// 10 ice 11 dust 12 blood 13 water 14 pollen 15 insect 16 fly. Bit 0x80 = tint by particle colour.
+	if (o.Sprite == 0u) {
+		static const uint kTypeCell[27] = {
+			1u, 2u, 3u, 13u, 7u, 11u, 12u, 8u, 10u,             // 0-8 rain snow leaf splash spark dust blood ember ice
+			14u | 0x80u, 14u | 0x80u, 15u | 0x80u, 16u, 16u, 15u, // 9-14 pollen firefly butterfly gnat fly lamp
+			5u, 6u,                                              // 15-16 needle twig
+			14u | 0x80u, 10u | 0x80u, 14u | 0x80u, 9u | 0x80u,  // 17-20 restoration alteration illusion conjuration
+			11u | 0x80u, 10u | 0x80u, 13u | 0x80u,              // 21-23 shout ward shard ward ripple
+			12u, 13u, 13u                                        // 24-26 blood stain, water stain, drip
+		};
+		o.Sprite = o.Kind < 27u ? kTypeCell[o.Kind] : 0u;
+	}
 	if (p.Life <= 0.0 || p.Age >= p.Life || pid >= Ranges.w) {
 		o.Position = float4(0, 0, -2, 1);
 		return o;
@@ -183,17 +197,21 @@ float4 main(VSOut i) : SV_Target
 	float shape;
 	float3 rgb = i.Color.rgb;
 	// ReactPad.x is 1 once atlas.dds loaded. Sprite 0 stays the old procedural shape.
-	bool textured = ReactPad.x > 0 && i.Sprite >= 1 && i.Sprite <= 16;
+	uint spr = i.Sprite & 0x7Fu;
+	bool tint = (i.Sprite & 0x80u) != 0;
+	bool textured = ReactPad.x > 0 && spr >= 1 && spr <= 16;
 	if (textured) {
-		uint cell = i.Sprite - 1u;
+		uint cell = spr - 1u;
 		float2 uv01 = float2(uv.x, -uv.y) * 0.5 + 0.5;
 		float2 atlasUV = (float2(cell & 3u, cell >> 2u) + uv01) * 0.25;
 		float4 tex = SpriteAtlas.Sample(SpriteSamp, atlasUV);
 		shape = tex.a;
+		if (i.Kind == SSPP_WARD_RIPPLE)  // keep the ring, water texture only breaks it up
+			shape *= saturate(1.0 - abs(length(uv) - 0.55) * 7.0);
 		if (shape < 0.03)
 			discard;
 		if (i.Color.a <= 0.001) {
-			rgb = i.Color.rgb;
+			rgb = i.Color.rgb * (tint ? tex.rgb * 1.5 : 1.0);
 		} else {
 			// Atlas albedo is the picture. Floor the lighting so blood and ash stay readable
 			// after the linear-lighting decode, without blowing out rain and snow.
@@ -205,6 +223,8 @@ float4 main(VSOut i) : SV_Target
 			}
 			float peak = max(i.Color.r, max(i.Color.g, i.Color.b));
 			rgb = albedo * max(peak, 0.65);
+			if (tint)  // magic, glow motes: keep the texture detail, take the hue from the emitter colour
+				rgb = dot(albedo, float3(0.2126, 0.7152, 0.0722)) * i.Color.rgb / max(peak, 1e-3) * max(peak, 0.65) * 1.4;
 		}
 	} else if (i.Kind == SSPP_RAIN || i.Kind == SSPP_SPARK || i.Kind == SSPP_SPLASH || i.Kind == SSPP_WATER_DRIP || i.Kind == SSPP_WARD_SHARD)
 		shape = saturate(1.0 - uv.x * uv.x) * saturate(1.0 - uv.y * uv.y * uv.y * uv.y);
