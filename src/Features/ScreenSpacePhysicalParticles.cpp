@@ -1,4 +1,5 @@
 #include "ScreenSpacePhysicalParticles.h"
+#include "NativeParticlePhysics.h"
 #include "SSPPSubFeatures.h"
 #include "Bearforj/Context.h"
 #include "Bearforj/TipUI.h"
@@ -18,7 +19,7 @@
 
 #define I18N_KEY_PREFIX "feature.sspp."
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ScreenSpacePhysicalParticles::Extra, SuppressVanilla, ParticleBudget, GlobalDensity, LeafGroundMin, LeafGroundMax, LeafGlide, LeafGustLift, SparkRestTime, IceRestTime, MagicParticles, MagicCount, MagicLifetime, MagicMaxDistance, SizeVariation, FadeDistance, WindDrift, WindDriftDensity, FireSparks, FireSparkRate, FireSparkRadius)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ScreenSpacePhysicalParticles::Extra, SuppressVanilla, ParticleBudget, GlobalDensity, LeafGroundMin, LeafGroundMax, LeafGlide, LeafGustLift, SparkRestTime, IceRestTime, MagicParticles, MagicCount, MagicLifetime, MagicMaxDistance, SizeVariation, FadeDistance, WindDrift, WindDriftDensity, FireSparks, FireSparkRate, FireSparkRadius, ReactMask, ReactToActors)
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ScreenSpacePhysicalParticles::Settings,
@@ -500,7 +501,12 @@ void ScreenSpacePhysicalParticles::Prepass()
 
 void ScreenSpacePhysicalParticles::OnBeforePostProcessing(RE::RENDER_TARGET a_renderTarget)
 {
-	if (!loaded || !settings.Enabled || globals::game::isVR || !globals::state->inWorld)
+	// inWorld is set only for the body of Main::RenderWorld and cleared when that call returns.
+	// ImageSpaceManager::PostProcessing (the HDR hook this runs from) is after that, so an
+	// inWorld test here skips every frame. 0.6 drew in this hook and the particles were on
+	// screen; 0.6.3's guard is why rain, snow, leaves, sparks, blood and dust all vanished.
+	// worldRenderedThisFrame stays true until Present, which is what post-time code has to use.
+	if (!loaded || !settings.Enabled || globals::game::isVR || !globals::state->worldRenderedThisFrame)
 		return;
 	if (simulatedThisFrame)
 		return;  // HDR blend can be invoked more than once per frame
@@ -606,6 +612,13 @@ void ScreenSpacePhysicalParticles::OnBeforePostProcessing(RE::RENDER_TARGET a_re
 		cb.ContextB = float4(cx.hour, static_cast<float>(cx.loc), static_cast<float>(cx.weatherSlot), cx.night ? 1.0f : 0.0f);
 	}
 	cb.ExtraP2 = float4(std::clamp(settings.bf.SizeVariation, 0.0f, 0.95f), settings.bf.LeafGlide, settings.bf.LeafGustLift ? 1.0f : 0.0f, std::max(settings.bf.FadeDistance, 500.0f));
+	globals::features::nativeParticlePhysics.RefreshInfluencers();
+	for (uint32_t i = 0; i < NativeParticlePhysics::kInfluencerCount; ++i) {
+		const auto& inf = globals::features::nativeParticlePhysics.influencers[i];
+		cb.InfluencerPos[i] = float4(inf.pos[0], inf.pos[1], inf.pos[2], settings.bf.ReactToActors ? inf.pos[3] : 0.0f);
+		cb.InfluencerVel[i] = float4(inf.vel[0], inf.vel[1], inf.vel[2], settings.bf.ReactToActors ? inf.vel[3] : 0.0f);
+	}
+	cb.ReactMask = settings.bf.ReactMask;
 
 	// Wind drift (CPU-cheap: a few dust events per frame near the camera, GPU does the rest).
 	if (settings.bf.WindDrift && !paused && !Util::IsInterior() && windStrength > 0.25f && rain < 0.5f) {
@@ -681,6 +694,12 @@ void ScreenSpacePhysicalParticles::OnBeforePostProcessing(RE::RENDER_TARGET a_re
 	}
 	{
 		CS_GPU_PASS("SSPP::Draw");
+		// Linear Lighting's scene decode is a full-target UAV write. It is registered later in
+		// the feature list, so it used to run after this draw and erase every particle. Decode
+		// first (no-op when the scene is already linear), then composite. The LL colour decode
+		// in SSPPDraw.hlsl stays: these sprites are authored in gamma and the target is linear.
+		if (globals::features::linearLighting.loaded)
+			globals::features::linearLighting.OnBeforePostProcessing(a_renderTarget);
 		D3D11_VIEWPORT vp{ 0.0f, 0.0f, dynSize.x, dynSize.y, 0.0f, 1.0f };
 		context->RSSetViewports(1, &vp);
 		context->RSSetState(rasterState.get());
@@ -734,7 +753,35 @@ void ScreenSpacePhysicalParticles::DrawSettings()
 	if (settings.bf.FireSparks)
 		BFUI::SliderFloat(T(TKEY("fire_spark_rate"), "Fire spark bursts per second"), &settings.bf.FireSparkRate, 0.1f, 20.0f, "%.1f");
 	BFUI::Checkbox(T(TKEY("wind_drift"), "Wind drift (blowing snow / dust)"), &settings.bf.WindDrift);
-	BFUI::Checkbox(T(TKEY("leaf_gust"), "Gusts lift fallen leaves"), &settings.bf.LeafGustLift);
+	BFUI::Checkbox(T(TKEY("leaf_gust"), "Gusts lift resting particles"), &settings.bf.LeafGustLift);
+	BFUI::Checkbox(T(TKEY("react_actors"), "Actors, creatures, spells and shouts push particles"), &settings.bf.ReactToActors);
+	if (ImGui::TreeNodeEx(T(TKEY("react_section"), "Which particles react"))) {
+		auto bit = [&](const char* a_label, Kind a_kind) {
+			bool on = (settings.bf.ReactMask & (1u << a_kind)) != 0;
+			if (BFUI::Checkbox(a_label, &on)) {
+				if (on)
+					settings.bf.ReactMask |= 1u << a_kind;
+				else
+					settings.bf.ReactMask &= ~(1u << a_kind);
+			}
+		};
+		bit(T(TKEY("react_rain"), "Rain"), kRain);
+		ImGui::SameLine();
+		bit(T(TKEY("react_snow"), "Snow and ash"), kSnow);
+		ImGui::SameLine();
+		bit(T(TKEY("react_leaf"), "Leaves, needles and twigs"), kLeaf);
+		bit(T(TKEY("react_dust"), "Dust, sand and debris"), kDust);
+		ImGui::SameLine();
+		bit(T(TKEY("react_spark"), "Sparks"), kSpark);
+		ImGui::SameLine();
+		bit(T(TKEY("react_ember"), "Embers"), kEmber);
+		bit(T(TKEY("react_ice"), "Ice crumbs"), kIce);
+		ImGui::SameLine();
+		bit(T(TKEY("react_blood"), "Blood"), kBlood);
+		ImGui::SameLine();
+		bit(T(TKEY("react_splash"), "Splashes"), kSplash);
+		ImGui::TreePop();
+	}
 	if (ImGui::TreeNodeEx(T(TKEY("bearforj_section"), "Bearforj: lifetimes, density, fade"))) {
 		BFUI::SliderFloat(T(TKEY("leaf_ground_min"), "Leaf rest on ground min"), &settings.bf.LeafGroundMin, 0.0f, 60.0f, "%.0f s");
 		BFUI::SliderFloat(T(TKEY("leaf_ground_max"), "Leaf rest on ground max"), &settings.bf.LeafGroundMax, 0.0f, 90.0f, "%.0f s");

@@ -23,7 +23,6 @@ file_common_defines:
             - SSS
             - TERRAIN_BLENDING
             - TERRAIN_SHADOWS
-            - UNIFIED_WATER
             - VANILLA_FRESNEL
             - VOLUMETRIC_SHADOWS
             - WATER_EFFECTS
@@ -56,7 +55,6 @@ file_common_defines:
             - SSS
             - TERRAIN_BLENDING
             - TERRAIN_SHADOWS
-            - UNIFIED_WATER
             - VANILLA_FRESNEL
             - VOLUMETRIC_SHADOWS
             - WATER_EFFECTS
@@ -140,7 +138,6 @@ file_common_defines:
             - TERRAIN_BLENDING
             - TERRAIN_SHADOWS
             - TERRAIN_VARIATION
-            - UNIFIED_WATER
             - VANILLA_FRESNEL
             - VC
             - VOLUMETRIC_SHADOWS
@@ -166,7 +163,6 @@ file_common_defines:
             - TERRAIN_BLENDING
             - TERRAIN_SHADOWS
             - TERRAIN_VARIATION
-            - UNIFIED_WATER
             - VANILLA_FRESNEL
             - VOLUMETRIC_SHADOWS
             - WATER_EFFECTS
@@ -193,7 +189,6 @@ file_common_defines:
             - SSS
             - TERRAIN_BLENDING
             - TERRAIN_SHADOWS
-            - UNIFIED_WATER
             - VANILLA_FRESNEL
             - VOLUMETRIC_SHADOWS
             - WATER_EFFECTS
@@ -217,7 +212,6 @@ file_common_defines:
             - SSS
             - TERRAIN_BLENDING
             - TERRAIN_SHADOWS
-            - UNIFIED_WATER
             - VANILLA_FRESNEL
             - VOLUMETRIC_SHADOWS
             - WATER_EFFECTS
@@ -245,7 +239,6 @@ file_common_defines:
             - SSS
             - TERRAIN_BLENDING
             - TERRAIN_SHADOWS
-            - UNIFIED_WATER
             - VANILLA_FRESNEL
             - VOLUMETRIC_SHADOWS
             - WATER
@@ -274,7 +267,6 @@ shaders:
                   - SSS
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VOLUMETRIC_SHADOWS
                   - VR
@@ -303,7 +295,6 @@ shaders:
                   - SSS
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VOLUMETRIC_SHADOWS
                   - VR
@@ -11104,7 +11095,6 @@ shaders:
                   - SSS
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VOLUMETRIC_SHADOWS
                   - VR
@@ -11133,7 +11123,6 @@ shaders:
                   - SSS
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VOLUMETRIC_SHADOWS
                   - VR
@@ -11469,7 +11458,6 @@ shaders:
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
                   - TERRAIN_VARIATION
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VC
                   - VOLUMETRIC_SHADOWS
@@ -12949,7 +12937,6 @@ shaders:
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
                   - TERRAIN_VARIATION
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VOLUMETRIC_SHADOWS
                   - VR
@@ -13146,7 +13133,6 @@ shaders:
                   - SSS
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VOLUMETRIC_SHADOWS
                   - VR
@@ -13180,7 +13166,6 @@ shaders:
                   - SSS
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VOLUMETRIC_SHADOWS
                   - VR
@@ -13218,7 +13203,6 @@ shaders:
                   - SSS
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VOLUMETRIC_SHADOWS
                   - VR
@@ -13321,7 +13305,6 @@ shaders:
                   - SSS
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VOLUMETRIC_SHADOWS
                   - VR
@@ -16665,7 +16648,6 @@ shaders:
                   - SSS
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VOLUMETRIC_SHADOWS
                   - VR
@@ -19243,7 +19225,6 @@ shaders:
                   - SSS
                   - TERRAIN_BLENDING
                   - TERRAIN_SHADOWS
-                  - UNIFIED_WATER
                   - VANILLA_FRESNEL
                   - VOLUMETRIC_SHADOWS
                   - VR

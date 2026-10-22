@@ -57,6 +57,8 @@ struct Skin : Feature
 		float WetFadeTime = 10.0f;
 		float StartSweat = 0.75f;
 		float FullSweat = 0.15f;
+		/// Scales the sweat sheen. 1 is the stock stamina response; 0 disables sweat.
+		float SweatAmount = 1.0f;
 		float4 WetParams{ 512.0f, 0.7f, 10.0f, 4.0f };
 		/// Mod folder that receives material files saved by the editor; empty means the game's Data folder.
 		std::string MaterialOutputFolder;
@@ -127,6 +129,7 @@ private:
 	{
 		float4 wetness{ 0, 0, 0, 0 };
 		uint32_t frameCount = 0;
+		float exertion = 0.0f;
 	};
 	struct Editor
 	{

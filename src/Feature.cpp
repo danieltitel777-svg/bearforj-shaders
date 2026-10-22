@@ -57,7 +57,6 @@
 #include "Features/TerrainHelper.h"
 #include "Features/TerrainShadows.h"
 #include "Features/TerrainVariation.h"
-#include "Features/UnifiedWater.h"
 #include "Features/Upscaling.h"
 #include "Features/VR.h"
 #include "Features/VanillaFresnel.h"
@@ -320,7 +319,6 @@ namespace
 			&globals::features::physicalSky,
 			&globals::features::hairBacklighting,
 			&globals::features::pseudoSunBounce,
-			&globals::features::unifiedWater,
 			&globals::features::horizonFix,
 			&globals::features::exponentialHeightFog,
 			&globals::features::hdrDisplay,

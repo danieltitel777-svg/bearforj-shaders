@@ -134,9 +134,6 @@ src/Features/TerrainDeformation.cpp
 src/Features/TerrainHelper.cpp
 src/Features/TerrainShadows.cpp
 src/Features/TerrainVariation.cpp
-src/Features/UnifiedWater.cpp
-src/Features/UnifiedWater/Flowmap.cpp
-src/Features/UnifiedWater/WaterCache.cpp
 src/Features/Upscaling.cpp
 src/Features/Upscaling/DX12SwapChain.cpp
 src/Features/Upscaling/FidelityFX.cpp

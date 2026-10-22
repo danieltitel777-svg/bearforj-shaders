@@ -241,13 +241,24 @@ public:
 	/** @brief Returns whether render-pass geometry needs character rain surface classification. */
 	bool ShouldClassifyCharacterRainSurfaces() const
 	{
+		// Tag skin, armor and hair whenever the feature is on. Gating this on current wetness
+		// left the body untagged at the start of rain and while wading in dry weather, so the
+		// droplet permutation never ran.
 		const bool characterEffectsEnabled = settings.EnableWetnessEffects && settings.EnableCharacterRainSpots;
-		const bool characterWaterVisible = characterSurfaceWetness > 0.0f || settings.CharacterSpotDebug != 0u;
-		return loaded && characterEffectsEnabled && characterWaterVisible;
+		return loaded && characterEffectsEnabled;
 	}
 
 	/** @brief Bearforj: retained character rain wetness (0..1), used by Submersion Wetness for the rain coat. */
 	float GetCharacterRetainedWetness() const { return characterSurfaceWetness; }
+
+	/**
+	 * @brief How much faster than the dry-time slider the actor should dry right now.
+	 * Indoors, in sun, and near flame lights dry faster. Snow and dense fog dry slower.
+	 */
+	float GetDryingScale(RE::Actor* a_actor) const;
+
+	/** @brief Menu multiplier for every dry timer. 1 matches the dry-time slider. */
+	float dryingSpeed = 1.0f;
 
 private:
 	void DrawEnvironmentWetnessSettings();

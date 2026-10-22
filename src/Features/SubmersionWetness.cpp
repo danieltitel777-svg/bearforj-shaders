@@ -214,6 +214,8 @@ void SubmersionWetness::UpdateActor(RE::Actor* a_actor, float a_dt, float a_rain
 	st.depth = waterZ > kNoWater ? std::clamp(waterZ - st.feetZ, 0.0f, st.height + 16.0f) : 0.0f;
 	st.waterZ = waterZ;
 
+	const float dryScale = globals::features::wetnessEffects.GetDryingScale(a_actor);
+	const float dryTime = std::max(settings.DryTime, 1.0f) / std::max(dryScale, 0.15f);
 	if (st.depth > 1.0f) {
 		// Wading in: the wet line climbs toward the water over SoakInTime (ankles, then knees, then
 		// waist) instead of jumping to the current depth, and the soaked part fills in over the same time.
@@ -222,7 +224,9 @@ void SubmersionWetness::UpdateActor(RE::Actor* a_actor, float a_dt, float a_rain
 		st.soakLine = std::min(desired, st.soakLine + climb * a_dt);
 		st.soak = std::min(1.0f, st.soak + a_dt / std::max(settings.SoakInTime, 0.1f));
 	} else {
-		st.soak = std::max(0.0f, st.soak - a_dt / std::max(settings.DryTime, 1.0f));
+		st.soak = std::max(0.0f, st.soak - a_dt / dryTime);
+		// The waterline creeps down as the actor dries, so only the still-soaked part stays wet.
+		st.soakLine = std::max(0.0f, st.soakLine - st.height * a_dt / dryTime);
 		if (st.soak <= 0.0f)
 			st.soakLine = 0.0f;
 	}
@@ -241,7 +245,7 @@ void SubmersionWetness::UpdateActor(RE::Actor* a_actor, float a_dt, float a_rain
 	if (target > st.rain)
 		st.rain = std::min(target, st.rain + a_dt / std::max(settings.RainSoakTime, 0.5f));
 	else
-		st.rain = std::max(target, st.rain - a_dt / std::max(settings.DryTime, 1.0f));
+		st.rain = std::max(target, st.rain - a_dt / dryTime);
 }
 
 void SubmersionWetness::Prepass()
@@ -315,6 +319,16 @@ void SubmersionWetness::OnLightingSetupGeometry(RE::BSRenderPass* a_pass)
 	ID3D11Buffer* cb = perGeometryCB->CB();
 	globals::d3d::context->PSSetConstantBuffers(9, 1, &cb);
 	boundThisDraw = true;
+}
+
+bool SubmersionWetness::TryGetSoak(RE::FormID a_formID, float& a_line, float& a_amount) const
+{
+	auto it = actors.find(a_formID);
+	if (it == actors.end())
+		return false;
+	a_line = it->second.soakLine;
+	a_amount = it->second.soak;
+	return true;
 }
 
 void SubmersionWetness::OnLightingRestoreGeometry()

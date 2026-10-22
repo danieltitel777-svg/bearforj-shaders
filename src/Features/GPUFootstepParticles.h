@@ -27,7 +27,7 @@ struct GPUFootstepParticles : Feature, RE::BSTEventSink<RE::BGSFootstepEvent>
 
 	struct Settings
 	{
-		bool Enabled = false;  // Bearforj 0.6.4: off by default, SSPP Footstep Particles sub-feature already emits footsteps
+		bool Enabled = true;  // GPU footstep collision; SSPP also scatters resting particles in the same step
 		bool IncludeNPCs = true;
 		bool Water = true;
 		bool RainWetness = true;

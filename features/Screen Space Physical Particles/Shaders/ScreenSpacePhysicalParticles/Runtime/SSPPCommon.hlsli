@@ -51,6 +51,10 @@ cbuffer SSPPFrame : register(b0)
 	float4 ExtraP2;               // x size variation 0..1, y leaf glide (flutter scale), z gust lift 0/1, w fade distance (units)
 	float4 ContextA;              // x interior, y deciduous tree density, z conifer density, w cold 0..1
 	float4 ContextB;              // x game hour, y location flags (Bearforj::Context), z weather slot, w night
+	float4 InfluencerPos[8];      // xyz world, w radius (0 = empty)
+	float4 InfluencerVel[8];      // xyz motion, w push strength
+	uint ReactMask;               // bit (1 << kind): this profile reacts to actors, creatures, gusts, spells
+	uint3 ReactPad;
 };
 
 float Hash(uint a_seed)

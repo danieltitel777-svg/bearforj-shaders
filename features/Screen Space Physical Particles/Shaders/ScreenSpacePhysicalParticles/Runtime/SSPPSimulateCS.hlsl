@@ -94,6 +94,45 @@ void SpawnDynamic(uint a_kind, float3 a_pos, float3 a_vel, float a_life, float a
 		Particles[slot] = p;
 }
 
+// Actors, creatures, gusts, spells and shouts. Resting debris is lifted; airborne particles are pushed and swirled.
+void ReactToBodies(inout Particle p, uint kind, inout bool settled)
+{
+	if ((ReactMask & (1u << kind)) == 0u)
+		return;
+	float3 push = 0;
+	float lift = 0;
+	[unroll] for (uint i = 0; i < 8; i++) {
+		float radius = InfluencerPos[i].w;
+		float strength = InfluencerVel[i].w;
+		if (radius < 1.0 || strength <= 0.0)
+			continue;
+		float3 delta = p.Position - InfluencerPos[i].xyz;
+		float horizontal = length(delta.xy);
+		if (horizontal > radius || abs(delta.z) > radius * 1.4)
+			continue;
+		float falloff = 1.0 - horizontal / radius;
+		float3 away = horizontal > 1.0 ? float3(delta.xy / horizontal, 0) : float3(1, 0, 0);
+		float3 swirl = float3(-away.y, away.x, 0);
+		float3 motion = InfluencerVel[i].xyz;
+		push += (away * 0.7 + swirl * 0.45) * strength * falloff + motion * falloff * 0.25;
+		lift = max(lift, falloff * strength);
+	}
+	float gust = Wind.w * (0.5 + 0.5 * sin(TimeParams.x * 0.7 + p.Position.x * 0.002 + p.Position.y * 0.0017));
+	bool debris = kind != SSPP_RAIN;
+	if (ExtraP2.z > 0.5 && debris && settled && gust > (kind == SSPP_LEAF || kind == SSPP_DUST || kind == SSPP_SNOW ? 0.45 : 0.7))
+		lift = max(lift, gust * 220.0);
+	if (settled) {
+		if (lift > 70.0 && debris) {
+			p.Kind &= ~SSPP_FLAG_SETTLED;
+			p.Velocity = push + float3(Wind.xy * 0.35, 90.0 + lift * 0.35);
+			p.Life = max(p.Life, p.Age + 8.0);
+			settled = false;
+		}
+	} else if (dot(push, push) > 1.0) {
+		p.Velocity += push * TimeParams.y * 3.0;
+	}
+}
+
 void Respawn(inout Particle p, uint id, uint kind, float amount, float fallSpeed)
 {
 	uint seed = id * 7919u + (uint)TimeParams.z * 104729u;
@@ -248,14 +287,6 @@ void Respawn(inout Particle p, uint id, uint kind, float amount, float fallSpeed
 		// resting particles off screen can't be depth-tested: dissolve them (removal order: far, off screen, oldest)
 		p.Life = min(p.Life, p.Age + 1.5);
 	}
-	if (settled && kind == SSPP_LEAF && ExtraP2.z > 0.5) {
-		// a strong gust can pick a resting leaf up again (rare, per-leaf random)
-		float gustNow = Wind.w * (0.5 + 0.5 * sin(TimeParams.x * 0.7 + p.Position.x * 0.002 + p.Position.y * 0.0017));
-		if (gustNow > 0.45 && Hash(id * 389u + (uint)TimeParams.z) < 0.004 && (p.Life - p.Age) > 2.0) {
-			p.Kind &= ~SSPP_FLAG_SETTLED;
-			p.Velocity = float3(Wind.xy * 0.8, 120.0 + 100.0 * gustNow);
-			p.Life = p.Age + 30.0;
-		}
-	}
+	ReactToBodies(p, kind, settled);
 	Particles[id] = p;
 }

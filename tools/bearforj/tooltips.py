@@ -7,7 +7,7 @@ en=json.load(open(f"{TR}/en.json"),object_pairs_hook=collections.OrderedDict)
 ru=json.load(open(f"{TR}/ru.json"),object_pairs_hook=collections.OrderedDict)
 CALLS="SliderFloat|SliderInt|Checkbox|DragFloat|DragInt|Combo|ColorEdit3|ColorEdit4|SliderFloat2|SliderFloat3|SliderAngle|InputFloat|RadioButton|SliderScalar"
 HIGH={"ScreenSpaceGI","VolumetricLighting","Skylighting","PhysicalSky","Upscaling","ScreenSpaceShadows","TerrainShadows","ScreenSpaceReflections","ScreenSpacePhysicalParticles","LightLimitFix","ExponentialHeightFog","ProceduralAurora","GrassCollision","TerrainDeformation"}
-MED={"WetnessEffects","SubsurfaceScattering","CloudShadows","Bloom","DynamicCubemaps","ExtendedMaterials","WaterEffects","UnifiedWater","SubmersionWetness","PrecipitationPhysics","PhysicalLeaves","HairSpecular","TerrainBlending"}
+MED={"WetnessEffects","SubsurfaceScattering","CloudShadows","Bloom","DynamicCubemaps","ExtendedMaterials","WaterEffects","SubmersionWetness","PrecipitationPhysics","PhysicalLeaves","HairSpecular","TerrainBlending"}
 COSTLY=re.compile(r"sample|quality|step|resolution|slice|direction|count|distance|radius|range|res\b|iteration|cascade|lod|max .*lights|taps|rays",re.I)
 def feature_of(path):
     rel=os.path.relpath(path,f"{ROOT}/src/Features").replace("\\","/")

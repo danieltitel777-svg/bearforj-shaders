@@ -69,6 +69,9 @@ struct ScreenSpacePhysicalParticles : Feature
 		float FadeDistance = 6000.0f; // particles fade out smoothly towards this distance (no popping)
 		bool WindDrift = true;        // blowing snow / dust / debris near the ground in wind
 		float WindDriftDensity = 0.5f;
+		// Bit per Kind (1 << kRain ...). Airborne and resting particles of a set bit are pushed by actors, creatures, wind gusts, spells and shouts.
+		uint32_t ReactMask = (1u << 9) - 1u;
+		bool ReactToActors = true;
 		bool SuppressVanilla = true;        // never double precipitation (see cpp)
 		uint32_t ParticleBudget = 160000;  // shared limit for all pools; pools shrink proportionally above it
 		float GlobalDensity = 1.0f;        // multiplies weather precipitation and leaf amounts
@@ -184,6 +187,10 @@ struct ScreenSpacePhysicalParticles : Feature
 		float4 ExtraP2;  // x size variation, y leaf glide, z gust lift, w fade distance
 		float4 ContextA; // x interior, y trees, z conifers, w cold
 		float4 ContextB; // x hour, y location flags, z weather slot, w night
+		float4 InfluencerPos[8];  // xyz world, w radius (0 = empty)
+		float4 InfluencerVel[8];  // xyz motion, w push strength
+		uint32_t ReactMask;
+		uint32_t ReactPad[3];
 	};
 
 	virtual void SetupResources() override;

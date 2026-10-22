@@ -262,7 +262,15 @@ namespace Skin
 		waterWet = skinPerGeometry.y * (1 - smoothstep(waterLevel - 2.5f, waterLevel + 2.5f, z));
 
 		float sweatWet = skinPerGeometry.x;
-#if !defined(SKIN)
+#if defined(SKIN)
+		// Face, neck and arms first. Legs fill in only once the sweat amount is high.
+		float aboveFeet = z - skinPerGeometry.z;
+		float upper = smoothstep(40.0f, 110.0f, aboveFeet);
+		float limbs = saturate(1.0f - abs(modelNormal.z));
+		float region = saturate(max(upper, limbs * 0.85f));
+		float spread = smoothstep(0.35f, 0.9f, sweatWet);
+		sweatWet *= lerp(region, 1.0f, spread);
+#else
 		sweatWet *= 1.0f - saturate(dot(modelNormal, float3(0, 0, 1)));
 #endif
 		return float2(sweatWet, waterWet);

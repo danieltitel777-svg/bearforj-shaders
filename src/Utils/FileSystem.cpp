@@ -112,11 +112,6 @@ namespace Util
 			return GetCommunityShaderPath() / "SceneSettings";
 		}
 
-		std::filesystem::path GetUnifiedWaterCachePath()
-		{
-			return GetCommunityShaderPath() / "UnifiedWaterCache";
-		}
-
 		std::filesystem::path GetWindSettingsPath()
 		{
 			return GetCommunityShaderPath() / "WindSettings";

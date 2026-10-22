@@ -283,20 +283,25 @@ namespace CharacterRainSpots
 			float distanceFade = 1.0f - smoothstep(SpotDrawDistance * DrawDistanceFadeStart,
 											SpotDrawDistance, length(headRelativePosition));
 			float rainExposure = smoothstep(SkyVisibilityFadeStart, SkyVisibilityFadeEnd, skyVisibility);
-			const float3 rainArrival = float3(0.0f, 0.0f, 1.0f);
-			float facing = dot(worldNormal, rainArrival);
-			float facingCoverage = smoothstep(SurfaceFacingFadeStart, SurfaceFacingFadeEnd, facing) *
-			                       lerp(VerticalSurfaceCoverage, 1.0f, smoothstep(0.0f, UpwardFacingEnd, facing));
 			float visibility = distanceFade;
 			float configuredDensity = settings.CharacterSpotDensity;
-			[branch] if (visibility > 0.0f && rainExposure > 0.0f && configuredDensity > 0.0f)
+			// CharacterStatePadding.x is precipitation only. While rain is hitting the surface,
+			// droplets cover the whole character, hair included, and keep flowing even when the
+			// coat is already soaked. After the rain stops, only the retained coat remains and it sits still.
+			float precip = smoothstep(0.02f, 0.15f, settings.CharacterStatePadding.x);
+			float rainHit = precip * rainExposure;
+			[branch] if (visibility > 0.0f && configuredDensity > 0.0f && (rainHit > 0.0f || retainedWetness > 0.001f))
 			{
 				float activity = max(settings.CharacterRainActivityMultiplier, MinimumActivityMultiplier);
-				float baseRainDensity = saturate(configuredDensity * settings.CharacterImpactIntensity * rainExposure * facingCoverage);
-				float baseSettledDensity = saturate(configuredDensity * retainedWetness * lerp(MinimumSettledFacingDensity, 1.0f, facingCoverage));
+				// Facing fade is not applied during rain: vertical hair cards and the sides of the
+				// body get the same droplets as upward faces. Drying beads are masked to the wet
+				// region in Lighting.hlsl, so they are not culled by facing either.
+				float baseRainDensity = saturate(configuredDensity * rainHit);
+				float baseSettledDensity = saturate(configuredDensity * retainedWetness);
+				float coveredDensity = max(baseSettledDensity, saturate(configuredDensity * rainHit));
 				float rainDensity = 1.0f - pow(1.0f - baseRainDensity, activity);
-				float settledDensity = 1.0f - pow(1.0f - baseSettledDensity, activity);
-				float flowSlope = smoothstep(FlowSlopeFadeStart, FlowSlopeFadeEnd, length(worldNormal.xy));
+				float settledDensity = 1.0f - pow(1.0f - (rainHit > 0.0f ? coveredDensity : baseSettledDensity), activity);
+				float flowSlope = smoothstep(FlowSlopeFadeStart, FlowSlopeFadeEnd, length(worldNormal.xy)) * rainHit;
 				[unroll] for (uint projectionIndex = 0u; projectionIndex < SurfaceProjectionCount; ++projectionIndex)
 				{
 					[branch] if (projectionWeights[projectionIndex] > MinimumProjectionWeight)
@@ -314,7 +319,10 @@ namespace CharacterRainSpots
 						         projectionWeights[projectionIndex];
 					}
 				}
-				water.xz *= visibility * rainExposure * settings.CharacterSpotStrength;
+				// Settled beads stay after the actor walks under cover or indoors. Rain exposure already
+				// gates new impacts (rainDensity) and rivulets (flowSlope). Multiplying the whole result
+				// by rain exposure deleted every droplet the moment the body was sheltered.
+				water.xz *= visibility * settings.CharacterSpotStrength;
 			}
 			// Shelter suppresses localized water here; the broad retained sheen is applied separately in Lighting.hlsl.
 			// Coverage fades the coat contribution; flattening its height as well would attenuate normals twice.

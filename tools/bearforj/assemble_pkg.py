@@ -29,8 +29,6 @@ for fd in sorted(glob.glob(f"{SRC}/features/*/")):
 # 0.6.3: 0.5 shaders/textures that no C++ in the DLL compiles or loads (SSPP v2 replaced them) are not shipped.
 for dead in ("Shaders/PhysicalBlood", "Shaders/PhysicalLeaves"):
     shutil.rmtree(f"{core}/{dead}", ignore_errors=True)
-# 0.6.3: UnifiedWaterCache is no longer shipped (Unified Water regenerates it at runtime if enabled).
-shutil.rmtree(f"{core}/SKSE/Plugins/CommunityShaders/UnifiedWaterCache", ignore_errors=True)
 for need in ("PhysicalBlood", "PhysicalEffectParticles", "PhysicalLeaves", "FootstepParticles", "PrecipitationPhysics"):
     assert os.path.exists(f"{core}/SKSE/Plugins/CommunityShaders/Shaders/Features/{need}.ini") or os.path.exists(f"{core}/Shaders/Features/{need}.ini"), need
 lib = f"{core}/SKSE/Plugins/CommunityShaders/Bearforj/Profiles/Library"
