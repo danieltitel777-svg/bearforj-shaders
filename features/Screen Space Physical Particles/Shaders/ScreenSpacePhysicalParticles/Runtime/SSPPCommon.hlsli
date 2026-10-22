@@ -16,6 +16,8 @@
 #define SSPP_ICE 8u    // frost magic: ice shards
 
 #define SSPP_FLAG_SETTLED 0x100u
+// Bits 16-23 of Kind are the atlas sprite (0 = procedural quad). See atlas.dds.
+#define SSPP_SPRITE_SHIFT 16u
 
 struct Particle
 {

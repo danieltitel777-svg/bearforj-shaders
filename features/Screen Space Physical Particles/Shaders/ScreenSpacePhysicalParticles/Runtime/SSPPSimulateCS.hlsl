@@ -155,19 +155,27 @@ void Respawn(inout Particle p, uint id, uint kind, float amount, float fallSpeed
 	if (kind == SSPP_RAIN) {
 		p.Size = RainP.x * lerp(1.0 - ExtraP2.x * 0.6, 1.0 + ExtraP2.x * 0.6, Hash(seed + 5u));
 		p.Color = PackColor(float4(0.75, 0.8, 0.88, 1));
+		p.Kind = kind | (1u << SSPP_SPRITE_SHIFT);  // rain streak
 	} else if (kind == SSPP_SNOW) {
 		p.Size = SnowP.x * lerp(1.0 - ExtraP2.x, 1.0 + ExtraP2.x, Hash(seed + 5u));
-		p.Color = PackColor(float4(1, 1, 1, 1));
+		// Weather slot 8 is ash (Bearforj::WeatherPresets::kAsh). Ash uses its own flake.
+		bool ash = abs(ContextB.z - 8.0) < 0.5;
+		p.Color = PackColor(ash ? float4(0.55, 0.52, 0.48, 1) : float4(1, 1, 1, 1));
+		p.Kind = kind | ((ash ? 9u : 2u) << SSPP_SPRITE_SHIFT);
 	} else {
 		p.Size = LeafP.x * lerp(1.0 - ExtraP2.x * 0.8, 1.0 + ExtraP2.x * 0.8, Hash(seed + 5u));
 		float t = Hash(seed + 6u);
 		float3 leaf = t < 0.4 ? float3(0.55, 0.32, 0.08) : (t < 0.7 ? float3(0.62, 0.48, 0.12) : (t < 0.9 ? float3(0.3, 0.38, 0.1) : float3(0.45, 0.12, 0.05)));
-		// plan step 3: conifer areas drop small needles/twigs instead of broad leaves (share from tree context)
+		// Conifer areas drop needles and twigs. Broad leaves pick one of two shapes.
 		float coniferShare = ContextA.z / max(ContextA.y + ContextA.z, 1e-3);
+		uint spr = t < 0.55 ? 3u : 4u;
 		if (Hash(seed + 7u) < coniferShare) {
-			p.Size *= 0.35;
-			leaf = lerp(float3(0.28, 0.22, 0.1), float3(0.22, 0.28, 0.12), Hash(seed + 8u));
+			bool needle = Hash(seed + 8u) < 0.72;
+			spr = needle ? 5u : 6u;
+			p.Size *= needle ? 0.28 : 0.48;
+			leaf = needle ? float3(0.22, 0.4, 0.16) : float3(0.4, 0.28, 0.12);
 		}
+		p.Kind = kind | (spr << SSPP_SPRITE_SHIFT);
 		p.Color = PackColor(float4(leaf, 1));
 		p.Position.z = CameraPos.z + lerp(150.0, 900.0, Hash(seed + 3u));
 	}
@@ -251,7 +259,7 @@ void Respawn(inout Particle p, uint id, uint kind, float amount, float fallSpeed
 					[unroll] for (uint i = 0; i < 3; i++) {
 						float a = Hash(seed2 + i * 3u + 1u) * 6.2831853;
 						float s = lerp(60.0, 140.0, Hash(seed2 + i * 3u + 2u));
-						SpawnDynamic(SSPP_SPLASH, surface + float3(0, 0, 1), float3(cos(a) * s, sin(a) * s, lerp(120.0, 220.0, Hash(seed2 + i))), SplashP.w, SplashP.x, float4(0.8, 0.85, 0.9, 1), seed2 + i);
+						SpawnDynamic(SSPP_SPLASH | (13u << SSPP_SPRITE_SHIFT), surface + float3(0, 0, 1), float3(cos(a) * s, sin(a) * s, lerp(120.0, 220.0, Hash(seed2 + i))), SplashP.w, SplashP.x, float4(0.8, 0.85, 0.9, 1), seed2 + i);
 					}
 				}
 				p.Life = 0;

@@ -1,9 +1,11 @@
-// Bearforj SSPP runtime v2: one procedural draw for all profiles (6 vertices per particle).
+// Bearforj SSPP runtime v2: atlas sprites, procedural quad if the atlas or the sprite id is missing.
 #include "Common/ColorSpaces.hlsli"
 #include "ScreenSpacePhysicalParticles/Runtime/SSPPCommon.hlsli"
 
 StructuredBuffer<Particle> Particles : register(t0);
 Texture2D<float> SceneDepth : register(t1);
+Texture2D<float4> SpriteAtlas : register(t2);
+SamplerState SpriteSamp : register(s0);
 
 struct VSOut
 {
@@ -12,6 +14,7 @@ struct VSOut
 	nointerpolation float4 Color : TEXCOORD1;   // rgb premultiplied later, a: opacity
 	nointerpolation uint Kind : TEXCOORD2;
 	float ViewZ : TEXCOORD3;
+	nointerpolation uint Sprite : TEXCOORD4;
 };
 
 #if defined(VSHADER)
@@ -25,6 +28,7 @@ VSOut main(uint vid : SV_VertexID)
 	o.UV = c;
 	Particle p = Particles[pid];
 	o.Kind = p.Kind & 0xFFu;
+	o.Sprite = (p.Kind >> SSPP_SPRITE_SHIFT) & 0xFFu;
 	if (p.Life <= 0.0 || p.Age >= p.Life || pid >= Ranges.w) {
 		o.Position = float4(0, 0, -2, 1);
 		return o;
@@ -71,9 +75,18 @@ VSOut main(uint vid : SV_VertexID)
 			float3 r2 = right * co + up * s;
 			up = -right * s + up * co;
 			right = r2;
-			if (!settled)
-				width *= 0.35 + 0.65 * abs(cos(p.Spin * 1.3));  // tumble
-			height *= 0.6;
+			// Needles stay long. Twigs stay a bit thicker than a broad leaf's tumble squash.
+			if (o.Sprite == 5u) {
+				height *= 1.7;
+				width *= 0.45;
+			} else if (o.Sprite == 6u) {
+				height *= 1.15;
+				width *= 0.7;
+			} else {
+				if (!settled)
+					width *= 0.35 + 0.65 * abs(cos(p.Spin * 1.3));  // tumble
+				height *= 0.6;
+			}
 			color.rgb *= light * LeafP.y;
 		} else if (kind == SSPP_SNOW) {
 			color.rgb *= light * SnowP.y;
@@ -134,7 +147,32 @@ float4 main(VSOut i) : SV_Target
 	float soft = sceneZ > 0.0 ? saturate((sceneZ - i.ViewZ) / max(Flags.z, 0.1)) : 1.0;
 	float2 uv = i.UV;
 	float shape;
-	if (i.Kind == SSPP_RAIN || i.Kind == SSPP_SPARK || i.Kind == SSPP_SPLASH)
+	float3 rgb = i.Color.rgb;
+	// ReactPad.x is 1 once atlas.dds loaded. Sprite 0 stays the old procedural shape.
+	bool textured = ReactPad.x > 0 && i.Sprite >= 1 && i.Sprite <= 16;
+	if (textured) {
+		uint cell = i.Sprite - 1u;
+		float2 uv01 = float2(uv.x, -uv.y) * 0.5 + 0.5;
+		float2 atlasUV = (float2(cell & 3u, cell >> 2u) + uv01) * 0.25;
+		float4 tex = SpriteAtlas.Sample(SpriteSamp, atlasUV);
+		shape = tex.a;
+		if (shape < 0.03)
+			discard;
+		if (i.Color.a <= 0.001) {
+			rgb = i.Color.rgb;
+		} else {
+			// Atlas albedo is the picture. Floor the lighting so blood and ash stay readable
+			// after the linear-lighting decode, without blowing out rain and snow.
+			float3 albedo = tex.rgb;
+			if (DustP.w > 0.5) {
+				albedo = pow(max(albedo, 0.0), 1.6);
+				if (BloodP.w > 0.5)
+					albedo = sRGBToAP1(albedo);
+			}
+			float peak = max(i.Color.r, max(i.Color.g, i.Color.b));
+			rgb = albedo * max(peak, 0.65);
+		}
+	} else if (i.Kind == SSPP_RAIN || i.Kind == SSPP_SPARK || i.Kind == SSPP_SPLASH)
 		shape = saturate(1.0 - uv.x * uv.x) * saturate(1.0 - uv.y * uv.y * uv.y * uv.y);
 	else if (i.Kind == SSPP_ICE)
 		shape = step(abs(uv.x) + abs(uv.y) * 0.55, 0.9);  // diamond shard
@@ -148,6 +186,6 @@ float4 main(VSOut i) : SV_Target
 	float a = shape * soft;
 	// premultiplied: alpha 0 means additive (sparks)
 	float opacity = i.Color.a > 0.0 ? i.Color.a : 1.0;
-	return float4(i.Color.rgb * opacity * a, i.Color.a * a);
+	return float4(rgb * opacity * a, i.Color.a * a);
 }
 #endif

@@ -12,7 +12,19 @@ COSTLY=re.compile(r"sample|quality|step|resolution|slice|direction|count|distanc
 def feature_of(path):
     rel=os.path.relpath(path,f"{ROOT}/src/Features").replace("\\","/")
     return rel.split("/")[0].rsplit(".",1)[0]
+EXACT={
+"Pollen from grass":("Seeds and pollen drift off grass around the camera. They thin out in rain and snow.","Семена и пыльца с травы вокруг камеры. В дождь и снег их меньше."),
+"Insects (fireflies, butterflies, gnats, flies, lamps)":("One switch. Night brings fireflies, day brings butterflies, water brings gnats, corpses bring flies, lamps bring insects.","Один переключатель. Ночью светлячки, днём бабочки, у воды мошки, у трупов мухи, у ламп насекомые."),
+"Water drips off a wet character":("Drips fall off the character while rain or wading wetness is still on the body.","Капли падают с персонажа, пока на теле есть влага от дождя или воды."),
+"Blood and water floor stains":("Blood and water leave a soaked patch on the ground. It lingers, then fades.","Кровь и вода оставляют мокрое пятно на земле. Оно держится, потом гаснет."),
+"School magic (restoration, alteration, illusion, conjuration)":("Each of those schools has its own particles, on the caster and on a hit.","У каждой из этих школ свои частицы, на кастере и при попадании."),
+"Shout particles":("A shout pushes out a puff wave. An equipped shout does not do this on a normal spell.","Крик выталкивает волну. Надетый крик не срабатывает на обычное заклинание."),
+"Ward shatter and ripple":("A hit on a raised ward bursts shards in the spell's color and a ring on the ground. A shield block does not.","Удар в поднятый оберег даёт осколки цвета заклинания и кольцо на земле. Блок щитом — нет."),
+"Pollen and insects":("Actors, creatures, wind, spells and shouts push pollen and insects.","Актёры, существа, ветер, заклинания и крики толкают пыльцу и насекомых."),
+"Floor stains":("Actors, creatures, wind, spells and shouts can lift floor stains.","Актёры, существа, ветер, заклинания и крики могут поднять пятна с пола."),
+}
 def what(label):
+    if label in EXACT: return EXACT[label]
     l=label.lower()
     rules=[("enable","Turns this part of the feature on or off.","Включает или выключает эту часть фичи."),
            ("intensity|strength|power|amount|mult|scale|boost","How strong the effect is. Higher = more visible.","Сила эффекта. Больше = заметнее."),

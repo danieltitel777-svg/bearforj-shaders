@@ -29,6 +29,24 @@ for fd in sorted(glob.glob(f"{SRC}/features/*/")):
 # 0.6.3: 0.5 shaders/textures that no C++ in the DLL compiles or loads (SSPP v2 replaced them) are not shipped.
 for dead in ("Shaders/PhysicalBlood", "Shaders/PhysicalLeaves"):
     shutil.rmtree(f"{core}/{dead}", ignore_errors=True)
+# 0.6.5: overlay copies a previous stage, so files the repo deleted would ship again.
+# Mirrors the local package fix that drops stale Unified Water and the pre-helmet mascots.
+for dead in ("Shaders/UnifiedWater", "SKSE/Plugins/CommunityShaders/UnifiedWaterCache"):
+    shutil.rmtree(f"{core}/{dead}", ignore_errors=True)
+for stale in (
+    "SKSE/Plugins/CommunityShaders/Shaders/Features/UnifiedWater.ini",
+    "Shaders/Features/UnifiedWater.ini",
+    "meshes/water/WaterMesh.nif",
+    "Interface/CommunityShaders/Bearforj/emotions/happy.png",
+    "Interface/CommunityShaders/Bearforj/head_grumpy.png",
+    "Interface/CommunityShaders/Bearforj/head_happy.png",
+    "Interface/CommunityShaders/Bearforj/head_worried.png",
+    "Interface/CommunityShaders/Bearforj/mishmish_front.png",
+):
+    try:
+        os.remove(f"{core}/{stale}")
+    except OSError:
+        pass
 for need in ("PhysicalBlood", "PhysicalEffectParticles", "PhysicalLeaves", "FootstepParticles", "PrecipitationPhysics"):
     assert os.path.exists(f"{core}/SKSE/Plugins/CommunityShaders/Shaders/Features/{need}.ini") or os.path.exists(f"{core}/Shaders/Features/{need}.ini"), need
 lib = f"{core}/SKSE/Plugins/CommunityShaders/Bearforj/Profiles/Library"

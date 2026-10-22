@@ -50,6 +50,28 @@ struct ScreenSpacePhysicalParticles : Feature
 		kIce     // frost magic
 	};
 
+	// Cell in Textures/Bearforj/Particles/atlas.dds. 0 keeps the procedural quad.
+	enum Sprite : uint32_t
+	{
+		kSprRain = 1,
+		kSprSnow,
+		kSprLeaf,
+		kSprLeafNarrow,
+		kSprNeedle,
+		kSprTwig,
+		kSprSpark,
+		kSprEmber,
+		kSprAsh,
+		kSprIce,
+		kSprDust,
+		kSprBlood,
+		kSprWater,
+		kSprPollen,
+		kSprInsect,
+		kSprFly
+	};
+	static constexpr uint32_t WithSprite(uint32_t a_kind, uint32_t a_sprite) { return a_kind | (a_sprite << 16); }
+
 	struct Extra  // Bearforj 0.6 additions (separate struct: nlohmann macro arg limit)
 	{
 		float LeafGroundMin = 10.0f;  // s a fallen leaf rests (random between min and max), then fades
@@ -220,6 +242,7 @@ private:
 	void CreatePool();
 	void ComputeWeather(float& a_rain, float& a_snow, float3& a_wind, float& a_gust) const;
 	bool CompileShaders();
+	void LoadSpriteAtlas();
 
 	winrt::com_ptr<ID3D11Buffer> particleBuffer;
 	winrt::com_ptr<ID3D11ShaderResourceView> particleSRV;
@@ -229,6 +252,9 @@ private:
 	winrt::com_ptr<ID3D11Buffer> eventBuffer;
 	winrt::com_ptr<ID3D11ShaderResourceView> eventSRV;
 	winrt::com_ptr<ID3D11BlendState> blendState;
+	winrt::com_ptr<ID3D11SamplerState> spriteSampler;
+	winrt::com_ptr<ID3D11ShaderResourceView> spriteAtlas;
+	bool spriteLoadTried = false;
 	winrt::com_ptr<ID3D11DepthStencilState> depthState;
 	winrt::com_ptr<ID3D11RasterizerState> rasterState;
 	ConstantBuffer* frameCB = nullptr;

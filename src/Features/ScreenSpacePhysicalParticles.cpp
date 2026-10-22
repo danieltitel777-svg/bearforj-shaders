@@ -97,6 +97,30 @@ void ScreenSpacePhysicalParticles::SetupResources()
 	rs.CullMode = D3D11_CULL_NONE;
 	rs.DepthClipEnable = TRUE;
 	DX::ThrowIfFailed(device->CreateRasterizerState(&rs, rasterState.put()));
+
+	D3D11_SAMPLER_DESC samp{};
+	samp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	samp.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+	samp.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+	samp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+	samp.MaxLOD = D3D11_FLOAT32_MAX;
+	DX::ThrowIfFailed(device->CreateSamplerState(&samp, spriteSampler.put()));
+}
+
+void ScreenSpacePhysicalParticles::LoadSpriteAtlas()
+{
+	if (spriteLoadTried || spriteAtlas)
+		return;
+	ImVec2 size{};
+	ID3D11ShaderResourceView* srv = nullptr;
+	if (Util::LoadDDSTextureFromFile(globals::d3d::device, "Textures\\Bearforj\\Particles\\atlas.dds", &srv, size) && srv) {
+		spriteAtlas.attach(srv);
+		spriteLoadTried = true;
+		logger::info("[SSPP] Loaded particle atlas {}x{}", size.x, size.y);
+	} else if (frame > 300) {
+		spriteLoadTried = true;
+		logger::warn("[SSPP] Particle atlas missing, drawing procedural quads");
+	}
 }
 
 void ScreenSpacePhysicalParticles::CreatePool()
@@ -247,10 +271,13 @@ void ScreenSpacePhysicalParticles::EmitFootstep(const RE::NiPoint3& a_position, 
 			const float t = (rng >> 8) / 16777216.0f;
 			EmitEvent l{};
 			l.position = float3(a_position.x, a_position.y, a_position.z + 3.0f);
-			l.kind = kLeaf;
+			const bool conifer = cx.conifers > cx.trees;
+			const uint32_t leafSprite = conifer ? (((rng & 3u) == 0u) ? kSprTwig : kSprNeedle) : ((t < 0.55f) ? kSprLeaf : kSprLeafNarrow);
+			l.kind = WithSprite(kLeaf, leafSprite);
 			l.direction = float3(0.0f, 0.0f, 1.0f);
 			l.count = 2u + static_cast<uint32_t>(4.0f * cx.trees * a_scale);
-			l.params = float4(110.0f * a_scale, 0.8f, settings.LeafSize * 0.8f, 12.0f);
+			const float leafScale = leafSprite == kSprNeedle ? 0.32f : (leafSprite == kSprTwig ? 0.5f : 1.0f);
+			l.params = float4(110.0f * a_scale, 0.8f, settings.LeafSize * 0.8f * leafScale, 12.0f);
 			l.color = t < 0.4f ? float4(0.55f, 0.32f, 0.08f, 1) : t < 0.75f ? float4(0.62f, 0.48f, 0.12f, 1) : float4(0.3f, 0.38f, 0.1f, 1);
 			Emit(l);
 		}
@@ -283,7 +310,7 @@ void ScreenSpacePhysicalParticles::EmitFootstep(const RE::NiPoint3& a_position, 
 	}
 	EmitEvent e{};
 	e.position = float3(a_position.x, a_position.y, a_position.z + 2.0f);
-	e.kind = kDust;
+	e.kind = WithSprite(kDust, (a_material == M::kSnow || a_material == M::kSnowStairs) ? kSprSnow : kSprDust);
 	e.direction = float3(0.0f, 0.0f, 0.0f);
 	e.count = static_cast<uint32_t>(std::max(1.0f, settings.DustCount * amount * a_scale));
 	e.params = float4(70.0f * a_scale, 1.0f, settings.DustSize * a_scale, settings.DustLifetime);
@@ -338,15 +365,15 @@ void ScreenSpacePhysicalParticles::OnHit(const RE::TESHitEvent* a_event)
 					m.direction = dir;
 					m.count = std::min<uint32_t>(static_cast<uint32_t>(settings.bf.MagicCount * lod), 256u);
 					if (element == 0) {
-						m.kind = kEmber;
+						m.kind = WithSprite(kEmber, kSprEmber);
 						m.params = float4(220.0f, 0.9f, settings.SparkSize * 1.6f, settings.bf.MagicLifetime);
 						m.color = float4(1.0f, 0.5f, 0.1f, 1.0f);
 					} else if (element == 1) {
-						m.kind = kIce;
+						m.kind = WithSprite(kIce, kSprIce);
 						m.params = float4(320.0f, 0.7f, settings.SparkSize * 2.2f, settings.bf.MagicLifetime);
 						m.color = float4(0.8f, 0.9f, 1.0f, 1.0f);
 					} else {
-						m.kind = kSpark;
+						m.kind = WithSprite(kSpark, kSprSpark);
 						m.params = float4(520.0f, 1.0f, settings.SparkSize, settings.bf.MagicLifetime * 0.5f);
 						m.color = float4(0.5f, 0.7f, 1.0f, 1.0f);  // blue > red: shader draws shock sparks
 					}
@@ -361,7 +388,7 @@ void ScreenSpacePhysicalParticles::OnHit(const RE::TESHitEvent* a_event)
 		if (!settings.Sparks || !SSPPSub::Effects().Allowed())
 			return;
 		e.position = float3(pos.x, pos.y, pos.z + height * 0.65f);
-		e.kind = kSpark;
+		e.kind = WithSprite(kSpark, kSprSpark);
 		e.count = settings.SparkCount;
 		e.params = float4(450.0f, 0.8f, settings.SparkSize, settings.SparkLifetime);
 		e.color = float4(1.0f, 0.7f, 0.3f, 1.0f);
@@ -369,7 +396,7 @@ void ScreenSpacePhysicalParticles::OnHit(const RE::TESHitEvent* a_event)
 		if (!settings.Blood || !SSPPSub::Blood().Allowed())
 			return;
 		e.position = float3(pos.x, pos.y, pos.z + height * 0.6f);
-		e.kind = kBlood;
+		e.kind = WithSprite(kBlood, kSprBlood);
 		e.count = settings.BloodCount;
 		e.params = float4(260.0f, 0.6f, settings.BloodSize, 30.0f);  // lifetime ends when it sticks
 		e.color = float4(0.35f, 0.02f, 0.02f, 1.0f);
@@ -484,7 +511,7 @@ void ScreenSpacePhysicalParticles::UpdateFireSparks()
 		EmitEvent e{};
 		e.position = fireSources[i];
 		e.direction = float3(0.0f, 0.0f, 1.0f);
-		e.kind = kEmber;
+		e.kind = WithSprite(kEmber, kSprEmber);
 		e.count = 3 + (rng & 3u);
 		e.params = float4(140.0f, 0.6f, settings.SparkSize * 1.2f, 2.5f);  // speed, spread, size, lifetime (same layout as magic embers)
 		e.color = float4(1.0f, 0.55f, 0.15f, 1.0f);
@@ -619,6 +646,8 @@ void ScreenSpacePhysicalParticles::OnBeforePostProcessing(RE::RENDER_TARGET a_re
 		cb.InfluencerVel[i] = float4(inf.vel[0], inf.vel[1], inf.vel[2], settings.bf.ReactToActors ? inf.vel[3] : 0.0f);
 	}
 	cb.ReactMask = settings.bf.ReactMask;
+	LoadSpriteAtlas();
+	cb.ReactPad[0] = spriteAtlas ? 1u : 0u;
 
 	// Wind drift (CPU-cheap: a few dust events per frame near the camera, GPU does the rest).
 	if (settings.bf.WindDrift && !paused && !Util::IsInterior() && windStrength > 0.25f && rain < 0.5f) {
@@ -633,7 +662,9 @@ void ScreenSpacePhysicalParticles::OnBeforePostProcessing(RE::RENDER_TARGET a_re
 			const bool high = snowy && gust > 0.4f && rnd() < 0.3f;  // gust: snow dust blown off roofs / cliffs / branches
 			EmitEvent e{};
 			e.position = float3(camAdjust.x + std::cos(a) * r, camAdjust.y + std::sin(a) * r, camAdjust.z - 110.0f + (high ? 250.0f + rnd() * 400.0f : rnd() * 20.0f));
-			e.kind = kDust;
+			const auto slot = Bearforj::WeatherPresets::CurrentSlot();
+			const uint32_t driftSprite = snowy ? (slot == Bearforj::WeatherPresets::kAsh ? kSprAsh : kSprSnow) : kSprDust;
+			e.kind = WithSprite(kDust, driftSprite);
 			const float wl = std::max(std::sqrt(wind.x * wind.x + wind.y * wind.y), 1.0f);
 			e.direction = float3(wind.x / wl, wind.y / wl, high ? -0.3f : 0.05f);
 			e.count = high ? 10u : 6u;
@@ -718,13 +749,22 @@ void ScreenSpacePhysicalParticles::OnBeforePostProcessing(RE::RENDER_TARGET a_re
 		context->GSSetShader(nullptr, nullptr, 0);
 		context->VSSetConstantBuffers(0, 1, &frameBuffer);
 		context->PSSetConstantBuffers(0, 1, &frameBuffer);
-		ID3D11ShaderResourceView* srvs[2] = { particleSRV.get(), depthSRV };
-		context->VSSetShaderResources(0, 2, srvs);
-		context->PSSetShaderResources(0, 2, srvs);
+		ID3D11ShaderResourceView* vsSrvs[2] = { particleSRV.get(), depthSRV };
+		ID3D11ShaderResourceView* psSrvs[3] = { particleSRV.get(), depthSRV, spriteAtlas.get() };
+		context->VSSetShaderResources(0, 2, vsSrvs);
+		context->PSSetShaderResources(0, 3, psSrvs);
+		ID3D11SamplerState* samp = spriteSampler.get();
+		ID3D11SamplerState* oldSamp = nullptr;
+		context->PSGetSamplers(0, 1, &oldSamp);
+		context->PSSetSamplers(0, 1, &samp);
 		context->Draw(cb.Ranges[3] * 6, 0);
-		ID3D11ShaderResourceView* nullSRV[2] = {};
-		context->VSSetShaderResources(0, 2, nullSRV);
-		context->PSSetShaderResources(0, 2, nullSRV);
+		ID3D11ShaderResourceView* nullVS[2] = {};
+		ID3D11ShaderResourceView* nullPS[3] = {};
+		context->VSSetShaderResources(0, 2, nullVS);
+		context->PSSetShaderResources(0, 3, nullPS);
+		context->PSSetSamplers(0, 1, &oldSamp);
+		if (oldSamp)
+			oldSamp->Release();
 	}
 
 	ID3D11RenderTargetView* restoreRTV = oldRTV.get();
