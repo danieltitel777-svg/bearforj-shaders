@@ -7,6 +7,7 @@
 #include <imgui_stdlib.h>
 #include <thread>
 
+#include "Bearforj/TipUI.h"
 #include "FeatureIssues.h"
 #include "Features/DynamicCubemaps.h"
 #include "Features/PerformanceOverlay/ABTesting/ABTesting.h"
@@ -62,7 +63,7 @@ namespace
 															  "Restored this session: {count}")
 										  .c_str());
 		auto limitMB = static_cast<int>(globals::state->contentStoreMaxMB.load(std::memory_order_relaxed));
-		if (ImGui::SliderInt(T("menu.advanced.content_store_limit", "Store Size Limit"), &limitMB,
+		if (BFUI::SliderInt(T("menu.advanced.content_store_limit", "Store Size Limit"), &limitMB,
 				static_cast<int>(State::kContentStoreMinMB), static_cast<int>(State::kContentStoreMaxMB), "%d MB", ImGuiSliderFlags_AlwaysClamp))
 			globals::state->contentStoreMaxMB.store(static_cast<uint32_t>(limitMB), std::memory_order_relaxed);
 		if (ImGui::IsItemDeactivatedAfterEdit()) {
@@ -218,7 +219,7 @@ void AdvancedSettingsRenderer::RenderShaderCompileFlags()
 
 	// Half-precision (partial precision) shader compile flag
 	bool partialPrecision = globals::state->enablePartialPrecision.load(std::memory_order_relaxed);
-	if (ImGui::Checkbox(T("menu.advanced.half_precision", "Half Precision (Partial Precision)"), &partialPrecision)) {
+	if (BFUI::Checkbox(T("menu.advanced.half_precision", "Half Precision (Partial Precision)"), &partialPrecision)) {
 		globals::state->enablePartialPrecision.store(partialPrecision, std::memory_order_relaxed);
 		// Force a recompile so the flag actually takes effect on subsequent shader builds.
 		shaderCache->Clear();
@@ -235,7 +236,7 @@ void AdvancedSettingsRenderer::RenderShaderCompileFlags()
 	}
 
 	bool contentStore = globals::state->enableContentStore.load(std::memory_order_relaxed);
-	if (ImGui::Checkbox(T("menu.advanced.content_store", "Persistent Shader Store (Developers/Testers)"), &contentStore))
+	if (BFUI::Checkbox(T("menu.advanced.content_store", "Persistent Shader Store (Developers/Testers)"), &contentStore))
 		globals::state->enableContentStore.store(contentStore, std::memory_order_relaxed);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T("menu.advanced.content_store_tooltip",
@@ -251,7 +252,7 @@ void AdvancedSettingsRenderer::RenderShaderCompileFlags()
 	// Avoid flow control compiler flag (transient — not saved to config because the
 	// right setting depends on the current scene, not the user).
 	bool avoidFlowControl = globals::state->enableAvoidFlowControl.load(std::memory_order_relaxed);
-	if (ImGui::Checkbox(T("menu.advanced.avoid_flow_control", "Avoid Flow Control"), &avoidFlowControl)) {
+	if (BFUI::Checkbox(T("menu.advanced.avoid_flow_control", "Avoid Flow Control"), &avoidFlowControl)) {
 		globals::state->enableAvoidFlowControl.store(avoidFlowControl, std::memory_order_relaxed);
 		// Force a recompile so the flag actually takes effect on subsequent shader builds.
 		shaderCache->Clear();
@@ -289,14 +290,14 @@ void AdvancedSettingsRenderer::RenderShaderThreading()
 	shaderCache->compilationThreadCount = std::clamp(shaderCache->compilationThreadCount, 1, maxThreads);
 	shaderCache->backgroundCompilationThreadCount = std::clamp(shaderCache->backgroundCompilationThreadCount, 1, maxThreads);
 
-	ImGui::SliderInt(T("menu.advanced.compiler_threads", "Compiler Threads"), &shaderCache->compilationThreadCount, 1, maxThreads, "%d", ImGuiSliderFlags_AlwaysClamp);
+	BFUI::SliderInt(T("menu.advanced.compiler_threads", "Compiler Threads"), &shaderCache->compilationThreadCount, 1, maxThreads, "%d", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T("menu.advanced.compiler_threads_tooltip",
 							  "Number of threads used to compile shaders at startup. "
 							  "Defaults to all logical cores minus one for OS headroom (E-cores included). "
 							  "Higher values finish compilation faster but may make the system less responsive."));
 	}
-	ImGui::SliderInt(T("menu.advanced.background_compiler_threads", "Background Compiler Threads"), &shaderCache->backgroundCompilationThreadCount, 1, maxThreads, "%d", ImGuiSliderFlags_AlwaysClamp);
+	BFUI::SliderInt(T("menu.advanced.background_compiler_threads", "Background Compiler Threads"), &shaderCache->backgroundCompilationThreadCount, 1, maxThreads, "%d", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T("menu.advanced.background_compiler_threads_tooltip",
 							  "Number of threads used to compile shaders during gameplay. "
@@ -306,7 +307,7 @@ void AdvancedSettingsRenderer::RenderShaderThreading()
 
 	// Persisted in Menu::Settings (not ShaderCache); applied to backgroundCompilation at boot in Menu::Load.
 	auto& menuSettings = globals::menu->GetSettings();
-	ImGui::Checkbox("Background Compile on Boot", &menuSettings.BackgroundShaderCompilationOnBoot);
+	BFUI::Checkbox("Background Compile on Boot", &menuSettings.BackgroundShaderCompilationOnBoot);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::TextUnformatted(
 			"Load the menu immediately and compile shaders in the background on boot "
@@ -315,7 +316,7 @@ void AdvancedSettingsRenderer::RenderShaderThreading()
 	}
 
 	if (globals::game::isVR) {
-		ImGui::Checkbox(T("menu.advanced.hide_compilation_hud_vr", "Hide Compilation HUD in VR"), &menuSettings.HideCompilationHUDInVR);
+		BFUI::Checkbox(T("menu.advanced.hide_compilation_hud_vr", "Hide Compilation HUD in VR"), &menuSettings.HideCompilationHUDInVR);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T("menu.advanced.hide_compilation_hud_vr_tooltip",
 								  "Suppresses the background-compilation progress overlay for immersion. "
@@ -333,7 +334,7 @@ void AdvancedSettingsRenderer::RenderShaderCacheControls()
 
 	// File Watcher option
 	bool useFileWatcher = shaderCache->UseFileWatcher();
-	if (ImGui::Checkbox(T("menu.advanced.enable_file_watcher", "Enable File Watcher"), &useFileWatcher)) {
+	if (BFUI::Checkbox(T("menu.advanced.enable_file_watcher", "Enable File Watcher"), &useFileWatcher)) {
 		shaderCache->SetFileWatcher(useFileWatcher);
 	}
 	if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -344,7 +345,7 @@ void AdvancedSettingsRenderer::RenderShaderCacheControls()
 
 	// Dump Shaders option
 	bool useDump = shaderCache->IsDump();
-	if (ImGui::Checkbox(T("menu.advanced.dump_shaders", "Dump Shaders"), &useDump)) {
+	if (BFUI::Checkbox(T("menu.advanced.dump_shaders", "Dump Shaders"), &useDump)) {
 		shaderCache->SetDump(useDump);
 	}
 	if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -387,13 +388,13 @@ void AdvancedSettingsRenderer::RenderShaderReplacementTable()
 
 			if (!(SIE::ShaderCache::IsSupportedShader(type) || state->IsDeveloperMode())) {
 				ImGui::BeginDisabled();
-				ImGui::Checkbox(std::format("{}", magic_enum::enum_name(type)).c_str(), &state->enabledClasses[classIndex]);
+				BFUI::Checkbox(std::format("{}", magic_enum::enum_name(type)).c_str(), &state->enabledClasses[classIndex]);
 				ImGui::EndDisabled();
 			} else
-				ImGui::Checkbox(std::format("{}", magic_enum::enum_name(type)).c_str(), &state->enabledClasses[classIndex]);
+				BFUI::Checkbox(std::format("{}", magic_enum::enum_name(type)).c_str(), &state->enabledClasses[classIndex]);
 		});
 		if (state->IsDeveloperMode()) {
-			ImGui::Checkbox(T("menu.advanced.vertex", "Vertex"), &state->enableVShaders);
+			BFUI::Checkbox(T("menu.advanced.vertex", "Vertex"), &state->enableVShaders);
 			if (auto _tt = Util::HoverTooltipWrapper()) {
 				ImGui::Text("%s", T("menu.advanced.vertex_tooltip",
 									  "Replace Vertex Shaders. "
@@ -401,7 +402,7 @@ void AdvancedSettingsRenderer::RenderShaderReplacementTable()
 									  "For developers to test whether custom shaders match vanilla behavior. "));
 			}
 
-			ImGui::Checkbox(T("menu.advanced.pixel", "Pixel"), &state->enablePShaders);
+			BFUI::Checkbox(T("menu.advanced.pixel", "Pixel"), &state->enablePShaders);
 			if (auto _tt = Util::HoverTooltipWrapper()) {
 				ImGui::Text("%s", T("menu.advanced.pixel_tooltip",
 									  "Replace Pixel Shaders. "
@@ -409,7 +410,7 @@ void AdvancedSettingsRenderer::RenderShaderReplacementTable()
 									  "For developers to test whether custom shaders match vanilla behavior. "));
 			}
 
-			ImGui::Checkbox(T("menu.advanced.compute", "Compute"), &state->enableCShaders);
+			BFUI::Checkbox(T("menu.advanced.compute", "Compute"), &state->enableCShaders);
 			if (auto _tt = Util::HoverTooltipWrapper()) {
 				ImGui::Text("%s", T("menu.advanced.compute_tooltip",
 									  "Replace Compute Shaders. "
@@ -741,7 +742,7 @@ void AdvancedSettingsRenderer::RenderLoggingControls()
 		T("menu.advanced.log_level_off", "off")
 	};
 	int item_current = static_cast<int>(logLevel);
-	if (ImGui::Combo(T("menu.advanced.log_level", "Log Level"), &item_current, items, IM_ARRAYSIZE(items))) {
+	if (BFUI::Combo(T("menu.advanced.log_level", "Log Level"), &item_current, items, IM_ARRAYSIZE(items))) {
 		globals::state->SetLogLevel(static_cast<spdlog::level::level_enum>(item_current));
 	}
 	if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -771,13 +772,13 @@ void AdvancedSettingsRenderer::RenderRuntimeDebugControls()
 	Util::DrawSectionHeader(T("menu.advanced.runtime_debug_header", "Runtime Debug"));
 
 	// Frame annotations toggle
-	ImGui::Checkbox(T("menu.advanced.frame_annotations", "Frame Annotations"), &globals::state->frameAnnotations);
+	BFUI::Checkbox(T("menu.advanced.frame_annotations", "Frame Annotations"), &globals::state->frameAnnotations);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T("menu.advanced.frame_annotations_tooltip", "Enable detailed frame annotations for debugging render passes and draw calls."));
 	}
 
 	// Heat-shimmer (ISRefraction.hlsl) strength. Live per-frame value, no recompile needed.
-	ImGui::SliderFloat(T("menu.advanced.refraction_scale", "Refraction Scale"), &globals::state->refractionScale, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+	BFUI::SliderFloat(T("menu.advanced.refraction_scale", "Refraction Scale"), &globals::state->refractionScale, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T("menu.advanced.refraction_scale_tooltip", "Scales the heat-shimmer/refraction distortion around fire and other heat sources. 1.0 is unmodified vanilla strength; 0 disables it."));
 	}
@@ -871,7 +872,7 @@ void AdvancedSettingsRenderer::RenderShaderBlockingPanel()
 		auto& menuSettings = menu->GetSettings();
 		auto& themeSettings = menuSettings.Theme;
 
-		if (ImGui::Checkbox(T("menu.advanced.enable_shader_blocking", "Enable Shader Blocking"), &menuSettings.EnableShaderBlocking)) {
+		if (BFUI::Checkbox(T("menu.advanced.enable_shader_blocking", "Enable Shader Blocking"), &menuSettings.EnableShaderBlocking)) {
 			// Setting saved automatically on next save
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -1104,7 +1105,7 @@ void AdvancedSettingsRenderer::RenderTestingSection()
 {
 	auto state = globals::state;
 
-	if (ImGui::Checkbox(T("menu.advanced.enable_developer_mode", "Enable Developer Mode"), &state->enableDeveloperMode)) {
+	if (BFUI::Checkbox(T("menu.advanced.enable_developer_mode", "Enable Developer Mode"), &state->enableDeveloperMode)) {
 		logger::info("Developer Mode {}", state->enableDeveloperMode ? "enabled" : "disabled");
 	}
 	if (auto _tt = Util::HoverTooltipWrapper()) {

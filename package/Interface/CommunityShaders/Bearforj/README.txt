@@ -1,4 +1,9 @@
-Bearforj menu images (loaded from disk at menu start, swap freely, PNG RGBA):
-logo.png, head_happy.png (feature ON), head_grumpy.png (feature OFF),
-emotions/{thinking,surprised,happy,proud,wink}.png, emotes/{generation,settings}.png.
-head_happy/head_grumpy are PLACEHOLDERS cropped from emotions/happy and emotions/thinking until Designer delivers the real heads.
+Bearforj menu images. Loaded at menu open from this folder (swap the PNGs, no DLL rebuild).
+
+logo.png                         wordmark, inscription "Bearforj."
+mishmish_front.png               front view of Mish Mish (the logo). Do not redraw it.
+head_happy.png                   same front view, feature ON
+head_grumpy.png / head_worried.png  emotion crops for feature OFF and warnings
+emotions/{thinking,surprised,happy,proud,wink}.png
+emotes/{generation,settings,training,mods,voices}.png
+brand/                           original logo (svg + 4k png) and mishmish_etalon_helmet.jpg

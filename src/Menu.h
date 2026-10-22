@@ -269,8 +269,8 @@ public:
 			files[static_cast<size_t>(role)] = std::move(value);
 		};
 		setFile(FontRole::Body, "Jost/Jost-Regular.ttf");
-		setFile(FontRole::Title, "Jost/Jost-Regular.ttf");
-		setFile(FontRole::Heading, "Jost/Jost-Regular.ttf");
+		setFile(FontRole::Title, "Cinzel/Cinzel-Regular.ttf");
+		setFile(FontRole::Heading, "Cinzel/Cinzel-Regular.ttf");
 		setFile(FontRole::Subheading, "Jost/Jost-Regular.ttf");
 		setFile(FontRole::Subtext, "Jost/Jost-Regular.ttf");
 		return files;
@@ -389,8 +389,8 @@ public:
 			};
 
 			setRole(FontRole::Body, "Jost", "Regular", "Jost/Jost-Regular.ttf", 1.0f);
-			setRole(FontRole::Title, "Jost", "Regular", "Jost/Jost-Regular.ttf", 1.0f);
-			setRole(FontRole::Heading, "Jost", "Regular", "Jost/Jost-Regular.ttf", 1.0f);
+			setRole(FontRole::Title, "Cinzel", "Regular", "Cinzel/Cinzel-Regular.ttf", 1.15f);
+			setRole(FontRole::Heading, "Cinzel", "Regular", "Cinzel/Cinzel-Regular.ttf", 1.05f);
 			setRole(FontRole::Subheading, "Jost", "Regular", "Jost/Jost-Regular.ttf", 1.0f);
 			setRole(FontRole::Subtext, "Jost", "Regular", "Jost/Jost-Regular.ttf", 0.9f);
 
@@ -567,7 +567,7 @@ public:
 		std::vector<InputCombo> ShaderBlockPrevKey = { InputCombo::Keyboard(VK_PRIOR) };                                     // Debug: cycle backward through shaders (PageUp)
 		std::vector<InputCombo> ShaderBlockNextKey = { InputCombo::Keyboard(VK_NEXT) };                                      // Debug: cycle forward through shaders (PageDown)
 		std::vector<InputCombo> CSEditorToggleKey = { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(VK_END) };        // CS Editor toggle key
-		std::vector<InputCombo> ScreenshotKey = { InputCombo::Keyboard(VK_SNAPSHOT) };                                       // Screenshot capture key
+		std::vector<InputCombo> ScreenshotKey = { InputCombo::Keyboard(VK_F12) };                                           // Screenshot + Mish Mish report
 		std::vector<InputCombo> Effects11ToggleKey = { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(VK_MULTIPLY) };  // Effects 11 toggle key
 		std::vector<InputCombo> Effects11EditorKey = { InputCombo::Keyboard(VK_CONTROL), InputCombo::Keyboard(VK_END) };
 		bool EnableShaderBlocking = false;               // Enable shader blocking hotkeys for debugging
