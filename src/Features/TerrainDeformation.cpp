@@ -4,7 +4,6 @@
 #include "../I18n/I18n.h"
 #include "../Utils/UI.h"
 #include "Globals.h"
-#include "ScreenSpacePhysicalParticles.h"
 #include "ShaderCache.h"
 #include "State.h"
 #include "Utils/D3D.h"

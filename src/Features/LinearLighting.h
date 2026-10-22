@@ -26,8 +26,8 @@ struct LinearLighting : Feature
 
 	struct Settings
 	{
-		uint enableLinearLighting = false;
-		uint enableACEScg = false;
+		uint enableLinearLighting = true;
+		uint enableACEScg = true;
 		float conversionSaturation = 0.92f;
 
 		// Lighting multipliers

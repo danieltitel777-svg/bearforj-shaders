@@ -27,7 +27,7 @@ struct GPUFootstepParticles : Feature, RE::BSTEventSink<RE::BGSFootstepEvent>
 
 	struct Settings
 	{
-		bool Enabled = true;  // GPU footstep collision; SSPP also scatters resting particles in the same step
+		bool Enabled = true;
 		bool IncludeNPCs = true;
 		bool Water = true;
 		bool RainWetness = true;

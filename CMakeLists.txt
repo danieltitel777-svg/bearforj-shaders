@@ -30,7 +30,7 @@ project(
 )
 
 # Bearforj: the one version constant shown to users (menu, badge, FOMOD, Bearforj Look INI).
-set(BEARFORJ_VERSION "0.6.5")
+set(BEARFORJ_VERSION "0.6.6")
 string(REPLACE "." "-" BEARFORJ_VERSION_INI "${BEARFORJ_VERSION}")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/features/Bearforj Look/Shaders/Features/BearforjLook.ini" _bfl_ver REGEX "^Version")
 if(NOT _bfl_ver MATCHES "${BEARFORJ_VERSION_INI}")

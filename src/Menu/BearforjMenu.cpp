@@ -276,9 +276,7 @@ namespace
 	{
 		const std::string s = f->GetShortName();
 		static const std::unordered_map<std::string, Tab> overrides = {
-			{ "ScreenSpacePhysicalParticles", kParticles }, { "PhysicalLeaves", kParticles }, { "PhysicalBlood", kParticles },
-			{ "NativeParticlePhysics", kParticles }, { "FootstepKickParticles", kParticles }, { "GPUFootstepParticles", kParticles },
-			{ "PrecipitationPhysics", kParticles }, { "FootstepParticles", kParticles },
+			{ "PhysicalEffectParticles", kParticles }, { "GPUFootstepParticles", kParticles },
 			{ "GrassCollision", kParticles },
 			{ "WetnessEffects", kSkyWeather }, { "RainRefraction", kSkyWeather }, { "WeatherPicker", kSkyWeather },
 			{ "SkySync", kSkyWeather }, { "PhysicalSky", kSkyWeather }, { "CloudShadows", kSkyWeather }, { "CloudRelight", kSkyWeather },
@@ -1104,9 +1102,9 @@ namespace
 		ImGui::BeginGroup();
 		ImGui::Dummy({ 0.0f, logoH * 0.18f });
 		MonoLabel("SYS.01 // SHADERS-ONLINE");
-		if (!logo || !logo->srv) {
-			FontScope title(menu.GetFont(Menu::FontRole::Title), ImGui::GetFontSize() * 1.7f);
-			ImGui::TextColored(ImColor(kWhite), "Bearforj.");
+		{
+			FontScope title(menu.GetFont(Menu::FontRole::Title), ImGui::GetFontSize() * 1.25f);
+			ImGui::TextColored(ImColor(kWhite), "%s", T("bearforj.ui.brand", "Bearforj Shaders"));
 		}
 		ImGui::EndGroup();
 

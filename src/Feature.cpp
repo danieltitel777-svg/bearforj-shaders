@@ -24,11 +24,8 @@
 #include "Features/HairSpecular.h"
 #include "Features/TerrainDeformation.h"
 #include "Features/SubmersionWetness.h"
-#include "Features/ScreenSpacePhysicalParticles.h"
-#include "Features/NativeParticlePhysics.h"
-#include "Features/FootstepKickParticles.h"
+#include "Features/PhysicalEffectParticles.h"
 #include "Features/GPUFootstepParticles.h"
-#include "Features/SSPPSubFeatures.h"
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
 #include "Features/InteriorSun.h"
@@ -285,14 +282,7 @@ namespace
 			&globals::features::hairSpecular,
 			&globals::features::terrainDeformation,
 			&globals::features::submersionWetness,
-			&globals::features::screenSpacePhysicalParticles,
-			&SSPPSub::Blood(),
-			&SSPPSub::Effects(),
-			&SSPPSub::Leaves(),
-			&SSPPSub::Footsteps(),
-			&SSPPSub::Precipitation(),
-			&globals::features::nativeParticlePhysics,
-			&globals::features::footstepKickParticles,
+			&globals::features::physicalEffectParticles,
 			&globals::features::gpuFootstepParticles,
 			&globals::features::interiorSun,
 			&globals::features::furShells,

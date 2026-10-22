@@ -23,9 +23,7 @@
 #include "Features/HairSpecular.h"
 #include "Features/TerrainDeformation.h"
 #include "Features/SubmersionWetness.h"
-#include "Features/ScreenSpacePhysicalParticles.h"
-#include "Features/NativeParticlePhysics.h"
-#include "Features/FootstepKickParticles.h"
+#include "Features/PhysicalEffectParticles.h"
 #include "Features/GPUFootstepParticles.h"
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
@@ -100,9 +98,7 @@ namespace globals
 		HairSpecular hairSpecular{};
 		TerrainDeformation terrainDeformation{};
 		SubmersionWetness submersionWetness{};
-		ScreenSpacePhysicalParticles screenSpacePhysicalParticles{};
-		NativeParticlePhysics nativeParticlePhysics{};
-		FootstepKickParticles footstepKickParticles{};
+		PhysicalEffectParticles physicalEffectParticles{};
 		GPUFootstepParticles gpuFootstepParticles{};
 		HorizonFix horizonFix{};
 		InteriorSun interiorSun{};
