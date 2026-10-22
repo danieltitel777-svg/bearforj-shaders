@@ -347,7 +347,7 @@ void ThemeManager::MergeCyrillicFallback(ImFont* font, const std::string& fontFi
 	if (!font)
 		return;
 	// Shipped fonts without Cyrillic glyphs (checked with fontTools): Crimson Pro, Sanguis.
-	if (fontFile.find("CrimsonPro") == std::string::npos && fontFile.find("Sanguis") == std::string::npos)
+	if (fontFile.find("CrimsonPro") == std::string::npos && fontFile.find("Sanguis") == std::string::npos && fontFile.find("Cinzel") == std::string::npos)
 		return;
 	static const ImWchar cyrillic[] = { 0x0400, 0x052F, 0x2DE0, 0x2DFF, 0xA640, 0xA69F, 0x2116, 0x2116, 0 };
 	const auto path = Util::PathHelpers::GetFontsPath() / "IBMPlexSerif" / "IBMPlexSerif-Regular.ttf";

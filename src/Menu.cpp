@@ -1,7 +1,7 @@
 #include "Bearforj/Analyzer.h"
+#include "Bearforj/Compat.h"
 #include "Bearforj/PerfAssistant.h"
 #include "Bearforj/Report.h"
-#include "Menu/BearforjMenu.h"
 #include "Menu.h"
 #include "Menu/BearforjMenu.h"
 
@@ -1270,7 +1270,7 @@ void Menu::ProcessInputEventQueue()
 					{ settings.ShaderBlockNextKey, [this, shaderCache]() { if (settings.EnableShaderBlocking) shaderCache->IterateShaderBlock(false); } },
 					{ settings.OverlayToggleKey, []() { Menu::GetSingleton()->overlayVisible = !Menu::GetSingleton()->overlayVisible; } },
 					{ settings.ScreenshotKey, []() {
-						 if (globals::features::screenshotFeature.loaded)
+						 if (!Bearforj::Report::OwnsHotkey() && globals::features::screenshotFeature.loaded)
 							 globals::features::screenshotFeature.captureRequested = true;
 					 } },
 					{ settings.Effects11ToggleKey, []() {
@@ -1327,7 +1327,14 @@ void Menu::ProcessInputEventQueue()
 					{ &settings.ShaderBlockPrevKey, &settingShaderBlockPrevKey, [this](std::vector<InputCombo> keys) { settings.ShaderBlockPrevKey = keys; settingShaderBlockPrevKey = false; } },
 					{ &settings.ShaderBlockNextKey, &settingShaderBlockNextKey, [this](std::vector<InputCombo> keys) { settings.ShaderBlockNextKey = keys; settingShaderBlockNextKey = false; } },
 					{ &settings.CSEditorToggleKey, &settingCSEditorToggleKey, [this](std::vector<InputCombo> keys) { settings.CSEditorToggleKey = keys; settingCSEditorToggleKey = false; } },
-					{ &settings.ScreenshotKey, &settingScreenshotKey, [this](std::vector<InputCombo> keys) { settings.ScreenshotKey = keys; settingScreenshotKey = false; } },
+					{ &settings.ScreenshotKey, &settingScreenshotKey, [this](std::vector<InputCombo> keys) {
+						 settings.ScreenshotKey = keys;
+						 settingScreenshotKey = false;
+						 if (keys.size() == 1 && keys[0].GetDevice() == InputDeviceType::Keyboard) {
+							 Bearforj::Compat::GetConfig().reportKey = static_cast<int>(keys[0].GetKey());
+							 Bearforj::Compat::SaveConfig();
+						 }
+					 } },
 					{ &settings.Effects11ToggleKey, &settingEffects11ToggleKey, [this](std::vector<InputCombo> keys) { settings.Effects11ToggleKey = keys; settingEffects11ToggleKey = false; } },
 					{ &settings.Effects11EditorKey, &settingEffects11EditorKey, [this](std::vector<InputCombo> keys) { settings.Effects11EditorKey = keys; settingEffects11EditorKey = false; } },
 				};

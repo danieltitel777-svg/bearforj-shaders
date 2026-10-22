@@ -15,4 +15,8 @@ namespace Bearforj::Report
 	void BeginRebind();
 	bool Rebinding();
 	std::string KeyName(int a_vk);
+	/** @brief Key the report listens to: the menu screenshot binding when it is a single key, else reportKey. */
+	int ActiveKey();
+	/** @brief True while the report hotkey also saves the screenshot (menu binding should not capture again). */
+	bool OwnsHotkey();
 }

@@ -45,9 +45,9 @@ namespace Bearforj::Compat
 		std::string appliedSignature;
 		std::vector<std::string> safeModeDisabled;
 		std::vector<std::string> dismissedConflicts;
-		bool devReport = true;          // developer mode: Mish Mish report hotkey
+		bool devReport = true;          // Mish Mish report hotkey (screenshot + settings/perf report)
 		int reportKey = 0x7B;           // VK_F12
-		std::string reportDir = "C:/Users/danie/Desktop/SPBR/Bearforj/reports";  // conflict ids the user chose not to see again
+		std::string reportDir;          // empty: <SKSE logs>/Bearforj/reports
 	};
 
 	/** @brief A detected conflict. Bearforj never disables anything by itself; it only explains. */

@@ -1,6 +1,8 @@
 #include "BearforjMenu.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <functional>
 #include <map>
 #include <format>
@@ -135,9 +137,9 @@ namespace
 	};
 
 	constexpr std::array<const char*, kImageCount> kImageFiles = {
-		"logo.png", "head_happy.png", "head_grumpy.png",
+		"logo.png", "mishmish_front.png", "head_grumpy.png",
 		"emotions/thinking.png", "emotions/surprised.png", "emotions/happy.png", "emotions/proud.png", "emotions/wink.png",
-		"emotes/generation.png", "emotes/settings.png", "anim/push_sheet.png", "anim/walk_sheet.png", "head_worried.png"
+		"emotes/generation.png", "emotes/settings.png", "emotes/training.png", "emotes/voices.png", "head_worried.png"
 	};
 
 	std::array<Image, kImageCount> g_images;
@@ -148,7 +150,7 @@ namespace
 		if (g_imagesLoaded || !globals::d3d::device)
 			return;
 		g_imagesLoaded = true;
-		const auto root = Util::PathHelpers::GetInterfacePath() / "CommunityShaders" / "Bearforj";
+		const auto root = Util::PathHelpers::GetInterfacePath() / "Bearforj";
 		for (size_t i = 0; i < kImageCount; ++i) {
 			const auto path = root / kImageFiles[i];
 			std::error_code ec;
@@ -556,7 +558,7 @@ namespace
 		changed |= ImGui::Checkbox(T("bearforj.report.enable", "Report hotkey (screenshot + settings/perf report)"), &c.devReport);
 		ImGui::TextUnformatted(T("bearforj.report.key", "Hotkey:"));
 		ImGui::SameLine();
-		if (ImGui::Button(Bearforj::Report::Rebinding() ? T("bearforj.report.press", "Press a key... (Esc = cancel)") : Bearforj::Report::KeyName(c.reportKey).c_str()))
+		if (ImGui::Button(Bearforj::Report::Rebinding() ? T("bearforj.report.press", "Press a key... (Esc = cancel)") : Bearforj::Report::KeyName(Bearforj::Report::ActiveKey()).c_str()))
 			Bearforj::Report::BeginRebind();
 		{
 			static char dir[512]{};
@@ -653,117 +655,221 @@ namespace
 	}
 
 	// ---------------------------------------------------------------- compile overlay: Mish Mish pushes the bar
-	void DrawCompileBar(float a_percent, const char* a_overlay)
+	enum class CompileMood
 	{
-		const float w = 520.0f, barH = ImGui::GetFrameHeight() * 0.9f;
-		const bool sheetOk = g_images[kPushSheet].srv != nullptr && g_images[kPushSheet].size.y > 0;
-		const bool anim = Bearforj::Compat::GetConfig().compileAnimation && sheetOk;
+		Push,
+		Rejoice,
+		Displeased,
+		Wipe,
+		Rage
+	};
+
+	struct CompileClock
+	{
+		float last = -1.0f;
+		double lastMove = 0.0;
+		double rejoiceUntil = 0.0;
+		double wipeUntil = 0.0;
+		bool wiped = false;
+	};
+
+	CompileMood UpdateCompileMood(CompileClock& clock, float pct, double now)
+	{
+		if (clock.last < 0.0f || pct + 0.05f < clock.last) {
+			clock.last = pct;
+			clock.lastMove = now;
+			clock.wiped = false;
+			clock.rejoiceUntil = 0.0;
+			clock.wipeUntil = 0.0;
+		}
+		if (pct > clock.last + 0.0004f) {
+			if (now - clock.lastMove > 0.8)
+				clock.rejoiceUntil = now + 1.35;
+			clock.last = pct;
+			clock.lastMove = now;
+			clock.wiped = false;
+		}
+		if (pct >= 0.999f)
+			clock.rejoiceUntil = now + 2.2;
+		const double stall = now - clock.lastMove;
+		if (now < clock.rejoiceUntil)
+			return CompileMood::Rejoice;
+		if (stall > 10.0)
+			return CompileMood::Rage;
+		if (stall > 6.0 && !clock.wiped) {
+			clock.wipeUntil = now + 1.25;
+			clock.wiped = true;
+		}
+		if (now < clock.wipeUntil)
+			return CompileMood::Wipe;
+		if (stall > 2.4)
+			return CompileMood::Displeased;
+		return CompileMood::Push;
+	}
+
+	const Image* CompileSprite(CompileMood mood, double now)
+	{
+		const Image* img = nullptr;
+		switch (mood) {
+		case CompileMood::Rejoice:
+			img = std::fmod(now, 0.7) < 0.35 ? Img(kHappy) : Img(kProud);
+			break;
+		case CompileMood::Displeased:
+			img = Img(kThinking);
+			break;
+		case CompileMood::Wipe:
+			img = Img(kWink);
+			break;
+		case CompileMood::Rage:
+			img = Img(kSurprised);
+			if (!img)
+				img = Img(kPushSheet);
+			break;
+		case CompileMood::Push:
+			img = Img(kGeneration);
+			break;
+		}
+		if (!img)
+			img = Img(kHappy);
+		if (!img)
+			img = Img(kHeadHappy);
+		return img;
+	}
+
+	bool SpriteNeedsPaper(const Image* sprite)
+	{
+		return sprite == Img(kThinking) || sprite == Img(kSurprised) || sprite == Img(kHappy) || sprite == Img(kProud) || sprite == Img(kWink) || sprite == Img(kHeadHappy) || sprite == Img(kHeadGrumpy);
+	}
+
+	void AddSpriteQuad(ImDrawList* dl, ImTextureID tex, ImVec2 feet, float w, float h, float lean, float squash, float stretch)
+	{
+		const float dw = w * squash;
+		const float dh = h * stretch;
+		const ImVec2 bl{ feet.x - dw * 0.5f, feet.y };
+		const ImVec2 br{ feet.x + dw * 0.5f, feet.y };
+		const ImVec2 tl{ feet.x - dw * 0.5f + lean, feet.y - dh };
+		const ImVec2 tr{ feet.x + dw * 0.5f + lean * 0.35f, feet.y - dh };
+		dl->AddImageQuad(tex, tl, tr, br, bl, { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 }, IM_COL32_WHITE);
+	}
+
+	void DrawCompileBar(float a_percent, const char* a_overlay, const char* a_caption)
+	{
+		constexpr float kBarW = 560.0f;
+		const float barH = ImGui::GetFrameHeight() * 0.95f;
+		const bool motion = Bearforj::Compat::GetConfig().compileAnimation;
+		const float pct = std::clamp(std::isfinite(a_percent) ? a_percent : 0.0f, 0.0f, 1.0f);
+		static CompileClock clock;
 		static bool loggedAnim = false;
+		const double now = ImGui::GetTime();
+		const CompileMood mood = UpdateCompileMood(clock, pct, now);
+		const Image* sprite = CompileSprite(mood, now);
 		if (!loggedAnim) {
 			loggedAnim = true;
-			logger::info("[Bearforj UI] compile overlay: Mish Mish animation {} (setting {}, push_sheet {})", anim ? "ON" : "OFF",
-				Bearforj::Compat::GetConfig().compileAnimation ? "on" : "off", sheetOk ? "loaded" : "MISSING");
+			logger::info("[Bearforj UI] compile overlay: Mish Mish {} (animation {}, sprite {})", sprite ? "ON" : "OFF",
+				motion ? "on" : "off", sprite ? "loaded" : "MISSING");
 		}
-		// Full-body Mish Mish: push_sheet.png is 10 frames of 160x200 (black ink on transparent).
-		const int frames = 10;
-		const float spriteH = anim ? barH * 5.0f : 0.0f, spriteW = spriteH * 0.8f;
-		const ImVec2 p0 = ImGui::GetCursorScreenPos();
-		const float rowH = std::max(spriteH, barH);
-		const ImVec2 bar0{ p0.x + spriteW * 0.6f, p0.y + rowH - barH };
-		const ImVec2 bar1{ bar0.x + w, bar0.y + barH };
+
+		const float spriteH = sprite ? 196.0f : 0.0f;
+		const float aspect = sprite && sprite->size.y > 0.0f ? sprite->size.x / sprite->size.y : 0.72f;
+		const float spriteW = spriteH * aspect;
+		const float padTop = sprite ? 84.0f : 0.0f;
+		const float left = spriteW * 0.95f;
+		const ImVec2 origin = ImGui::GetCursorScreenPos();
+		const float rowH = std::max(spriteH + padTop, barH);
+		const ImVec2 bar0{ origin.x + left, origin.y + rowH - barH };
+		const ImVec2 bar1{ bar0.x + kBarW, bar0.y + barH };
 		auto* dl = ImGui::GetWindowDrawList();
-		const float pct = std::clamp(std::isfinite(a_percent) ? a_percent : 0.0f, 0.0f, 1.0f);
-		const float fillX = bar0.x + w * pct;
+		const float fillX = bar0.x + kBarW * pct;
 		dl->AddRectFilled(bar0, bar1, kBlack, barH * 0.5f);
 		if (pct > 0.0f)
 			dl->AddRectFilled(bar0, { std::max(fillX, bar0.x + barH), bar1.y }, kText, barH * 0.5f);
 		dl->AddRect(bar0, bar1, kOutline, barH * 0.5f);
-		const ImVec2 ts = ImGui::CalcTextSize(a_overlay);
-		const ImVec2 tp{ bar0.x + (w - ts.x) * 0.5f, bar0.y + (barH - ts.y) * 0.5f };
-		dl->PushClipRect(bar0, { fillX, bar1.y }, true);
-		dl->AddText(tp, kBlack, a_overlay);
-		dl->PopClipRect();
-		dl->PushClipRect({ fillX, bar0.y }, bar1, true);
-		dl->AddText(tp, kText, a_overlay);
-		dl->PopClipRect();
-		if (anim) {
-			// Mood: progress jump -> happy; no progress 2.5 s -> strains (grumpy, faster, sweat);
-			// 8 s+ -> angry (stomps, steam); done -> celebrates (jumps, happy).
-			static float lastPct = -1.0f;
-			static double lastMove = 0.0, happyUntil = 0.0;
-			const double now = ImGui::GetTime();
-			if (pct < lastPct - 0.01f || lastPct < 0.0f) {  // new compile run
-				lastPct = pct;
-				lastMove = now;
+		if (a_overlay && *a_overlay) {
+			const ImVec2 ts = ImGui::CalcTextSize(a_overlay);
+			const ImVec2 tp{ bar0.x + (kBarW - ts.x) * 0.5f, bar0.y + (barH - ts.y) * 0.5f };
+			dl->PushClipRect(bar0, { fillX, bar1.y }, true);
+			dl->AddText(tp, kBlack, a_overlay);
+			dl->PopClipRect();
+			dl->PushClipRect({ fillX, bar0.y }, bar1, true);
+			dl->AddText(tp, kText, a_overlay);
+			dl->PopClipRect();
+		}
+
+		float squash = 1.0f, stretch = 1.0f, lean = 0.0f, slip = 0.0f, hop = 0.0f;
+		if (motion && sprite) {
+			const float rate = mood == CompileMood::Rage ? 14.0f : mood == CompileMood::Displeased ? 9.0f : 7.0f;
+			const float amp = mood == CompileMood::Rage ? 0.16f : mood == CompileMood::Displeased ? 0.11f : 0.07f;
+			const float wave = (float)std::sin(now * rate);
+			squash = 1.0f + amp * wave;
+			stretch = 1.0f - amp * wave;
+			lean = (mood == CompileMood::Rage ? 22.0f : 12.0f) * (0.35f + 0.65f * (wave * 0.5f + 0.5f));
+			if (mood == CompileMood::Rejoice) {
+				hop = -std::abs((float)std::sin(now * 7.0)) * spriteH * 0.14f;
+				squash = 1.0f - 0.1f * std::abs((float)std::sin(now * 7.0));
+				stretch = squash > 0.01f ? 1.0f / squash : 1.0f;
+				lean = (float)std::sin(now * 5.0) * 6.0f;
 			}
-			if (pct > lastPct + 0.0005f) {
-				if (pct - lastPct > 0.02f)
-					happyUntil = now + 1.2;
-				lastPct = pct;
-				lastMove = now;
-			}
-			const double stall = now - lastMove;
-			const bool done = pct >= 0.999f, happy = done || now < happyUntil;
-			const bool strain = !happy && stall > 2.5, angry = !happy && stall > 8.0;
-			const double fps = angry ? 16.0 : strain ? 13.0 : 10.0;
-			const int f = (int)(now * fps) % frames;
-			float dx = 0.0f, dy = 0.0f;
-			if (strain)
-				dx = (float)std::sin(now * 60.0) * 1.5f - (float)std::fmod(now * 2.5, 1.0) * 3.0f;  // shaking + feet slipping back
-			if (angry)
-				dy = -std::abs((float)std::sin(now * 9.0)) * spriteH * 0.08f;  // stomping
-			if (done)
-				dy = -std::abs((float)std::sin(now * 6.0)) * spriteH * 0.25f;  // celebration hops
-			const ImVec2 s0{ fillX - spriteW * 0.85f + dx, p0.y + rowH - spriteH + dy };
-			// Black ink is invisible on the black overlay: give Mish Mish a paper card to stand on.
-			dl->AddRectFilled({ s0.x - 4.0f, s0.y - 4.0f }, { s0.x + spriteW + 4.0f, s0.y + spriteH + 2.0f }, IM_COL32(235, 235, 235, 255), 6.0f);
-			dl->AddImage((ImTextureID)g_images[kPushSheet].srv, s0, { s0.x + spriteW, s0.y + spriteH },
-				{ (float)f / frames, 0.0f }, { (float)(f + 1) / frames, 1.0f });
-			// mood face bubble above the head
-			if (happy || strain) {
-				const float hs = spriteH * 0.42f;
-				const ImVec2 h0{ s0.x + spriteW * 0.55f, s0.y - hs * 0.55f };
-				if (const auto* head = Img(happy ? kHeadHappy : kHeadGrumpy)) {
-					dl->AddCircleFilled({ h0.x + hs * 0.5f, h0.y + hs * 0.5f }, hs * 0.58f, kBlack);
-					dl->AddImage((ImTextureID)head->srv, h0, { h0.x + hs, h0.y + hs });
-				}
-			}
-			// slipping feet: dust kicked back from under the feet while straining
-			if (strain) {
-				for (int i = 0; i < 2; ++i) {
-					const float t = (float)std::fmod(now * 2.5 + i * 0.5, 1.0);
-					const ImVec2 c{ s0.x + spriteW * 0.2f - t * spriteW * 0.6f, s0.y + spriteH - 3.0f - t * 4.0f };
-					dl->AddCircleFilled(c, 1.5f + t * 3.0f, IM_COL32(200, 200, 200, (int)(180 * (1.0f - t))));
-				}
-			}
-			// sweat drop, every ~1.6 s while straining
-			if (strain && !angry) {
-				const float t = (float)std::fmod(now, 1.6) / 1.6f;
-				if (t < 0.5f) {
-					const ImVec2 d{ s0.x + spriteW * 0.35f, s0.y + spriteH * (0.15f + t * 0.5f) };
-					dl->AddCircleFilled(d, 2.5f, kText);
-					dl->AddTriangleFilled({ d.x - 2.5f, d.y }, { d.x + 2.5f, d.y }, { d.x, d.y - 5.0f }, kText);
-				}
-			}
-			// steam puffs when angry
-			if (angry) {
-				for (int i = 0; i < 3; ++i) {
-					const float t = (float)std::fmod(now * 1.4 + i / 3.0, 1.0);
-					const ImVec2 c{ s0.x + spriteW * (0.25f + 0.25f * i) + std::sin(t * 6.0f + i) * 3.0f, s0.y - t * spriteH * 0.5f };
-					dl->AddCircle(c, 2.0f + t * 5.0f, IM_COL32(230, 230, 230, (int)(220 * (1.0f - t))), 12, 1.5f);
-				}
-			}
-			// confetti-ish sparkles on completion
-			if (done) {
-				for (int i = 0; i < 6; ++i) {
-					const float a = (float)(now * 2.0 + i * 1.047);
-					const ImVec2 c{ s0.x + spriteW * 0.5f + std::cos(a) * spriteW * 0.7f, s0.y + spriteH * 0.3f + std::sin(a) * spriteH * 0.35f };
-					dl->AddLine({ c.x - 3, c.y }, { c.x + 3, c.y }, kText, 1.5f);
-					dl->AddLine({ c.x, c.y - 3 }, { c.x, c.y + 3 }, kText, 1.5f);
-				}
+			if (mood == CompileMood::Displeased || mood == CompileMood::Rage || mood == CompileMood::Wipe) {
+				const float t = (float)std::fmod(now * (mood == CompileMood::Rage ? 3.4 : 2.2), 1.0);
+				slip = -t * spriteW * 0.28f;
 			}
 		}
-		ImGui::Dummy({ w + spriteW * 0.6f, rowH });
+
+		const ImVec2 feet{ fillX - spriteW * 0.05f + slip, bar1.y + hop };
+		if (sprite && sprite->srv) {
+			if (SpriteNeedsPaper(sprite)) {
+				const float dw = spriteW * squash;
+				const float dh = spriteH * stretch;
+				dl->AddRectFilled({ feet.x - dw * 0.5f - 6.0f + lean * 0.15f, feet.y - dh - 6.0f }, { feet.x + dw * 0.5f + 6.0f, feet.y + 3.0f }, kWhite, 12.0f);
+			}
+			AddSpriteQuad(dl, (ImTextureID)sprite->srv, feet, spriteW, spriteH, lean, squash, stretch);
+		}
+		if (motion && sprite && (mood == CompileMood::Displeased || mood == CompileMood::Rage || mood == CompileMood::Wipe)) {
+			for (int i = 0; i < 2; ++i) {
+				const float t = (float)std::fmod(now * 2.6 + i * 0.45, 1.0);
+				const ImVec2 c{ feet.x - spriteW * (0.05f + 0.28f * i) - t * 36.0f, feet.y - 2.0f - t * 8.0f };
+				dl->AddCircleFilled(c, 6.0f, IM_COL32(255, 255, 255, (int)(230 * (1.0f - t))));
+				dl->AddCircle(c, 9.0f + t * 6.0f, IM_COL32(210, 210, 210, (int)(150 * (1.0f - t))), 12, 1.5f);
+			}
+		}
+		if (motion && sprite && mood != CompileMood::Rejoice) {
+			const int drops = mood == CompileMood::Push ? 1 : mood == CompileMood::Rage ? 3 : 2;
+			for (int i = 0; i < drops; ++i) {
+				const float period = mood == CompileMood::Rage ? 0.65f : 1.25f;
+				const float t = (float)std::fmod(now * (1.0 / period) + i * 0.37, 1.0);
+				const ImVec2 d{ feet.x + lean * 0.25f + (i - 1) * 16.0f, feet.y - spriteH * stretch * (0.86f - t * 0.5f) };
+				dl->AddCircleFilled(d, 3.4f, kWhite);
+				dl->AddTriangleFilled({ d.x - 3.4f, d.y - 0.5f }, { d.x + 3.4f, d.y - 0.5f }, { d.x, d.y - 8.0f }, kWhite);
+			}
+		}
+		if (motion && sprite && mood == CompileMood::Wipe) {
+			const float t = (float)std::fmod(now, 1.25) / 1.25f;
+			const float y = feet.y - spriteH * stretch * 0.62f;
+			const float x0 = feet.x - spriteW * 0.22f + lean;
+			const float x1 = x0 + spriteW * 0.55f * t;
+			dl->AddLine({ x0, y + 8.0f }, { x1, y }, kWhite, 5.0f);
+			dl->AddCircleFilled({ x1, y }, 7.0f, kWhite);
+		}
+		if (motion && sprite && mood == CompileMood::Rage) {
+			for (int i = 0; i < 4; ++i) {
+				const float t = (float)std::fmod(now * 1.35 + i * 0.23, 1.0);
+				const float side = (i & 1) ? 1.0f : -1.0f;
+				const ImVec2 c{ feet.x + side * spriteW * 0.32f + lean * 0.2f + std::sin(t * 6.0f + i) * 5.0f, feet.y - spriteH * (0.8f + t * 0.42f) };
+				dl->AddCircle(c, 3.0f + t * 9.0f, IM_COL32(240, 240, 240, (int)(210 * (1.0f - t))), 14, 1.7f);
+			}
+		}
+		if (motion && sprite && mood == CompileMood::Rejoice) {
+			for (int i = 0; i < 5; ++i) {
+				const float a = (float)(now * 2.4 + i * 1.256);
+				const ImVec2 c{ feet.x + std::cos(a) * spriteW * 0.75f, feet.y - spriteH * 0.5f + std::sin(a) * spriteH * 0.22f };
+				dl->AddLine({ c.x - 4, c.y }, { c.x + 4, c.y }, kWhite, 1.7f);
+				dl->AddLine({ c.x, c.y - 4 }, { c.x, c.y + 4 }, kWhite, 1.7f);
+			}
+		}
+
+		ImGui::Dummy({ kBarW + left, rowH + 6.0f });
+		if (a_caption && *a_caption)
+			MonoLabel(a_caption, kDim);
 	}
 
 	/** @brief Sets one top-level settings key of a feature through its JSON round-trip; returns an undo action. */
@@ -1082,14 +1188,26 @@ namespace
 	// ---------------------------------------------------------------- sections
 	void DrawHeader(Menu& menu)
 	{
-		const float logo = ImGui::GetFrameHeight() * 2.6f;
-		DrawImageFit(Img(kLogo), { logo, logo });
+		const float h = ImGui::GetFrameHeight() * 3.4f;
+		const Image* bear = Img(kHeadHappy);
+		const Image* logo = Img(kLogo);
+		const float bearW = bear && bear->size.y > 0.0f ? h * (bear->size.x / bear->size.y) : h * 0.7f;
+		{
+			const ImVec2 p = ImGui::GetCursorScreenPos();
+			ImGui::GetWindowDrawList()->AddRectFilled(p, { p.x + bearW, p.y + h }, kWhite, 10.0f);
+		}
+		DrawImageFit(bear, { bearW, h });
+		ImGui::SameLine();
+		const float logoH = h * 0.92f;
+		const float logoW = logo && logo->size.y > 0.0f ? logoH * (logo->size.x / logo->size.y) : logoH * 1.3f;
+		DrawImageFit(logo, { logoW, logoH });
 		ImGui::SameLine();
 		ImGui::BeginGroup();
+		ImGui::Dummy({ 0.0f, logoH * 0.18f });
 		MonoLabel("SYS.01 // SHADERS-ONLINE");
-		{
-			FontScope title(menu.GetFont(Menu::FontRole::Title), ImGui::GetFontSize() * 1.9f);
-			ImGui::TextColored(ImColor(kWhite), "BearForj Shaders");
+		if (!logo || !logo->srv) {
+			FontScope title(menu.GetFont(Menu::FontRole::Title), ImGui::GetFontSize() * 1.7f);
+			ImGui::TextColored(ImColor(kWhite), "Bearforj.");
 		}
 		ImGui::EndGroup();
 
@@ -1099,10 +1217,11 @@ namespace
 		const float bw = ImGui::GetFrameHeight() * 1.6f;
 		ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - bw * 2 - 70.0f - 120.0f);
 		ImGui::BeginGroup();
-		ImGui::Dummy({ 0, logo * 0.25f });
+		ImGui::Dummy({ 0, h * 0.25f });
 		{
 			StyleScope s;
 			s.Col(ImGuiCol_Border, kOutline);
+			FontScope title(menu.GetFont(Menu::FontRole::Title), ImGui::GetFontSize() * 0.8f);
 			ImGui::Button(Plugin::BEARFORJ_VERSION_LABEL.data(), { 110.0f, 0 });
 		}
 		ImGui::SameLine();
@@ -1245,6 +1364,7 @@ namespace
 		const auto& selected = g_selected[g_tab];
 		if (g_tab == kSystem && selected == "#general") {
 			ImGui::TextColored(ImColor(kWhite), "%s", T("bearforj.ui.general", "General"));
+			BFUI::SetContext("menu");
 			menu.DrawGeneralSettings();  // Shaders / Keybindings / Interface (Behavior -> Language)
 			return;
 		}
@@ -1270,6 +1390,7 @@ namespace
 		}
 		if (g_tab == kSystem && selected == "#advanced") {
 			ImGui::TextColored(ImColor(kWhite), "%s", T("bearforj.ui.advanced", "Advanced"));
+			BFUI::SetContext("menu");
 			menu.DrawAdvancedSettings();
 			return;
 		}
@@ -1338,16 +1459,13 @@ namespace
 			const bool compiling = cache->IsCompiling() && total > 0;
 			ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 360.0f);
 			if (compiling)
-				DrawImageFit(Img(kGeneration), { ImGui::GetFrameHeight() * 1.3f, ImGui::GetFrameHeight() * 1.3f });
+				DrawImageFit(Img(kGeneration) ? Img(kGeneration) : Img(kHappy), { ImGui::GetFrameHeight() * 1.6f, ImGui::GetFrameHeight() * 1.6f });
 			else
-				ImGui::Dummy({ ImGui::GetFrameHeight() * 1.3f, 1 });
+				ImGui::Dummy({ ImGui::GetFrameHeight() * 1.6f, 1 });
 			ImGui::SameLine();
 			const std::string overlay = compiling ? std::format("{} {}/{}", T("bearforj.ui.compiling", "COMPILING"), done, total) : T("bearforj.ui.ready", "READY");
-			StyleScope s;
-			s.Col(ImGuiCol_PlotHistogram, IM_COL32(58, 58, 58, 255));
-			s.Col(ImGuiCol_FrameBg, kBlack);
-			s.Col(ImGuiCol_Border, kOutline);
-			ImGui::ProgressBar(compiling ? (float)done / (float)std::max<uint64_t>(total, 1) : 1.0f, { 300.0f, 0 }, overlay.c_str());
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted(overlay.c_str());
 		}
 
 		if (g_requestReset) {
@@ -1394,12 +1512,14 @@ namespace BearforjMenu
 		float a = 0;
 		if (!Bearforj::Report::ToastActive(text, a))
 			return;
+		LoadImages();
 		const auto* vp = ImGui::GetMainViewport();
 		ImGui::SetNextWindowPos({ vp->Pos.x + vp->Size.x - 24.0f, vp->Pos.y + 24.0f }, ImGuiCond_Always, { 1.0f, 0.0f });
 		ImGui::SetNextWindowBgAlpha(0.85f * a);
 		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, a);
 		if (ImGui::Begin("##bfreporttoast", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav)) {
-			DrawImageFit(Img(kWink), { 40, 40 });
+			const float wink = 0.72f + 0.28f * std::abs((float)std::sin(ImGui::GetTime() * 9.0));
+			DrawImageFit(Img(kWink) ? Img(kWink) : Img(kHeadHappy), { 64.0f, 64.0f * wink });
 			ImGui::SameLine();
 			ImGui::TextUnformatted(text.c_str());
 		}
@@ -1462,12 +1582,22 @@ namespace BearforjMenu
 		DrawFooter();
 	}
 
-	void DrawCompileOverlay(float a_percent, const char* a_overlay)
+	void DrawCompileOverlay(float a_percent, const char* a_overlay, const char* a_caption)
 	{
 		LoadImages();
 		StyleScope style;
 		PushBlackWhite(style);
-		DrawCompileBar(a_percent, a_overlay);
+		DrawCompileBar(a_percent, a_overlay, a_caption);
+	}
+
+	ID3D11ShaderResourceView* TooltipMascot()
+	{
+		LoadImages();
+		if (const Image* face = Img(kThinking))
+			return face->srv;
+		if (const Image* face = Img(kHeadHappy))
+			return face->srv;
+		return nullptr;
 	}
 
 	void ReleaseAssets()

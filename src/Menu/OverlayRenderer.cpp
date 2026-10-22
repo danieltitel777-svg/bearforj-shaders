@@ -294,15 +294,20 @@ void OverlayRenderer::RenderShaderCompilationStatus(const std::function<const ch
 		if (hideRoutineHud && !hasExceptionalInfo)
 			return;
 
+		ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.94f));
+		ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 14.0f));
 		ImGui::SetNextWindowPos(ImVec2(pos, pos));
 		if (!ImGui::Begin("ShaderCompilationInfo", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings)) {
 			ImGui::End();
+			ImGui::PopStyleVar(3);
+			ImGui::PopStyleColor(2);
 			return;
 		}
-		if (!hideRoutineHud) {
-			ImGui::TextUnformatted(progressTitle.c_str());
-			BearforjMenu::DrawCompileOverlay(percent, progressOverlay.c_str());
-		}
+		if (!hideRoutineHud)
+			BearforjMenu::DrawCompileOverlay(percent, progressOverlay.c_str(), progressTitle.c_str());
 		if (shaderCache->HasFeatureSetRevertPending()) {
 			ImGui::TextColored(themeSettings.StatusPalette.Warning, "%s",
 				T("overlay.revert_pending",
@@ -372,6 +377,8 @@ void OverlayRenderer::RenderShaderCompilationStatus(const std::function<const ch
 			ImGui::TextColored(themeSettings.StatusPalette.Warning, "%s", renderDocInformation.c_str());
 
 		ImGui::End();
+		ImGui::PopStyleVar(3);
+		ImGui::PopStyleColor(2);
 		return;
 	}
 
