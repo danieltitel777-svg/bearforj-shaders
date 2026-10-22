@@ -24,6 +24,7 @@
 #include "Features/HairSpecular.h"
 #include "Features/TerrainDeformation.h"
 #include "Features/SubmersionWetness.h"
+#include "Features/ColdBreath.h"
 #include "Features/PhysicalEffectParticles.h"
 #include "Features/GPUFootstepParticles.h"
 #include "Features/HorizonFix.h"
@@ -282,6 +283,7 @@ namespace
 			&globals::features::hairSpecular,
 			&globals::features::terrainDeformation,
 			&globals::features::submersionWetness,
+			&globals::features::coldBreath,
 			&globals::features::physicalEffectParticles,
 			&globals::features::gpuFootstepParticles,
 			&globals::features::interiorSun,

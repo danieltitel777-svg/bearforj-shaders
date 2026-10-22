@@ -1,0 +1,4 @@
+Breath meshes and textures are from Wet and Cold by isparks (Nexus).
+License: CC BY-NC-SA. Credit the author. Do not sell this mod or put it behind a paywall.
+The nifs play on the skeleton node named inside each file, usually NPC Head [Head].
+Textures stay at textures/wetandcold/breath.dds and breathgrad.dds, the paths stored in the nifs.

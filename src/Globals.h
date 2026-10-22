@@ -19,6 +19,7 @@ struct GrassOptimizations;
 struct HairSpecular;
 struct TerrainDeformation;
 struct SubmersionWetness;
+struct ColdBreath;
 struct PhysicalEffectParticles;
 struct GPUFootstepParticles;
 struct HorizonFix;
@@ -131,6 +132,7 @@ namespace globals
 		extern HairSpecular hairSpecular;
 		extern TerrainDeformation terrainDeformation;
 		extern SubmersionWetness submersionWetness;
+		extern ColdBreath coldBreath;
 		extern PhysicalEffectParticles physicalEffectParticles;
 		extern GPUFootstepParticles gpuFootstepParticles;
 		extern HorizonFix horizonFix;

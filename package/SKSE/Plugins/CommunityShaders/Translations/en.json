@@ -6987,5 +6987,14 @@
     "tt.c2cf49dfbd": "Fire scan radius (PhysicalEffectParticles): How far / how wide the effect reaches.\nRange 400.0 .. 6000.0; recommended: stay near the default, change in small steps.\nPerf cost: Medium: a few FPS.",
     "tt.3e2a12b17e": "Magic max distance (PhysicalEffectParticles): How far / how wide the effect reaches.\nRange 500.0 .. 8000.0; recommended: stay near the default, change in small steps.\nPerf cost: Medium: a few FPS.",
     "tt.be7da4880b": "Water Soak Time (SubmersionWetness): How fast it changes over time.\nRange 0.1 .. 20.0; recommended: stay near the default, change in small steps.\nPerf cost: ~0 (value only, no extra GPU work).",
-    "tt.68e95c0112": "Sweat amount (Skin): How strong the effect is. Higher = more visible.\nRange 0 .. 2; recommended: stay near the default, change in small steps.\nPerf cost: ~0 (value only, no extra GPU work)."
+    "tt.68e95c0112": "Sweat amount (Skin): How strong the effect is. Higher = more visible.\nRange 0 .. 2; recommended: stay near the default, change in small steps.\nPerf cost: ~0 (value only, no extra GPU work).",
+    "feature.cold_breath.name": "Cold Breath",
+    "feature.cold_breath.description": "Visible breath in snow and cold weather, using Wet and Cold's breath meshes.",
+    "feature.cold_breath.key_1": "Plays on the head of the player, NPCs and a few creatures",
+    "feature.cold_breath.key_2": "Only while it is snowing, out of doors",
+    "feature.cold_breath.enabled": "Enabled",
+    "feature.cold_breath.interval": "Breath Interval",
+    "feature.cold_breath.lifetime": "Breath Length",
+    "feature.cold_breath.range": "Range",
+    "feature.cold_breath.credit": "Breath meshes and textures are from Wet and Cold by isparks, CC BY-NC-SA."
 }

@@ -23,6 +23,7 @@
 #include "Features/HairSpecular.h"
 #include "Features/TerrainDeformation.h"
 #include "Features/SubmersionWetness.h"
+#include "Features/ColdBreath.h"
 #include "Features/PhysicalEffectParticles.h"
 #include "Features/GPUFootstepParticles.h"
 #include "Features/HorizonFix.h"
@@ -98,6 +99,7 @@ namespace globals
 		HairSpecular hairSpecular{};
 		TerrainDeformation terrainDeformation{};
 		SubmersionWetness submersionWetness{};
+		ColdBreath coldBreath{};
 		PhysicalEffectParticles physicalEffectParticles{};
 		GPUFootstepParticles gpuFootstepParticles{};
 		HorizonFix horizonFix{};
