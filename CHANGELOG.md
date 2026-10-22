@@ -10,6 +10,7 @@
 - Removed any remaining Unified Water and Water Cache package traces.
 - New installs and Restore Defaults use Linear Lighting with ACEScg, ambient 0.32 and saturation 0.92. Skylighting stays on the maximum probe grid. Weather color adaptation is unchanged.
 - The shader window title "Bearforj Shaders" sits beside the Mish Mish logo.
+- Rain refraction and the raindrop ripple math already matched the 2026-10-22 AIO build (Raindrops.png and optimized-ggx.hlsli are byte-identical). The AIO Wetness Effects file is an older subset, so it was not copied over the current shader.
 
 ### Русский
 
@@ -19,3 +20,4 @@
 - Следы Unified Water и Water Cache из пакета убраны.
 - Новая установка и «сброс по умолчанию»: линейный свет с ACEScg, ambient 0.32, насыщенность 0.92. Skylighting на максимальной сетке проб. Подстройка цветов под погоду не тронута.
 - В окне настроек шейдеров рядом с логотипом Миш Миш написано «Bearforj Shaders».
+- Преломление дождя и математика кругов от капель уже совпадали со сборкой AIO от 2026-10-22 (Raindrops.png и optimized-ggx.hlsli побайтно одинаковые). Файл Wetness Effects из AIO старше нашего, поэтому поверх текущего шейдера он не копировался.
