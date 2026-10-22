@@ -133,13 +133,31 @@ namespace
 		kPushSheet,
 		kWalkSheet,
 		kWorried,
+		kSword,
+		kIdea,
+		kSinging,
+		kPointing,
 		kImageCount
 	};
 
 	constexpr std::array<const char*, kImageCount> kImageFiles = {
-		"logo.png", "mishmish_front.png", "head_grumpy.png",
-		"emotions/thinking.png", "emotions/surprised.png", "emotions/happy.png", "emotions/proud.png", "emotions/wink.png",
-		"emotes/generation.png", "emotes/settings.png", "emotes/training.png", "emotes/voices.png", "head_worried.png"
+		"logo.png",
+		"emotions/thumbs_up.png",
+		"emotions/thinking.png",
+		"emotions/thinking.png",
+		"emotions/surprised.png",
+		"emotions/cheering.png",
+		"emotions/proud.png",
+		"emotions/wink.png",
+		"emotions/hourglass.png",
+		"emotions/wrench.png",
+		"emotions/sleeping.png",
+		"emotions/waving.png",
+		"emotions/bug.png",
+		"emotions/sword.png",
+		"emotions/idea.png",
+		"emotions/singing.png",
+		"emotions/pointing.png",
 	};
 
 	std::array<Image, kImageCount> g_images;
@@ -166,10 +184,6 @@ namespace
 	{
 		if (g_images[id].srv)
 			return &g_images[id];
-		if (id == kHeadGrumpy && g_images[kHeadHappy].srv)
-			return &g_images[kHeadHappy];
-		if ((id == kHeadHappy || id == kHeadGrumpy) && g_images[kLogo].srv)
-			return &g_images[kLogo];
 		return nullptr;
 	}
 
@@ -655,139 +669,102 @@ namespace
 		}
 	}
 
-	// ---------------------------------------------------------------- compile overlay: Mish Mish pushes the bar
-	enum class CompileMood
+	// ---------------------------------------------------------------- compile overlay: static Mish Mish beside the bar
+	struct CompileFade
 	{
-		Push,
-		Rejoice,
-		Displeased,
-		Wipe,
-		Rage
-	};
-
-	struct CompileClock
-	{
-		float last = -1.0f;
+		ImageId shown = kHeadHappy;
+		ImageId previous = kHeadHappy;
+		double swapped = -1.0;
+		float lastPct = -1.0f;
 		double lastMove = 0.0;
-		double rejoiceUntil = 0.0;
-		double wipeUntil = 0.0;
-		bool wiped = false;
+		double cheerUntil = 0.0;
 	};
 
-	CompileMood UpdateCompileMood(CompileClock& clock, float pct, double now)
+	ImageId CompileFace(CompileFade& st, float pct, double now)
 	{
-		if (clock.last < 0.0f || pct + 0.05f < clock.last) {
-			clock.last = pct;
-			clock.lastMove = now;
-			clock.wiped = false;
-			clock.rejoiceUntil = 0.0;
-			clock.wipeUntil = 0.0;
+		if (st.lastPct < 0.0f || pct + 0.05f < st.lastPct) {
+			st.lastPct = pct;
+			st.lastMove = now;
+			st.cheerUntil = 0.0;
 		}
-		if (pct > clock.last + 0.0004f) {
-			if (now - clock.lastMove > 0.8)
-				clock.rejoiceUntil = now + 1.35;
-			clock.last = pct;
-			clock.lastMove = now;
-			clock.wiped = false;
+		if (pct > st.lastPct + 0.0004f) {
+			if (now - st.lastMove > 0.6)
+				st.cheerUntil = now + 1.15;
+			st.lastPct = pct;
+			st.lastMove = now;
 		}
+		const bool failed = globals::shaderCache && globals::shaderCache->GetCurrentFailedCount() > 0;
 		if (pct >= 0.999f)
-			clock.rejoiceUntil = now + 2.2;
-		const double stall = now - clock.lastMove;
-		if (now < clock.rejoiceUntil)
-			return CompileMood::Rejoice;
-		if (stall > 10.0)
-			return CompileMood::Rage;
-		if (stall > 6.0 && !clock.wiped) {
-			clock.wipeUntil = now + 1.25;
-			clock.wiped = true;
-		}
-		if (now < clock.wipeUntil)
-			return CompileMood::Wipe;
-		if (stall > 2.4)
-			return CompileMood::Displeased;
-		return CompileMood::Push;
+			return kHappy;
+		const double stall = now - st.lastMove;
+		if (failed && stall > 2.0)
+			return kWorried;
+		if (now < st.cheerUntil)
+			return kHappy;
+		if (stall > 8.0)
+			return kPushSheet;
+		if (stall > 4.0)
+			return kThinking;
+		if (stall > 1.8)
+			return kGeneration;
+		return kHeadHappy;
 	}
 
-	const Image* CompileSprite(CompileMood mood, double now)
+	void DrawStillSprite(ImDrawList* dl, const Image* img, ImVec2 box0, float box, float alpha)
 	{
-		const Image* img = nullptr;
-		switch (mood) {
-		case CompileMood::Rejoice:
-			img = std::fmod(now, 0.7) < 0.35 ? Img(kHappy) : Img(kProud);
-			break;
-		case CompileMood::Displeased:
-			img = Img(kThinking);
-			break;
-		case CompileMood::Wipe:
-			img = Img(kWink);
-			break;
-		case CompileMood::Rage:
-			img = Img(kSurprised);
-			if (!img)
-				img = Img(kPushSheet);
-			break;
-		case CompileMood::Push:
-			img = Img(kGeneration);
-			break;
-		}
-		if (!img)
-			img = Img(kHappy);
-		if (!img)
-			img = Img(kHeadHappy);
-		return img;
-	}
-
-	bool SpriteNeedsPaper(const Image* sprite)
-	{
-		return sprite == Img(kThinking) || sprite == Img(kSurprised) || sprite == Img(kHappy) || sprite == Img(kProud) || sprite == Img(kWink) || sprite == Img(kHeadHappy) || sprite == Img(kHeadGrumpy);
-	}
-
-	void AddSpriteQuad(ImDrawList* dl, ImTextureID tex, ImVec2 feet, float w, float h, float lean, float squash, float stretch)
-	{
-		const float dw = w * squash;
-		const float dh = h * stretch;
-		const ImVec2 bl{ feet.x - dw * 0.5f, feet.y };
-		const ImVec2 br{ feet.x + dw * 0.5f, feet.y };
-		const ImVec2 tl{ feet.x - dw * 0.5f + lean, feet.y - dh };
-		const ImVec2 tr{ feet.x + dw * 0.5f + lean * 0.35f, feet.y - dh };
-		dl->AddImageQuad(tex, tl, tr, br, bl, { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 }, IM_COL32_WHITE);
+		if (!dl || !img || !img->srv || img->size.x <= 0.0f || img->size.y <= 0.0f || alpha <= 0.0f)
+			return;
+		const float s = box / std::max(img->size.x, img->size.y);
+		const float w = img->size.x * s;
+		const float h = img->size.y * s;
+		const ImVec2 o{ box0.x + (box - w) * 0.5f, box0.y + (box - h) * 0.5f };
+		dl->AddImage((ImTextureID)img->srv, o, { o.x + w, o.y + h }, { 0, 0 }, { 1, 1 }, IM_COL32(255, 255, 255, (int)(std::clamp(alpha, 0.0f, 1.0f) * 255.0f)));
 	}
 
 	void DrawCompileBar(float a_percent, const char* a_overlay, const char* a_caption)
 	{
-		constexpr float kBarW = 560.0f;
+		const float scale = std::max(Util::GetUIScale(), 0.5f);
+		const float mascot = 112.0f * scale;
+		const float gap = 12.0f * scale;
+		const float barW = 520.0f * scale;
 		const float barH = ImGui::GetFrameHeight() * 0.95f;
-		const bool motion = Bearforj::Compat::GetConfig().compileAnimation;
 		const float pct = std::clamp(std::isfinite(a_percent) ? a_percent : 0.0f, 0.0f, 1.0f);
-		static CompileClock clock;
-		static bool loggedAnim = false;
+		static CompileFade fade;
+		static bool logged = false;
 		const double now = ImGui::GetTime();
-		const CompileMood mood = UpdateCompileMood(clock, pct, now);
-		const Image* sprite = CompileSprite(mood, now);
-		if (!loggedAnim) {
-			loggedAnim = true;
-			logger::info("[Bearforj UI] compile overlay: Mish Mish {} (animation {}, sprite {})", sprite ? "ON" : "OFF",
-				motion ? "on" : "off", sprite ? "loaded" : "MISSING");
+		const ImageId face = CompileFace(fade, pct, now);
+		if (face != fade.shown) {
+			fade.previous = fade.shown;
+			fade.shown = face;
+			fade.swapped = now;
+		}
+		const float fadeSec = Bearforj::Compat::GetConfig().compileAnimation ? 0.22f : 0.0f;
+		const float t = fadeSec <= 0.0f || fade.swapped < 0.0 ? 1.0f : std::clamp((float)((now - fade.swapped) / fadeSec), 0.0f, 1.0f);
+		const Image* cur = Img(fade.shown);
+		const Image* prev = Img(fade.previous);
+		if (!logged) {
+			logged = true;
+			logger::info("[Bearforj UI] compile overlay: static Mish Mish {} px (sprite {})", (int)mascot, cur ? "loaded" : "MISSING");
 		}
 
-		const float spriteH = sprite ? 196.0f : 0.0f;
-		const float aspect = sprite && sprite->size.y > 0.0f ? sprite->size.x / sprite->size.y : 0.72f;
-		const float spriteW = spriteH * aspect;
-		const float padTop = sprite ? 84.0f : 0.0f;
-		const float left = spriteW * 0.95f;
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
-		const float rowH = std::max(spriteH + padTop, barH);
-		const ImVec2 bar0{ origin.x + left, origin.y + rowH - barH };
-		const ImVec2 bar1{ bar0.x + kBarW, bar0.y + barH };
+		const float rowH = std::max(mascot, barH);
+		const ImVec2 sprite0{ origin.x, origin.y + (rowH - mascot) * 0.5f };
+		const ImVec2 bar0{ origin.x + mascot + gap, origin.y + (rowH - barH) * 0.5f };
+		const ImVec2 bar1{ bar0.x + barW, bar0.y + barH };
 		auto* dl = ImGui::GetWindowDrawList();
-		const float fillX = bar0.x + kBarW * pct;
+		if (t < 1.0f)
+			DrawStillSprite(dl, prev, sprite0, mascot, 1.0f - t);
+		DrawStillSprite(dl, cur, sprite0, mascot, t);
+
+		const float fillX = bar0.x + barW * pct;
 		dl->AddRectFilled(bar0, bar1, kBlack, barH * 0.5f);
 		if (pct > 0.0f)
 			dl->AddRectFilled(bar0, { std::max(fillX, bar0.x + barH), bar1.y }, kText, barH * 0.5f);
 		dl->AddRect(bar0, bar1, kOutline, barH * 0.5f);
 		if (a_overlay && *a_overlay) {
 			const ImVec2 ts = ImGui::CalcTextSize(a_overlay);
-			const ImVec2 tp{ bar0.x + (kBarW - ts.x) * 0.5f, bar0.y + (barH - ts.y) * 0.5f };
+			const ImVec2 tp{ bar0.x + (barW - ts.x) * 0.5f, bar0.y + (barH - ts.y) * 0.5f };
 			dl->PushClipRect(bar0, { fillX, bar1.y }, true);
 			dl->AddText(tp, kBlack, a_overlay);
 			dl->PopClipRect();
@@ -796,79 +773,7 @@ namespace
 			dl->PopClipRect();
 		}
 
-		float squash = 1.0f, stretch = 1.0f, lean = 0.0f, slip = 0.0f, hop = 0.0f;
-		if (motion && sprite) {
-			const float rate = mood == CompileMood::Rage ? 14.0f : mood == CompileMood::Displeased ? 9.0f : 7.0f;
-			const float amp = mood == CompileMood::Rage ? 0.16f : mood == CompileMood::Displeased ? 0.11f : 0.07f;
-			const float wave = (float)std::sin(now * rate);
-			squash = 1.0f + amp * wave;
-			stretch = 1.0f - amp * wave;
-			lean = (mood == CompileMood::Rage ? 22.0f : 12.0f) * (0.35f + 0.65f * (wave * 0.5f + 0.5f));
-			if (mood == CompileMood::Rejoice) {
-				hop = -std::abs((float)std::sin(now * 7.0)) * spriteH * 0.14f;
-				squash = 1.0f - 0.1f * std::abs((float)std::sin(now * 7.0));
-				stretch = squash > 0.01f ? 1.0f / squash : 1.0f;
-				lean = (float)std::sin(now * 5.0) * 6.0f;
-			}
-			if (mood == CompileMood::Displeased || mood == CompileMood::Rage || mood == CompileMood::Wipe) {
-				const float t = (float)std::fmod(now * (mood == CompileMood::Rage ? 3.4 : 2.2), 1.0);
-				slip = -t * spriteW * 0.28f;
-			}
-		}
-
-		const ImVec2 feet{ fillX - spriteW * 0.05f + slip, bar1.y + hop };
-		if (sprite && sprite->srv) {
-			if (SpriteNeedsPaper(sprite)) {
-				const float dw = spriteW * squash;
-				const float dh = spriteH * stretch;
-				dl->AddRectFilled({ feet.x - dw * 0.5f - 6.0f + lean * 0.15f, feet.y - dh - 6.0f }, { feet.x + dw * 0.5f + 6.0f, feet.y + 3.0f }, kWhite, 12.0f);
-			}
-			AddSpriteQuad(dl, (ImTextureID)sprite->srv, feet, spriteW, spriteH, lean, squash, stretch);
-		}
-		if (motion && sprite && (mood == CompileMood::Displeased || mood == CompileMood::Rage || mood == CompileMood::Wipe)) {
-			for (int i = 0; i < 2; ++i) {
-				const float t = (float)std::fmod(now * 2.6 + i * 0.45, 1.0);
-				const ImVec2 c{ feet.x - spriteW * (0.05f + 0.28f * i) - t * 36.0f, feet.y - 2.0f - t * 8.0f };
-				dl->AddCircleFilled(c, 6.0f, IM_COL32(255, 255, 255, (int)(230 * (1.0f - t))));
-				dl->AddCircle(c, 9.0f + t * 6.0f, IM_COL32(210, 210, 210, (int)(150 * (1.0f - t))), 12, 1.5f);
-			}
-		}
-		if (motion && sprite && mood != CompileMood::Rejoice) {
-			const int drops = mood == CompileMood::Push ? 1 : mood == CompileMood::Rage ? 3 : 2;
-			for (int i = 0; i < drops; ++i) {
-				const float period = mood == CompileMood::Rage ? 0.65f : 1.25f;
-				const float t = (float)std::fmod(now * (1.0 / period) + i * 0.37, 1.0);
-				const ImVec2 d{ feet.x + lean * 0.25f + (i - 1) * 16.0f, feet.y - spriteH * stretch * (0.86f - t * 0.5f) };
-				dl->AddCircleFilled(d, 3.4f, kWhite);
-				dl->AddTriangleFilled({ d.x - 3.4f, d.y - 0.5f }, { d.x + 3.4f, d.y - 0.5f }, { d.x, d.y - 8.0f }, kWhite);
-			}
-		}
-		if (motion && sprite && mood == CompileMood::Wipe) {
-			const float t = (float)std::fmod(now, 1.25) / 1.25f;
-			const float y = feet.y - spriteH * stretch * 0.62f;
-			const float x0 = feet.x - spriteW * 0.22f + lean;
-			const float x1 = x0 + spriteW * 0.55f * t;
-			dl->AddLine({ x0, y + 8.0f }, { x1, y }, kWhite, 5.0f);
-			dl->AddCircleFilled({ x1, y }, 7.0f, kWhite);
-		}
-		if (motion && sprite && mood == CompileMood::Rage) {
-			for (int i = 0; i < 4; ++i) {
-				const float t = (float)std::fmod(now * 1.35 + i * 0.23, 1.0);
-				const float side = (i & 1) ? 1.0f : -1.0f;
-				const ImVec2 c{ feet.x + side * spriteW * 0.32f + lean * 0.2f + std::sin(t * 6.0f + i) * 5.0f, feet.y - spriteH * (0.8f + t * 0.42f) };
-				dl->AddCircle(c, 3.0f + t * 9.0f, IM_COL32(240, 240, 240, (int)(210 * (1.0f - t))), 14, 1.7f);
-			}
-		}
-		if (motion && sprite && mood == CompileMood::Rejoice) {
-			for (int i = 0; i < 5; ++i) {
-				const float a = (float)(now * 2.4 + i * 1.256);
-				const ImVec2 c{ feet.x + std::cos(a) * spriteW * 0.75f, feet.y - spriteH * 0.5f + std::sin(a) * spriteH * 0.22f };
-				dl->AddLine({ c.x - 4, c.y }, { c.x + 4, c.y }, kWhite, 1.7f);
-				dl->AddLine({ c.x, c.y - 4 }, { c.x, c.y + 4 }, kWhite, 1.7f);
-			}
-		}
-
-		ImGui::Dummy({ kBarW + left, rowH + 6.0f });
+		ImGui::Dummy({ mascot + gap + barW, rowH + 6.0f });
 		if (a_caption && *a_caption)
 			MonoLabel(a_caption, kDim);
 	}
@@ -1189,18 +1094,11 @@ namespace
 	// ---------------------------------------------------------------- sections
 	void DrawHeader(Menu& menu)
 	{
-		const float h = ImGui::GetFrameHeight() * 3.4f;
-		const Image* bear = Img(kHeadHappy);
 		const Image* logo = Img(kLogo);
-		const float bearW = bear && bear->size.y > 0.0f ? h * (bear->size.x / bear->size.y) : h * 0.7f;
-		{
-			const ImVec2 p = ImGui::GetCursorScreenPos();
-			ImGui::GetWindowDrawList()->AddRectFilled(p, { p.x + bearW, p.y + h }, kWhite, 10.0f);
-		}
-		DrawImageFit(bear, { bearW, h });
-		ImGui::SameLine();
-		const float logoH = h * 0.92f;
-		const float logoW = logo && logo->size.y > 0.0f ? logoH * (logo->size.x / logo->size.y) : logoH * 1.3f;
+		const float box = 168.0f * std::max(Util::GetUIScale(), 0.5f);
+		const float aspect = logo && logo->size.y > 0.0f ? logo->size.x / logo->size.y : 1.0f;
+		const float logoW = box * aspect;
+		const float logoH = box;
 		DrawImageFit(logo, { logoW, logoH });
 		ImGui::SameLine();
 		ImGui::BeginGroup();
@@ -1218,7 +1116,7 @@ namespace
 		const float bw = ImGui::GetFrameHeight() * 1.6f;
 		ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - bw * 2 - 70.0f - 120.0f);
 		ImGui::BeginGroup();
-		ImGui::Dummy({ 0, h * 0.25f });
+		ImGui::Dummy({ 0, logoH * 0.25f });
 		{
 			StyleScope s;
 			s.Col(ImGuiCol_Border, kOutline);
@@ -1519,8 +1417,8 @@ namespace BearforjMenu
 		ImGui::SetNextWindowBgAlpha(0.85f * a);
 		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, a);
 		if (ImGui::Begin("##bfreporttoast", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav)) {
-			const float wink = 0.72f + 0.28f * std::abs((float)std::sin(ImGui::GetTime() * 9.0));
-			DrawImageFit(Img(kWink) ? Img(kWink) : Img(kHeadHappy), { 64.0f, 64.0f * wink });
+			const float wink = 72.0f * std::max(Util::GetUIScale(), 0.5f);
+			DrawImageFit(Img(kWink) ? Img(kWink) : Img(kHeadHappy), { wink, wink });
 			ImGui::SameLine();
 			ImGui::TextUnformatted(text.c_str());
 		}

@@ -80,8 +80,7 @@ namespace BFUI
 		ImGui::BeginTooltip();
 		if (auto* icon = BearforjMenu::TooltipMascot()) {
 			const ImVec2 p = ImGui::GetCursorScreenPos();
-			ImGui::GetWindowDrawList()->AddRectFilled(p, { p.x + 48.0f, p.y + 48.0f }, IM_COL32(255, 255, 255, 255), 6.0f);
-			ImGui::GetWindowDrawList()->AddImage((ImTextureID)icon, p, { p.x + 48.0f, p.y + 48.0f });
+			ImGui::GetWindowDrawList()->AddImage((ImTextureID)icon, p, { p.x + 48.0f, p.y + 48.0f }, { 0, 0 }, { 1, 1 }, IM_COL32_WHITE);
 			ImGui::Dummy({ 48.0f, 48.0f });
 			ImGui::SameLine();
 		}

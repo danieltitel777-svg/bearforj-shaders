@@ -10,8 +10,7 @@ struct ID3D11ShaderResourceView;
  * Save / Reset to defaults / Clear shader cache in the footer.
  *
  * Images are loaded from Data/Interface/CommunityShaders/Bearforj/ so they can be swapped
- * without rebuilding: logo.png, mishmish_front.png, head_*.png, emotions/{thinking,surprised,
- * happy,proud,wink}.png, emotes/{generation,settings,training,voices}.png.
+ * without rebuilding: logo.png (full helmet, uncropped) and emotions/*.png (straight RGBA).
  *
  * Fonts are never cached across frames: every frame the mono font is looked up in the live
  * atlas (ThemeManager::FindMonoFont), so io.Fonts->Clear() in ReloadFont cannot leave a
@@ -23,7 +22,7 @@ namespace BearforjMenu
 	void Render(Menu& a_menu);
 	/** @brief Releases all textures (menu shutdown / device loss). */
 	void ReleaseAssets();
-	/** @brief Shader-compile overlay: Mish Mish pushes the bar. @p a_caption is the small status line under it. */
+	/** @brief Shader-compile overlay: a small static Mish Mish beside the bar. @p a_caption is the status line under it. */
 	void DrawCompileOverlay(float a_percent, const char* a_overlay, const char* a_caption = nullptr);
 	/** @brief Emotion sprite for setting tooltips. Null until the menu images have loaded. */
 	ID3D11ShaderResourceView* TooltipMascot();
