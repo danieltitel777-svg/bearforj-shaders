@@ -14,9 +14,28 @@
 #define SSPP_BLOOD 6u
 #define SSPP_EMBER 7u  // fire magic: smoldering embers
 #define SSPP_ICE 8u    // frost magic: ice shards
+// 0.6.5. Keep these numbers: features/Screen Space Physical Particles/SSPP_TYPES.md
+#define SSPP_POLLEN 9u
+#define SSPP_FIREFLY 10u
+#define SSPP_BUTTERFLY 11u
+#define SSPP_GNAT 12u
+#define SSPP_FLY 13u
+#define SSPP_LAMP 14u
+#define SSPP_NEEDLE 15u
+#define SSPP_TWIG 16u
+#define SSPP_RESTORATION 17u
+#define SSPP_ALTERATION 18u
+#define SSPP_ILLUSION 19u
+#define SSPP_CONJURATION 20u
+#define SSPP_SHOUT 21u
+#define SSPP_WARD_SHARD 22u
+#define SSPP_WARD_RIPPLE 23u
+#define SSPP_BLOOD_STAIN 24u
+#define SSPP_WATER_STAIN 25u
+#define SSPP_WATER_DRIP 26u
 
 #define SSPP_FLAG_SETTLED 0x100u
-// Bits 16-23 of Kind are the atlas sprite (0 = procedural quad). See atlas.dds.
+// Bits 16-23 are an optional atlas cell. New types leave them 0; map cells from bits 0-7.
 #define SSPP_SPRITE_SHIFT 16u
 
 struct Particle

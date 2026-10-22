@@ -39,13 +39,31 @@ VSOut main(uint vid : SV_VertexID)
 	float width = p.Size, height = p.Size;
 	float4 color = UnpackColor(p.Color);
 	// no popping: time fade in/out (leaves fade over 3 s) and distance fade towards the fade distance
-	float fadeOut = (o.Kind == SSPP_LEAF || o.Kind == SSPP_EMBER || o.Kind == SSPP_ICE) ? 3.0 : 1.0;
+	float fadeOut = (o.Kind == SSPP_LEAF || o.Kind == SSPP_NEEDLE || o.Kind == SSPP_TWIG || o.Kind == SSPP_EMBER || o.Kind == SSPP_ICE || o.Kind == SSPP_BLOOD_STAIN || o.Kind == SSPP_WATER_STAIN || o.Kind == SSPP_POLLEN || o.Kind == SSPP_BUTTERFLY) ? 3.0 : 1.0;
 	float fade = saturate((p.Life - p.Age) / min(fadeOut, p.Life * 0.3)) * saturate(p.Age * 8.0);
 	fade *= saturate((ExtraP2.w - length(rel)) / max(ExtraP2.w * 0.25, 1.0));
 	bool settled = (p.Kind & SSPP_FLAG_SETTLED) != 0;
 	float3 light = LightColor.rgb;
 	uint kind = o.Kind;
-	if ((kind == SSPP_RAIN || kind == SSPP_SPARK || kind == SSPP_SPLASH) && !settled && dot(p.Velocity, p.Velocity) > 1.0) {
+	bool flat = kind == SSPP_BLOOD_STAIN || kind == SSPP_WATER_STAIN || kind == SSPP_WARD_RIPPLE;
+	if (flat) {
+		float s, co;
+		sincos(p.Spin, s, co);
+		right = float3(co, s, 0);
+		up = float3(-s, co, 0);
+		if (kind == SSPP_WARD_RIPPLE) {
+			float grow = 1.0 + p.Age * 6.0;
+			width *= grow;
+			height *= grow;
+			color.rgb *= light * 1.5;
+			color.a *= saturate(1.0 - p.Age / max(p.Life, 0.05));
+		} else {
+			width *= 1.0;
+			height *= 1.0;
+			color.rgb = (kind == SSPP_BLOOD_STAIN ? float3(0.55, 0.06, 0.04) : float3(0.62, 0.7, 0.78)) * light;
+			color.a *= 0.9;
+		}
+	} else if ((kind == SSPP_RAIN || kind == SSPP_SPARK || kind == SSPP_SPLASH || kind == SSPP_WATER_DRIP || kind == SSPP_WARD_SHARD) && !settled && dot(p.Velocity, p.Velocity) > 1.0) {
 		// velocity-stretched streak
 		up = normalize(p.Velocity);
 		right = cross(up, toCam);
@@ -61,6 +79,14 @@ VSOut main(uint vid : SV_VertexID)
 			bool shock = color.b > color.r;  // shock magic: blue-white sparks
 			color.rgb = (shock ? lerp(float3(0.3, 0.5, 1.0), float3(0.85, 0.92, 1.0), heat) : lerp(float3(1.0, 0.25, 0.05), float3(1.0, 0.85, 0.5), heat)) * SparkP.z * (0.4 + heat);
 			color.a = 0.0;  // additive
+		} else if (kind == SSPP_WARD_SHARD) {
+			height = max(speed * 0.015, p.Size * 1.6);
+			color.rgb *= SparkP.z * 0.35;
+			color.a = 0.0;
+		} else if (kind == SSPP_WATER_DRIP) {
+			height = max(speed * 0.02, p.Size * 1.8);
+			color.rgb *= light * SplashP.y;
+			color.a *= 0.75;
 		} else {
 			height = max(speed * 0.015, p.Size);
 			color.rgb *= light * SplashP.y;
@@ -69,17 +95,16 @@ VSOut main(uint vid : SV_VertexID)
 	} else {
 		right = normalize(cross(toCam, float3(0, 0, 1)) + float3(1e-5, 0, 0));
 		up = cross(right, toCam);
-		if (kind == SSPP_LEAF) {
+		if (kind == SSPP_LEAF || kind == SSPP_NEEDLE || kind == SSPP_TWIG) {
 			float s, co;
 			sincos(p.Spin, s, co);
 			float3 r2 = right * co + up * s;
 			up = -right * s + up * co;
 			right = r2;
-			// Needles stay long. Twigs stay a bit thicker than a broad leaf's tumble squash.
-			if (o.Sprite == 5u) {
+			if (kind == SSPP_NEEDLE) {
 				height *= 1.7;
 				width *= 0.45;
-			} else if (o.Sprite == 6u) {
+			} else if (kind == SSPP_TWIG) {
 				height *= 1.15;
 				width *= 0.7;
 			} else {
@@ -106,6 +131,15 @@ VSOut main(uint vid : SV_VertexID)
 			bool shock = color.b > color.r;
 			float3 hot = shock ? float3(0.5, 0.7, 1.0) : float3(1.0, 0.45, 0.1);
 			color.rgb = lerp(float3(0.15, 0.02, 0.0), hot, cool * cool) * SparkP.z * (kind == SSPP_EMBER ? 0.35 : 0.5) * (0.15 + cool);
+			color.a = 0.0;
+		} else if (kind == SSPP_SHOUT) {
+			float grow = 1.0 + p.Age * 2.2;
+			width *= grow;
+			height *= grow;
+			color.rgb *= light * 1.4;
+			color.a *= 0.35 * saturate(1.0 - p.Age / p.Life);
+		} else if (kind == SSPP_FIREFLY || kind == SSPP_RESTORATION || kind == SSPP_ILLUSION || kind == SSPP_WARD_SHARD) {
+			color.rgb *= 2.2;
 			color.a = 0.0;
 		} else if (kind == SSPP_ICE) {
 			float s, co;
@@ -172,13 +206,22 @@ float4 main(VSOut i) : SV_Target
 			float peak = max(i.Color.r, max(i.Color.g, i.Color.b));
 			rgb = albedo * max(peak, 0.65);
 		}
-	} else if (i.Kind == SSPP_RAIN || i.Kind == SSPP_SPARK || i.Kind == SSPP_SPLASH)
+	} else if (i.Kind == SSPP_RAIN || i.Kind == SSPP_SPARK || i.Kind == SSPP_SPLASH || i.Kind == SSPP_WATER_DRIP || i.Kind == SSPP_WARD_SHARD)
 		shape = saturate(1.0 - uv.x * uv.x) * saturate(1.0 - uv.y * uv.y * uv.y * uv.y);
 	else if (i.Kind == SSPP_ICE)
 		shape = step(abs(uv.x) + abs(uv.y) * 0.55, 0.9);  // diamond shard
-	else if (i.Kind == SSPP_LEAF)
+	else if (i.Kind == SSPP_LEAF || i.Kind == SSPP_TWIG)
 		shape = step(uv.x * uv.x + uv.y * uv.y * 0.6 + abs(uv.y) * uv.x * uv.x * 0.8, 0.85);
-	else {
+	else if (i.Kind == SSPP_NEEDLE)
+		shape = saturate(1.0 - abs(uv.x) * 6.0) * saturate(1.0 - uv.y * uv.y);
+	else if (i.Kind == SSPP_WARD_RIPPLE)
+		shape = saturate(1.0 - abs(length(uv) - 0.55) * 7.0);
+	else if (i.Kind == SSPP_BLOOD_STAIN || i.Kind == SSPP_WATER_STAIN) {
+		float r = length(uv);
+		float n = 0.5 + 0.5 * sin(uv.x * 9.0) * sin(uv.y * 7.0);
+		shape = saturate(1.0 - r / (0.82 + 0.12 * n));
+		shape *= shape;
+	} else {
 		float r = dot(uv, uv);
 		shape = saturate(1.0 - r);
 		shape *= shape;

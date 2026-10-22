@@ -47,7 +47,27 @@ struct ScreenSpacePhysicalParticles : Feature
 		kDust,
 		kBlood,
 		kEmber,  // fire magic
-		kIce     // frost magic
+		kIce,    // frost magic
+		// 0.6.5 types. Bits 0-7 only. Do not renumber: SSPP_TYPES.md is the atlas map.
+		kPollen = 9,
+		kFirefly,
+		kButterfly,
+		kGnat,
+		kFly,
+		kLampInsect,
+		kNeedle,
+		kTwig,
+		kRestoration,
+		kAlteration,
+		kIllusion,
+		kConjuration,
+		kShout,
+		kWardShard,
+		kWardRipple,
+		kBloodStain,
+		kWaterStain,
+		kWaterDrip,
+		kKindCount
 	};
 
 	// Cell in Textures/Bearforj/Particles/atlas.dds. 0 keeps the procedural quad.
@@ -92,7 +112,14 @@ struct ScreenSpacePhysicalParticles : Feature
 		bool WindDrift = true;        // blowing snow / dust / debris near the ground in wind
 		float WindDriftDensity = 0.5f;
 		// Bit per Kind (1 << kRain ...). Airborne and resting particles of a set bit are pushed by actors, creatures, wind gusts, spells and shouts.
-		uint32_t ReactMask = (1u << 9) - 1u;
+		uint32_t ReactMask = (1u << 27) - 1u;
+		bool Pollen = true;
+		bool Insects = true;
+		bool WaterDrips = true;
+		bool GroundStains = true;
+		bool SchoolMagic = true;
+		bool ShoutParticles = true;
+		bool WardImpact = true;
 		bool ReactToActors = true;
 		bool SuppressVanilla = true;        // never double precipitation (see cpp)
 		uint32_t ParticleBudget = 160000;  // shared limit for all pools; pools shrink proportionally above it
@@ -237,6 +264,8 @@ struct ScreenSpacePhysicalParticles : Feature
 	std::vector<float> fireTimers;
 	float fireNextScan = 0.0f;
 	void OnHit(const RE::TESHitEvent* a_event);
+	void OnSpellCast(const RE::TESSpellCastEvent* a_event);
+	void UpdateAmbient(float a_dt, float a_rain, float a_snow, bool a_paused, const float3& a_camera);
 
 private:
 	void CreatePool();
@@ -287,4 +316,8 @@ private:
 	{
 		RE::BSEventNotifyControl ProcessEvent(const RE::BGSFootstepEvent* a_event, RE::BSTEventSource<RE::BGSFootstepEvent>*) override;
 	} footstepSink;
+	struct SpellSink : public RE::BSTEventSink<RE::TESSpellCastEvent>
+	{
+		RE::BSEventNotifyControl ProcessEvent(const RE::TESSpellCastEvent* a_event, RE::BSTEventSource<RE::TESSpellCastEvent>*) override;
+	} spellSink;
 };
