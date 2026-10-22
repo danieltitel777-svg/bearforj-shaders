@@ -259,6 +259,12 @@ private:
 	mutable float characterSurfaceWetness = 0.0f;
 	mutable Util::FrameLatch characterWetnessFrame;
 	mutable Util::FrameLatch rainTimerFrame;
+	// Smoothed exterior wetness. The weather record only has a fade percent, and many weathers
+	// have no fade, so the raw value snaps to 1. WeatherTransitionSpeed is the time constant.
+	mutable float smoothedWetness = 0.0f;
+	mutable float smoothedPuddleWetness = 0.0f;
+	mutable bool wetnessRampInit = false;
+	mutable Util::FrameLatch wetnessRampFrame;
 	bool splashesOfStormsLoaded = false;
 
 	// Weather wetness calculation result for debug display

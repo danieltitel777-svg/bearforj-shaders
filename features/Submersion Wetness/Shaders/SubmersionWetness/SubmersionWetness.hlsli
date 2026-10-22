@@ -86,7 +86,7 @@ namespace SubmersionWetness
 					float3 surfaceV = (worldDy * surfaceDx.x - worldDx * surfaceDy.x) * inverseDeterminant;
 					float3 surfaceMetric = abs(determinant) > 1e-8f ? float3(dot(surfaceU, surfaceU), dot(surfaceU, surfaceV), dot(surfaceV, surfaceV)) : float3(1, 0, 1);
 					water += CharacterRainSpots::EvaluateProjection(surfacePosition, surfaceMetric, footprint, projectionIndex,
-								 0.0f, density, flowSlope, heldWeapon) *
+								 density, density, flowSlope, heldWeapon) *
 					         projectionWeights[projectionIndex];
 				}
 			}

@@ -1114,6 +1114,10 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 				float combinedPuddleWetness = std::min(1.0f, currentWeatherResult.puddleWetness + lastWeatherResult.puddleWetness);
 				data.Wetness = combinedWetness;
 				data.PuddleWetness = combinedPuddleWetness;
+				// Precip geometry sometimes is not a rain emitter yet (or at all) while the weather
+				// is already flagged rainy. Without Raining, raindrops, ripples and wall beads never run.
+				if (data.Raining <= 0.001f && combinedWetness > 0.02f)
+					data.Raining = combinedWetness;
 				if (debugSettings.EnableWetnessOverride) {
 					data.Wetness = debugSettings.WetnessOverride.y;
 				}
@@ -1135,6 +1139,36 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 				}
 			}
 		}
+	}
+
+	// Stage the soak. WeatherTransitionSpeed is "how fast wetness appears"; it used to be uploaded
+	// and never read, so surfaces jumped to the weather fade (often instant).
+	{
+		const float targetWetness = data.Wetness;
+		const float targetPuddle = data.PuddleWetness;
+		const std::uint32_t rampFrame = globals::state ? globals::state->frameCount : 0u;
+		const bool rampPaused = globals::game::ui && globals::game::ui->GameIsPaused();
+		if (!wetnessRampInit) {
+			smoothedWetness = 0.0f;
+			smoothedPuddleWetness = 0.0f;
+			wetnessRampInit = true;
+		}
+		if (debugSettings.EnableWetnessOverride)
+			smoothedWetness = targetWetness;
+		if (debugSettings.EnablePuddleOverride)
+			smoothedPuddleWetness = targetPuddle;
+		if (wetnessRampFrame.TryAdvance(rampFrame, !rampPaused) &&
+			(!debugSettings.EnableWetnessOverride || !debugSettings.EnablePuddleOverride)) {
+			const float deltaSeconds = std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, 0.25f);
+			const float tau = 25.0f / std::max(settings.WeatherTransitionSpeed, 0.05f);
+			const float blend = 1.0f - std::exp(-deltaSeconds / tau);
+			if (!debugSettings.EnableWetnessOverride)
+				smoothedWetness += (targetWetness - smoothedWetness) * blend;
+			if (!debugSettings.EnablePuddleOverride)
+				smoothedPuddleWetness += (targetPuddle - smoothedPuddleWetness) * blend;
+		}
+		data.Wetness = smoothedWetness;
+		data.PuddleWetness = smoothedPuddleWetness;
 	}
 
 	static size_t rainTimer = 0;  // size_t for precision
@@ -1204,6 +1238,8 @@ void WetnessEffects::UpdateCharacterRainData(PerFrame& a_data) const
 	if (updateState && !a_data.settings.EnableCharacterRainSpots) {
 		characterSurfaceWetness = 0.0f;
 	} else if (updateState && weatherIntensity >= characterSurfaceWetness) {
+		// weatherIntensity is sqrt of the smoothed exterior wetness, so this tracks the ramp
+		// instead of jumping to 1 on the first rainy frame.
 		characterSurfaceWetness = weatherIntensity;
 	} else if (updateState && (!globals::game::ui || !globals::game::ui->GameIsPaused())) {
 		const float deltaSeconds = std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, kMaximumCharacterFrameDeltaSeconds);
@@ -1263,6 +1299,10 @@ void WetnessEffects::RestoreDefaultSettings()
 	rainFlowSettings = {};
 	characterSurfaceWetness = 0.0f;
 	characterWetnessFrame.Reset();
+	smoothedWetness = 0.0f;
+	smoothedPuddleWetness = 0.0f;
+	wetnessRampInit = false;
+	wetnessRampFrame.Reset();
 	climatePreset = defaultPreset;
 
 	// Apply the default climate preset to ensure settings reflect the preset values

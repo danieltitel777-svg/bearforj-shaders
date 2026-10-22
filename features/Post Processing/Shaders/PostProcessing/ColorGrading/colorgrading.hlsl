@@ -1,3 +1,4 @@
+#include "Common/BearforjLook.hlsli"
 #include "Common/Color.hlsli"
 #include "Common/ColorSpaces.hlsli"
 #include "Common/Math.hlsli"
@@ -863,6 +864,12 @@ float4 PSColorGrading(FullscreenTriangleVSOutput input) : SV_Target
 		color = ColorGrading(color);
 	else
 		color = ApplyLUT(color);
+
+	// Bearforj Crimson grade. ISHDR returns before its own copy when Post Processing owns the
+	// tonemap (DisableVanillaTonemapping is 1 only in that case), so this is the path that runs
+	// in the default setup. Applied on the linear tonemapped color, after the LUT, every frame.
+	if (SharedData::postProcessingSettings.DisableVanillaTonemapping)
+		color = ApplyBearforjCrimson(color, true);
 
 	color = pow(abs(color), inOutGamma.w);
 
