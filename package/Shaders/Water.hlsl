@@ -144,7 +144,7 @@ struct VS_OUTPUT
 #		if defined(FLOWMAP)
 	nointerpolation float2 TexCoord4: TEXCOORD4;
 #		endif
-#		if NUM_SPECULAR_LIGHTS == 0
+#		if NUM_SPECULAR_LIGHTS == 0 || defined(REFRACTIONS)
 	float4 MPosition: TEXCOORD5;
 #		endif
 #	endif
@@ -267,7 +267,7 @@ VS_OUTPUT main(VS_INPUT input)
 
 	vsout.TexCoord1.xyzw = NormalsScroll0 + posAdjust;
 #			else
-#				if !defined(SPECULAR) || (NUM_SPECULAR_LIGHTS == 0)
+#				if !defined(SPECULAR) || (NUM_SPECULAR_LIGHTS == 0) || defined(REFRACTIONS)
 	vsout.MPosition.xyzw = inputPosition.xyzw;
 #				endif
 
@@ -453,7 +453,7 @@ VS_OUTPUT main(WavePatch pc, float3 bary: SV_DomainLocation, const OutputPatch<V
 #				if defined(FLOWMAP)
 	WAVE_LERP(TexCoord4);
 #				endif
-#				if NUM_SPECULAR_LIGHTS == 0
+#				if NUM_SPECULAR_LIGHTS == 0 || defined(REFRACTIONS)
 	WAVE_LERP(MPosition);
 #				endif
 #			endif

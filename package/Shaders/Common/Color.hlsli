@@ -555,7 +555,8 @@ namespace Color
 #	if defined(PSHADER) && defined(CS_UTILITY) && !defined(LIGHT_LIMIT_FIX)
 		if (lightIndex >= MaxVanillaPointLightFlags)
 			return 0;
-		return lightIndex < PackedPointLightFlagVectorSize ? CSUtilityPointLightFlags0[lightIndex] : CSUtilityPointLightFlags1[lightIndex - PackedPointLightFlagVectorSize];
+		const uint packedIndex = lightIndex & (PackedPointLightFlagVectorSize - 1);  // keeps both ternary arms in range when unrolled
+		return lightIndex < PackedPointLightFlagVectorSize ? CSUtilityPointLightFlags0[packedIndex] : CSUtilityPointLightFlags1[packedIndex];
 #	else
 		return 0;
 #	endif

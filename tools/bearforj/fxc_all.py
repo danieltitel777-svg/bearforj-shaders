@@ -49,6 +49,7 @@ for stage, prof in (("HSHADER", "hs_5_0"), ("DSHADER", "ds_5_0")):
     jobs.append(("Lighting.hlsl", prof, "main", [stage, "LANDSCAPE", "TERRAIN_DEFORMATION", "VC", "MODELSPACENORMALS"]))
     jobs.append(("Lighting.hlsl", prof, "main", [stage, "LANDSCAPE", "TERRAIN_DEFORMATION", "VC"]))
     jobs.append(("Water.hlsl", prof, "main", [stage, "WATER", "FOG", "WATER_WAVES", "SPECULAR", "NUM_SPECULAR_LIGHTS=0", "REFLECTIONS", "REFRACTIONS", "DEPTH"]))
+    jobs.append(("Water.hlsl", prof, "main", [stage, "WATER", "FOG", "WATER_WAVES", "SPECULAR", "NUM_SPECULAR_LIGHTS=4", "REFLECTIONS", "REFRACTIONS", "DEPTH"]))  # 0.6.6: lit specular water with refractions (MPosition)
     jobs.append(("Water.hlsl", prof, "main", [stage, "WATER", "FOG", "WATER_WAVES", "UNDERWATER", "REFRACTIONS", "DEPTH"]))
     jobs.append(("Water.hlsl", prof, "main", [stage, "WATER", "FOG", "WATER_WAVES", "STENCIL"]))
     jobs.append(("Water.hlsl", prof, "main", [stage, "WATER", "FOG", "WATER_WAVES", "SIMPLE", "REFRACTIONS", "DEPTH"]))
