@@ -9,6 +9,7 @@
 #include "Skylighting.h"
 #include "WetnessEffects.h"
 #include "TerrainDeformation.h"
+#include "WaterWaves.h"
 #include "Utils/D3D.h"
 
 #define I18N_KEY_PREFIX "feature.submersion_wetness."
@@ -418,23 +419,25 @@ float SubmersionWetness::WaterHeightAt(const RE::TESObjectREFR* a_ref, const RE:
 {
 	if (!a_ref)
 		return -RE::NI_INFINITY;
-	float waterHeight = a_ref->GetWaterHeight();
-	if (waterHeight != -RE::NI_INFINITY)
-		return waterHeight;
-	if (const auto waterManager = RE::TESWaterSystem::GetSingleton()) {
-		for (const auto& waterObject : waterManager->waterObjects) {
-			if (!waterObject)
-				continue;
-			for (const auto& bound : waterObject->multiBounds) {
-				if (bound && bound->size.z <= 10.0f) {
-					const auto c = bound->center;
-					const auto s = bound->size;
-					if (a_pos.x >= c.x - s.x && a_pos.x <= c.x + s.x && a_pos.y >= c.y - s.y && a_pos.y <= c.y + s.y)
-						return c.z;
+	float flat = a_ref->GetWaterHeight();
+	if (flat == -RE::NI_INFINITY) {
+		if (const auto waterManager = RE::TESWaterSystem::GetSingleton()) {
+			for (const auto& waterObject : waterManager->waterObjects) {
+				if (!waterObject || flat != -RE::NI_INFINITY)
+					continue;
+				for (const auto& bound : waterObject->multiBounds) {
+					if (bound && bound->size.z <= 10.0f) {
+						const auto c = bound->center;
+						const auto s = bound->size;
+						if (a_pos.x >= c.x - s.x && a_pos.x <= c.x + s.x && a_pos.y >= c.y - s.y && a_pos.y <= c.y + s.y) {
+							flat = c.z;
+							break;
+						}
+					}
 				}
 			}
 		}
 	}
-	return -RE::NI_INFINITY;
+	return globals::features::waterWaves.DisplacedHeight(a_ref, a_pos, flat);
 }
 

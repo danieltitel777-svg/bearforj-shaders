@@ -7004,5 +7004,21 @@
     "feature.terrain_deformation.sand_raise": "Sand Height",
     "feature.terrain_deformation.sand_raise_tt": "Shallow hollows in sand near the water are lowered, so small shore waves can wash them out.",
     "feature.terrain_deformation.sink_fraction": "Leg Sink",
-    "feature.terrain_deformation.sink_tt": "How much of the raised layer a foot presses down. 0.65 sinks about two thirds of the drift."
+    "feature.terrain_deformation.sink_tt": "How much of the raised layer a foot presses down. 0.65 sinks about two thirds of the drift.",
+    "feature.water_waves.name": "Water Waves",
+    "feature.water_waves.description": "The existing water mesh is pushed into waves. The far water stays flat.",
+    "feature.water_waves.key_1": "Nine waves on the vanilla water mesh",
+    "feature.water_waves.key_2": "The shoreline stays on the flat plane",
+    "feature.water_waves.key_3": "Actors and the camera use the same height",
+    "feature.water_waves.enabled": "Enabled",
+    "feature.water_waves.amplitude": "Wave Height",
+    "feature.water_waves.amplitude_tt": "Height of the longest wave, in game units, before wind. It fades to a flat plane between 4000 and 7000 units.",
+    "feature.water_waves.chop": "Chop",
+    "feature.water_waves.shore": "Shore Length",
+    "feature.water_waves.shore_tt": "How deep the water must be before the waves reach full height. The last 4 units at the beach stay flat, so the edge does not flicker.",
+    "feature.water_waves.sea_scale": "Sea Scale",
+    "feature.water_waves.interior_scale": "Interior Scale",
+    "feature.water_waves.max_tess": "Tessellation",
+    "feature.water_waves.tess_range": "Tessellation Range",
+    "feature.water_waves.tess_tt": "Extra triangles near the camera. At factor 1 the surface matches the untessellated mesh. Rivers and waterfalls are not moved."
 }

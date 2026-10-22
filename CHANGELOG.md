@@ -17,6 +17,7 @@
 - Cold weather shows breath from Wet and Cold's meshes (isparks, CC BY-NC-SA) on NPC Head [Head], and on a few creature nodes when those bones exist.
 - Water keeps the shallow-color normalization that stops orange shallows, the existing shore wetness on sand, and a soft foam tint where the water thins out at the beach. Extra sheets of waves and foam under the surface were not added.
 - Snow, mud and sand stand up (60, 18 and 10 units by default). A foot sinks about 65% of that layer, and the old footprints stay when the raise is zero. The raise fades out before the tessellation range so it meets the flat far ground. Shallow sand hollows near water are lowered. Legs standing in snow pick up a coat up to the drift surface.
+- The existing water mesh is displaced by nine Gerstner waves. Rivers and waterfalls (flowmap) are not moved. The wave height fades to a flat plane between 4000 and 7000 units. Shore depth is one land-height grid shared by the mesh, the camera and actors, so the waterline does not swim with the camera. The last 4 units of depth at the shore stay on that plane. Fog, refraction and caustics use the displaced surface.
 
 ### Русский
 
@@ -33,3 +34,4 @@
 - На холоде видно дыхание. Меши Wet and Cold (isparks, CC BY-NC-SA) крепятся к NPC Head [Head], а у части существ — к их костям, если такие есть.
 - У воды остаётся нормализация мелкого цвета, из‑за которой мель не оранжевая, прежняя мокрота песка у берега и мягкая пена там, где вода сходит на нет. Отдельные слои волн и пены под поверхностью не добавлялись.
 - Снег, грязь и песок приподнимаются (по умолчанию 60, 18 и 10 единиц). Нога проваливается примерно на 65% слоя, а старые следы без подъёма остаются как были. Подъём сходит на нет до границы тесселяции и стыкуется с плоской дальней землёй. Мелкие впадины песка у воды понижаются. Ноги в снегу покрываются до поверхности сугроба.
+- Обычная сетка воды смещается девятью волнами Герстнера. Реки и водопады (flowmap) не двигаются. Высота сходит в плоскую плоскость между 4000 и 7000 единицами. Глубина у берега — одна сетка высоты земли, общая для сетки воды, камеры и актёров, поэтому линия берега не плывёт за камерой. Последние 4 единицы глубины у берега остаются на этой плоскости. Туман, преломление и каустика считаются от смещённой поверхности.

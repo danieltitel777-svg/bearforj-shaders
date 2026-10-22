@@ -1,5 +1,6 @@
 #include "Features/Skin.h"
 #include "Features/SubmersionWetness.h"
+#include "Features/WaterWaves.h"
 #include "Features/WetnessEffects.h"
 #include "Globals.h"
 #include "State.h"
@@ -15,7 +16,7 @@ float Skin::GetWaterHeight(const RE::TESObjectREFR* a_ref, const RE::NiPoint3& a
 		waterHeight = a_ref->GetWaterHeight();
 
 		if (waterHeight != -RE::NI_INFINITY) {
-			return waterHeight;
+			return globals::features::waterWaves.DisplacedHeight(a_ref, a_pos, waterHeight);
 		}
 
 		const auto get_nearest_water_object_height = [&]() {
@@ -42,7 +43,7 @@ float Skin::GetWaterHeight(const RE::TESObjectREFR* a_ref, const RE::NiPoint3& a
 		waterHeight = get_nearest_water_object_height();
 	}
 
-	return waterHeight;
+	return globals::features::waterWaves.DisplacedHeight(a_ref, a_pos, waterHeight);
 }
 
 float4 Skin::GetWetness(RE::BSGeometry* geometry)

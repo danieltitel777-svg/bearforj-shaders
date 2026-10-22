@@ -61,6 +61,7 @@
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
 #include "Features/WaterEffects.h"
+#include "Features/WaterWaves.h"
 #include "Features/WetnessEffects.h"
 #include "Features/Wind/Wind.h"
 #include "I18n/I18n.h"
@@ -316,7 +317,8 @@ namespace
 			&globals::features::hdrDisplay,
 			&globals::features::skin,
 			&globals::features::reverseZ,
-			&globals::features::postProcessing
+			&globals::features::postProcessing,
+			&globals::features::waterWaves
 		};
 		return features;
 	}

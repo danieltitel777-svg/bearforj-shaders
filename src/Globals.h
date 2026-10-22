@@ -47,6 +47,7 @@ struct VanillaFresnel;
 struct VolumetricLighting;
 struct VR;
 struct WaterEffects;
+struct WaterWaves;
 struct SceneSelector;
 struct PerformanceOverlay;
 struct WetnessEffects;
@@ -160,6 +161,7 @@ namespace globals
 		extern VolumetricLighting volumetricLighting;
 		extern VR vr;
 		extern WaterEffects waterEffects;
+		extern WaterWaves waterWaves;
 		extern SceneSelector sceneSelector;
 		extern PerformanceOverlay performanceOverlay;
 		extern WetnessEffects wetnessEffects;

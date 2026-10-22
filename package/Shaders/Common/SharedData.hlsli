@@ -32,7 +32,9 @@ namespace SharedData
 		bool HideSky;             // HideSky flag in WorldSpace, e.g. Blackreach
 		float MipBias;            // Offset to mip level for TAA sharpness
 		float WaterSystemHeight;  // TES::GetWaterHeight at eye-0 in camera-relative Z; -FLT_MAX when no water body found (VR only)
-		float3 pad0;
+		float DisplacedWaterHeight;  // camera-relative Z of the wave surface at the eye, -FLT_MAX if none
+		float CameraBelowWaves;      // 1 when the eye is under that surface
+		float WaveScale;             // 0 when waves are off, else sea or interior scale
 		float4 AmbientSHR;
 		float4 AmbientSHG;
 		float4 AmbientSHB;
@@ -40,7 +42,9 @@ namespace SharedData
 		float4 VRFoveationCenterOffsets;  // xy=left eye center offset, zw=right eye center offset
 		float4 HDRData;
 		float RefractionScale;
-		float3 pad1;
+		float WaveAmplitude;
+		float WaveChop;
+		float WaveShore;
 		WindField::WindTuning WindFieldTuning;
 		float4 WindFieldAmbient;
 		float4 WindFieldPreviousAmbient;
@@ -53,6 +57,11 @@ namespace SharedData
 		uint4 WindFieldActiveCounts;     // x/y: current/previous transient impulse counts, z/w: reserved
 		WindField::TransientWindSource WindFieldTransientImpulses[WindField::TransientImpulseCapacity];
 		WindField::TransientWindSource WindFieldPreviousTransientImpulses[WindField::TransientImpulseCapacity];
+		// World-space land grid shared with WaterWaves::SampleLandZ. Cell size 0 means the grid is not ready.
+		float ShoreOriginX;
+		float ShoreOriginY;
+		float ShoreCellSize;
+		float ShoreCellCount;
 	};
 
 	struct GrassLightingSettings

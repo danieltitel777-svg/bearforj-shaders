@@ -62,6 +62,7 @@
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
 #include "Features/WaterEffects.h"
+#include "Features/WaterWaves.h"
 #include "Features/WetnessEffects.h"
 #include "Features/Wind/Wind.h"
 #include "Menu.h"
@@ -123,6 +124,7 @@ namespace globals
 		VolumetricLighting volumetricLighting{};
 		VR vr{};
 		WaterEffects waterEffects{};
+		WaterWaves waterWaves{};
 		SceneSelector sceneSelector{};
 		PerformanceOverlay performanceOverlay{};
 		WetnessEffects wetnessEffects{};
