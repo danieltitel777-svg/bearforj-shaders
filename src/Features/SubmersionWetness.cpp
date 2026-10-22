@@ -253,6 +253,16 @@ void SubmersionWetness::UpdateActor(RE::Actor* a_actor, float a_dt, float a_rain
 		st.rainProgress = std::max(0.0f, st.rainProgress - a_dt / dryTime);
 	}
 	st.rain = st.rainDarken * std::max(settings.RainCoatStrength, 0.0f);
+
+	bool snowing = false;
+	if (auto* sky = RE::Sky::GetSingleton()) {
+		if (auto* weather = sky->currentWeather)
+			snowing = weather->data.flags.any(RE::TESWeather::WeatherDataFlag::kSnow);
+	}
+	if (snowing && exterior && shelter > 0.2f)
+		st.snow = std::min(1.0f, st.snow + a_dt / 45.0f);
+	else
+		st.snow = std::max(0.0f, st.snow - a_dt / 30.0f);
 }
 
 void SubmersionWetness::Prepass()
@@ -311,7 +321,7 @@ void SubmersionWetness::OnLightingSetupGeometry(RE::BSRenderPass* a_pass)
 	const auto& st = it->second;
 	const float waterCoat = st.soak;
 	const float coat = std::max(waterCoat, st.rain);
-	if (coat <= 0.001f && st.flow <= 0.0f && st.rainProgress <= 0.001f)
+	if (coat <= 0.001f && st.flow <= 0.0f && st.rainProgress <= 0.001f && st.snow <= 0.001f)
 		return;
 
 	const bool fullyUnder = st.depth >= st.height * 0.98f;
@@ -320,6 +330,7 @@ void SubmersionWetness::OnLightingSetupGeometry(RE::BSRenderPass* a_pass)
 	data.SubB = float4(std::clamp(std::max(waterCoat, st.rainDarken) * 1.5f, 0.0f, 1.0f), st.flow, settings.EdgeSoftness, 1.0f);
 	data.SubC = float4(settings.Strength, settings.BeadDensity, settings.HairStrength, settings.ArmorStrength);
 	data.SubD = float4(st.rainProgress, st.rainDarken, st.height, fullyUnder ? 1.0f : 0.0f);
+	data.SubE = float4(st.snow, 0.0f, 0.0f, 0.0f);
 	perGeometryCB->Update(data);
 	ID3D11Buffer* cb = perGeometryCB->CB();
 	globals::d3d::context->PSSetConstantBuffers(9, 1, &cb);

@@ -2899,6 +2899,13 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 		}
 #			endif
 		characterCoatMask *= regionMask;
+#			if defined(SUBMERSION_WETNESS)
+		{
+			float settledSnow = SubmersionWetness::Snow(input.ModelPosition.xyz, worldNormal.xyz);
+			if (settledSnow > 0.001)
+				material.BaseColor = lerp(material.BaseColor, float3(0.72, 0.76, 0.80), settledSnow);
+		}
+#			endif
 		// Droplets and sheen stay on the wet region. Darkening follows the coat and dries back off.
 		float wetAmount = saturate(wetness);
 		float metal = 0.0f;

@@ -13,6 +13,7 @@
 - Rain refraction and the raindrop ripple math already matched the 2026-10-22 AIO build (Raindrops.png and optimized-ggx.hlsli are byte-identical). The AIO Wetness Effects file is an older subset, so it was not copied over the current shader.
 - Raindrop ripples and splashes show on wet ground again. Flat puddles are still stronger, but a slope no longer turns the impact strength to zero.
 - Rain on a character starts as droplets at the head and moves down. The wet area darkens after the droplets. In water, only the part under the surface darkens as he wades. The whole body soaks at once only when it is completely under water. Droplets stay off the submerged part, then run down and thin out as he dries. Hair uses the same rule. Actor darkening follows the stronger 0.13.2 curve (porosity times wetness squared, times 2.4, then a 0.78 absorption).
+- During snowfall a light coat settles on upward surfaces of the player, NPCs and creatures, and melts off when the snow stops. It stays a dusting, not a heavy blanket. Roofs block it.
 
 ### Русский
 
@@ -25,3 +26,4 @@
 - Преломление дождя и математика кругов от капель уже совпадали со сборкой AIO от 2026-10-22 (Raindrops.png и optimized-ggx.hlsli побайтно одинаковые). Файл Wetness Effects из AIO старше нашего, поэтому поверх текущего шейдера он не копировался.
 - Круги и брызги от капель на мокрой земле снова видны. На плоских лужах они сильнее, но наклон больше не обнуляет силу удара.
 - Дождь на персонаже начинается каплями с головы и спускается вниз. Потемнение приходит следом. В воде темнеет только то, что под поверхностью, по мере захода в воду. Весь персонаж промокает сразу только когда он полностью под водой. Капель нет на затопленной части; после выхода они стекают, редеют и пропадают по мере высыхания. Волосы по тем же правилам. Потемнение — кривая 0.13.2: пористость на квадрат мокроты, на 2.4, затем поглощение 0.78.
+- В снегопад на верхние поверхности игрока, NPC и существ ложится лёгкий слой и тает, когда снег кончается. Это пыль, не тяжёлый сугроб. Под крышей снег не садится.

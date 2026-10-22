@@ -70,8 +70,9 @@ struct SubmersionWetness : Feature
 		float4 SubB;
 		float4 SubC;
 		float4 SubD;
+		float4 SubE;
 	};
-	static_assert(sizeof(PerGeometry) == 64);
+	static_assert(sizeof(PerGeometry) == 80);
 
 	struct ActorState
 	{
@@ -85,6 +86,7 @@ struct SubmersionWetness : Feature
 		float rain = 0.0f;          // darkened coat 0..RainCoatStrength
 		float rainProgress = 0.0f;  // head-to-feet droplet front, ahead of rain darkening
 		float rainDarken = 0.0f;    // 0..1 darkening, lags rainProgress
+		float snow = 0.0f;          // light snowfall coat 0..1
 		float skyVisibility = 1.0f;  // precipitation visibility above the head (GPU readback)
 		uint32_t lastSeenFrame = 0;
 	};

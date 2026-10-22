@@ -16,11 +16,29 @@ namespace SubmersionWetness
 		float4 SubB;  // x bead amount 0..1, y emerge flow 0..1, z edge softness (units), w enabled
 		float4 SubC;  // x wetness strength, y bead density, z hair strength, w armor strength
 		float4 SubD;  // x rain progress head-to-feet 0..1, y rain darkening 0..1, z actor height, w 1 when the whole body is under water
+		float4 SubE;  // x snowfall coat 0..1, y drift surface world z, z leg drift amount, w unused
 	};
 
 	bool Active()
 	{
-		return SubB.w > 0.5f && (SubA.w > 0.0f || SubB.x > 0.0f || SubD.x > 0.0f);
+		return SubB.w > 0.5f && (SubA.w > 0.0f || SubB.x > 0.0f || SubD.x > 0.0f || SubE.x > 0.0f || SubE.z > 0.0f);
+	}
+
+	float SnowHash(float3 p)
+	{
+		return frac(sin(dot(floor(p), float3(12.9898f, 78.233f, 37.719f))) * 43758.5453f);
+	}
+
+	/** @brief Light directional snow while it is snowing. Stays well below a full coat. */
+	float Snow(float3 modelPosition, float3 worldNormal)
+	{
+		float s = saturate(SubE.x);
+		if (s <= 0.001f)
+			return 0.0f;
+		float n = SnowHash(modelPosition * 0.17f);
+		float up = saturate(normalize(worldNormal).z);
+		float cut = lerp(0.94f, 0.58f, s);
+		return saturate(smoothstep(cut - 0.1f, cut + 0.1f, up + (n - 0.5f) * 0.28f) * lerp(0.12f, 0.45f, s));
 	}
 
 	float EdgeNoise(float3 p)
