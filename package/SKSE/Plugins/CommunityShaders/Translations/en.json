@@ -6941,5 +6941,16 @@
     "bearforj.report.press": "Press a key... (Esc = cancel)",
     "bearforj.report.dir": "Report folder",
     "bearforj.report.hint": "Nothing is captured until you press the key. If the folder can't be created: SKSE logs/Bearforj/reports.",
-    "tt.257029bba2": "Crimson filmic look (BearforjLook): Adjusts this effect.\nRange 0.0 .. 1.0; recommended: stay near the default, change in small steps.\nPerf cost: ~0 (value only, no extra GPU work)."
+    "tt.257029bba2": "Crimson filmic look (BearforjLook): Adjusts this effect.\nRange 0.0 .. 1.0; recommended: stay near the default, change in small steps.\nPerf cost: ~0 (value only, no extra GPU work).",
+    "menu.settings.screenshot_key_tooltip": "Saves a screenshot and a Mish Mish report (settings, fps, conflicts, the last log lines).\nDefault is F12. Mish Mish winks when the report is written. Nothing is saved until you press the key.",
+    "bearforj.tune.enable": "Turns this part on or off. If the picture does not change, restart the game, then press Save.",
+    "bearforj.tune.quality": "Quality versus speed. Raise it a little at a time: the picture gets cleaner and the frame rate drops. Leave it near the default if you are unsure.",
+    "bearforj.tune.reach": "How far the effect reaches. Larger values cover more of the scene and usually cost more. Move in small steps and watch the picture.",
+    "bearforj.tune.strength": "How strong the effect is. Higher is more visible. If it looks fake, lower it toward the default.",
+    "bearforj.tune.limit": "The point where the effect starts or stops. Nudge it until the artifact (halos, flicker, missing detail) goes away, then stop.",
+    "bearforj.tune.speed": "How fast it changes. Faster reacts sooner and can flicker; slower looks smoother.",
+    "bearforj.tune.color": "Color of this effect. Small shifts read as natural; big shifts look like a filter.",
+    "bearforj.tune.debug": "A debug view. Turn it off while playing or the picture stays technical.",
+    "bearforj.tune.mode": "Picks how the effect is calculated. Try the next entry, look at the picture, and keep the one that stays sharp without killing the frame rate.",
+    "bearforj.tune.generic": "Tune this in small steps and watch the game picture. Stay near the default unless you know you want more or less of the effect, then press Save."
 }

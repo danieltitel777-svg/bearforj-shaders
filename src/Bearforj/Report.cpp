@@ -6,8 +6,11 @@
 #include "Bearforj/WeatherPresets.h"
 
 #include "Feature.h"
+#include "Features/ScreenshotFeature.h"
 #include "Globals.h"
 #include "I18n/I18n.h"
+#include "Menu.h"
+#include "Utils/Input.h"
 
 #include <d3d11.h>
 #include <fstream>
@@ -149,8 +152,39 @@ namespace Bearforj::Report
 
 			g_toast = std::format("{} {}", T("bearforj.report.saved", "Mish Mish saved a report:"), base.filename().string()) + (png ? "" : std::string(" ") + T("bearforj.report.no_png", "(no screenshot: unsupported screen format)"));
 			g_toastUntil = Now() + 3.5;
+			if (globals::features::screenshotFeature.loaded)
+				globals::features::screenshotFeature.captureRequested = true;
 			logger::info("[Bearforj] Mish Mish report: {}", base.string());
 		}
+
+		void RememberKey(int a_vk)
+		{
+			auto& cfg = Compat::GetConfig();
+			cfg.reportKey = a_vk;
+			if (auto* menu = Menu::GetSingleton())
+				menu->GetSettings().ScreenshotKey = { InputCombo::Keyboard(static_cast<uint32_t>(a_vk)) };
+			Compat::SaveConfig();
+		}
+	}
+
+	int ActiveKey()
+	{
+		if (auto* menu = Menu::GetSingleton()) {
+			const auto& combo = menu->GetSettings().ScreenshotKey;
+			if (combo.size() == 1 && combo[0].GetDevice() == InputDeviceType::Keyboard) {
+				const int key = static_cast<int>(combo[0].GetKey());
+				if (key == VK_SNAPSHOT && Compat::GetConfig().reportKey == VK_F12)
+					return VK_F12;
+				return key;
+			}
+		}
+		const int report = Compat::GetConfig().reportKey;
+		return report > 0 ? report : VK_F12;
+	}
+
+	bool OwnsHotkey()
+	{
+		return Compat::GetConfig().devReport;
 	}
 
 	void BeginRebind() { g_rebind = true; }
@@ -176,10 +210,11 @@ namespace Bearforj::Report
 					continue;
 				if (GetAsyncKeyState(vk) & 0x8000) {
 					if (vk != VK_ESCAPE)
-						cfg.reportKey = vk;
+						RememberKey(vk);
+					else
+						Compat::SaveConfig();
 					g_rebind = false;
 					g_wasDown = true;  // don't fire on the binding press
-					Compat::SaveConfig();
 					break;
 				}
 			}
@@ -187,7 +222,9 @@ namespace Bearforj::Report
 		}
 		if (!cfg.devReport || !Foreground())
 			return;
-		const bool down = (GetAsyncKeyState(cfg.reportKey) & 0x8000) != 0;
+		const int key = ActiveKey();
+		const int alt = cfg.reportKey > 0 ? cfg.reportKey : VK_F12;
+		const bool down = ((GetAsyncKeyState(key) & 0x8000) != 0) || (alt != key && (GetAsyncKeyState(alt) & 0x8000) != 0);
 		if (down && !g_wasDown)
 			Capture();  // nothing is captured unless the key is pressed
 		g_wasDown = down;
