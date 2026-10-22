@@ -654,9 +654,12 @@ namespace WetnessEffects
 		float flatnessAmount = smoothstep(SharedData::wetnessEffectsSettings.PuddleMaxAngle, 1.0, minWetnessAngle);
 
 		float4 raindropInfo = float4(0, 0, 1, 0);
-		bool calculateRipples = enablePuddleEffects && SharedData::wetnessEffectsSettings.EnableRipples;
-		bool calculateSplashes = rainWetnessOverride < 0.0 && SharedData::wetnessEffectsSettings.EnableSplashes;
-		float impactCoverage = enableRainFlowEffects ? smoothstep(0.5, 0.9, vertexNormal.z) : 1.0;
+		// Wet ground still gets impacts. Flat puddles are stronger; a slope no longer zeros the ripple.
+		float wetImpact = smoothstep(0.02, 0.2, max(SharedData::wetnessEffectsSettings.Wetness, SharedData::wetnessEffectsSettings.Raining));
+		float rippleStrength = max(flatnessAmount, wetImpact * 0.7);
+		bool calculateRipples = SharedData::wetnessEffectsSettings.EnableRipples && (enablePuddleEffects || wetImpact > 0.0);
+		bool calculateSplashes = SharedData::wetnessEffectsSettings.EnableSplashes && (rainWetnessOverride < 0.0 || wetImpact > 0.0);
+		float impactCoverage = enableRainFlowEffects ? max(smoothstep(0.5, 0.9, vertexNormal.z), wetImpact) : 1.0;
 		bool shouldCalculateRaindrops = (vertexNormal.z > 0.0) &&
 		                                (impactCoverage > 0.0) &&
 		                                (SharedData::wetnessEffectsSettings.Raining > 0.0) &&
@@ -666,7 +669,7 @@ namespace WetnessEffects
 		[branch] if (shouldCalculateRaindrops)
 		{
 			float3 impactPosition = enablePuddleEffects ? puddlePosition : ripplePosition;
-			raindropInfo = GetRainDrops(impactPosition, SharedData::wetnessEffectsSettings.Time, float3(0, 0, 1), flatnessAmount, float2(0, 0), calculateRipples, calculateSplashes);
+			raindropInfo = GetRainDrops(impactPosition, SharedData::wetnessEffectsSettings.Time, float3(0, 0, 1), rippleStrength, float2(0, 0), calculateRipples, calculateSplashes);
 			raindropInfo.w *= impactCoverage;
 		}
 
@@ -708,7 +711,7 @@ namespace WetnessEffects
 		standingWater *= lerp(1.0, heightCoverage, surfaceHeight.y);
 		float puddleCoverage = smoothstep(0.02, 0.1, standingWater);
 		float beadCoverage = 1.0 - smoothstep(0.0, 0.02, standingWater);
-		float3 rippleNormal = normalize(lerp(float3(0, 0, 1), raindropInfo.xyz, lerp(flatnessAmount, 1.0, 0.5)));
+		float3 rippleNormal = normalize(lerp(float3(0, 0, 1), raindropInfo.xyz, lerp(rippleStrength, 1.0, 0.5)));
 		state.normal = normalize(lerp(shadingNormal, rippleNormal, puddleCoverage));
 
 		if (enableRainFlowEffects) {
