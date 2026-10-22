@@ -1,0 +1,31 @@
+{
+  "id": "weather_nat_cs3",
+  "name": "NAT.CS III",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/139567",
+  "plugins": [
+    "NAT.ENB - ESP WEATHER PLUGIN.esp",
+    "NAT.ENB III.esp",
+    "NAT.CS III.esp",
+    "NAT.CS.esp",
+    "NAT-ENB.esp",
+    "NAT-CS.esp",
+    "NAT.ENB - ESP WEATHER PLUGIN v3.1.1C - Fixed.esp"
+  ],
+  "notes": "Has its own filmic tonemap + HDR sun; Bearforj look kept light to avoid double tonemap. Requires Cloud Shadows + Skylighting (both in Open Shaders core).",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.15,
+      "Warmth": 0.3,
+      "NightLift": 0.3,
+      "TonemapMix": 35
+    },
+    "PhysicalSky": {
+      "vanillaMix": 0.35
+    },
+    "WetnessEffects": {
+      "MaxRainWetness": 1.0,
+      "WeatherTransitionSpeed": 3.0
+    }
+  }
+}

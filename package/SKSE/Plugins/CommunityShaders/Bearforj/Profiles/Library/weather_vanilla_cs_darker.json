@@ -1,0 +1,19 @@
+{
+  "id": "weather_vanilla_cs_darker",
+  "name": "Vanilla Weathers for CS + Darker Nights (Oct 2026)",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/194556",
+  "plugins": [
+    "Darker Nights For Vanilla Weathers For CS.esp",
+    "Darker Nights for Vanilla CS.esp"
+  ],
+  "notes": "Darker nights addon (8 Oct 2026) for Vanilla CS; night lift kept low so torches matter. Author: game brightness min, then +5 notches.",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.3,
+      "Warmth": 0.45,
+      "NightLift": 0.1,
+      "TonemapMix": 60
+    }
+  }
+}

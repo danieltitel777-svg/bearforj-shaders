@@ -1,0 +1,12 @@
+{
+  "id": "light_lux_orbis",
+  "name": "Lux Orbis (exteriors)",
+  "kind": "lighting",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/56095",
+  "plugins": [
+    "Lux Orbis.esp",
+    "Lux Orbis - Master plugin.esm"
+  ],
+  "notes": "Exterior lights only; no Bearforj changes needed.",
+  "patch": {}
+}

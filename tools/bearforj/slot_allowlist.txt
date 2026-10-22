@@ -1,0 +1,13 @@
+Effect.hlsl VSHADER: b12 <- ['PerFrame', 'VS_PerFrame']
+Lighting.hlsl PSHADER: b3 <- ['SpringField', 'StrictLightData']
+Lighting.hlsl PSHADER: s4 <- ['SampEnvSampler', 'SampParallaxSampler']
+Lighting.hlsl PSHADER: s5 <- ['SampEnvMaskSampler', 'SampRMAOSSampler']
+Lighting.hlsl PSHADER: t111 <- ['Normal1', 'ResponseFields']
+Lighting.hlsl PSHADER: t112 <- ['ResponseFields', 'Rmaos1']
+Lighting.hlsl PSHADER: t4 <- ['TexEnvSampler', 'TexParallaxSampler']
+Lighting.hlsl PSHADER: t5 <- ['TexEnvMaskSampler', 'TexRMAOSSampler']
+Lighting.hlsl VSHADER: b12 <- ['PerFrame', 'VS_PerFrame']
+Sky.hlsl PSHADER: t17 <- ['DepthTexture', 'TexDepthSampler']
+# Bearforj: PS b9 = SubmersionPerGeometry. PreviousBonesBuffer (Common/Skinned.hlsli) is declared in PS too but only read
+# by the vertex stage; nothing binds PS b9 except SubmersionWetness.cpp:312. No free PS cbuffer slot (b13 = VR).
+Lighting.hlsl PSHADER: b9 <- ['PreviousBonesBuffer', 'SubmersionPerGeometry']

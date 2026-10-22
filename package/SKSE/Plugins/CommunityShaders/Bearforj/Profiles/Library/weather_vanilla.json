@@ -1,0 +1,16 @@
+{
+  "id": "weather_vanilla",
+  "name": "Vanilla / no weather mod",
+  "kind": "weather",
+  "url": "",
+  "plugins": [],
+  "notes": "Bearforj default look (Crimson Desert style).",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.35,
+      "Warmth": 0.5,
+      "NightLift": 0.45,
+      "TonemapMix": 100
+    }
+  }
+}

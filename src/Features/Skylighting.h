@@ -1,0 +1,225 @@
+#pragma once
+
+#include "Buffer.h"
+
+#include <array>
+#include <atomic>
+
+/** @brief Simulates realistic ambient lighting by calculating sky occlusion via a 3D probe array. */
+struct Skylighting : Feature
+{
+private:
+	static constexpr std::string_view MOD_ID = "139352";
+
+public:
+	virtual bool SupportsVR() override { return true; };
+
+	virtual inline std::string GetName() override { return "Skylighting"; }
+	virtual std::string GetDisplayName() override { return T("feature.skylighting.name", "Skylighting"); }
+	virtual inline std::string GetShortName() override { return "Skylighting"; }
+	virtual inline std::string GetFeatureModLink() override { return MakeNexusModURL(MOD_ID); }
+	virtual inline std::string_view GetShaderDefineName() override { return "SKYLIGHTING"; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kLighting; }
+	/** @brief Returns a description and list of key features for the UI summary. */
+	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
+	{
+		return { T("feature.skylighting.description", "Simulates realistic ambient lighting by calculating sky occlusion and directional lighting, providing more accurate and natural illumination in outdoor environments."),
+			{ T("feature.skylighting.key_feature_1", "Sky occlusion calculation for ambient lighting"),
+				T("feature.skylighting.key_feature_2", "Directional skylighting based on environment geometry"),
+				T("feature.skylighting.key_feature_3", "Enhanced ambient lighting for outdoor scenes"),
+				T("feature.skylighting.key_feature_4", "Support for varying sky illumination intensities"),
+				T("feature.skylighting.key_feature_5", "Integration with existing lighting systems") } };
+	};
+
+	virtual bool HasShaderDefine(RE::BSShader::Type) override { return true; };
+
+	virtual void RestoreDefaultSettings() override;
+	/** @brief Draws the ImGui settings panel for Skylighting configuration. */
+	virtual void DrawSettings() override;
+
+	virtual void LoadSettings(json& o_json) override;
+	virtual void SaveSettings(json& o_json) override;
+
+	/** @brief Creates GPU resources including occlusion textures, probe arrays, and samplers. */
+	virtual void SetupResources() override;
+	/** @brief Releases cached compute shaders and recompiles them. */
+	virtual void ClearShaderCache() override;
+	/** @brief Compiles the probe update compute shader from HLSL source. */
+	void CompileComputeShaders();
+
+	/** @brief Dispatches the probe update compute shader during the prepass stage. */
+	virtual void Prepass() override;
+
+	/** @brief Installs rendering hooks and registers event handlers after plugin load. */
+	virtual void PostPostLoad() override;
+	/** @brief Invalidates probe state when a save finishes loading. */
+	virtual void GameLoaded() override;
+	/** @brief Queues probe invalidation for loading-screen transitions. */
+	virtual void OnSceneTransitionReset(bool opening) override;
+	/** @brief Exposes the probe rebuild command through DevBench. */
+	virtual void RegisterUxActions() override;
+
+	//////////////////////////////////////////////////////////////////////////////////
+
+	struct Settings
+	{
+		bool EnableSkylighting = true;
+		static constexpr float kWorldCellSize = 4096.0f;
+		static constexpr float kMinProbeFieldSizeCells = 10000.0f / kWorldCellSize;
+		static constexpr float kMaxProbeFieldSizeCells = 8.0f;
+		float MaxZenith = 3.1415926f / 2.f;  // 90 deg
+		float MinDiffuseVisibility = 0.1f;
+		float MinSpecularVisibility = 0.1f;
+		uint ProbeGridQuality = 2;
+		float ProbeArrayWorldSizeCells = kMinProbeFieldSizeCells;
+		bool EnableIncrementalProbeUpdates = false;
+		uint StableSliceCount = 16;
+		bool EnableReducedUpdateFrequency = false;
+		uint OcclusionUpdateInterval = 1;
+		uint ProbeUpdateInterval = 1;
+	} settings;
+
+	struct SkylightingCB
+	{
+		REX::W32::XMFLOAT4X4 OcclusionViewProj;
+		float4 OcclusionSHBasis4Pi;
+
+		float3 PosOffset;  // cell origin in camera model space
+		uint _pad0;
+		uint ArrayOrigin[3];  // xyz: array origin, w: max accum frames
+		uint _pad1;
+		int ValidMargin[4];
+
+		float MinDiffuseVisibility;
+		float MinSpecularVisibility;
+		uint ProbeDataReady;
+		uint ShadowDataAvailable;
+		uint ArrayDims[3];
+		float ProbeArrayWorldSize;
+
+		uint Enabled;
+		uint _pad4[3];
+
+		uint SliceStart;
+		uint SliceCount;
+		uint _pad5[2];
+	};
+	static_assert(sizeof(SkylightingCB) % 16 == 0);
+
+	/**
+	 * @brief Builds the skylighting constant buffer data from current probe array state.
+	 * @param a_inWorld Whether the player is currently in an exterior worldspace.
+	 * @return Populated SkylightingCB structure, or zeroed if not in world or map menu is open.
+	 */
+	SkylightingCB GetCommonBufferData(bool a_inWorld);
+
+	winrt::com_ptr<ID3D11SamplerState> comparisonSampler = nullptr;
+
+	Texture2D* texOcclusion = nullptr;
+	eastl::unique_ptr<Texture3D> texProbeArray;
+	eastl::unique_ptr<Texture3D> texAccumFramesArray;
+	eastl::unique_ptr<Texture3D> texShadowBitmask;
+	eastl::unique_ptr<Texture3D> texShadowVisibility;
+
+	winrt::com_ptr<ID3D11ComputeShader> probeUpdateCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> occlusionOnlyProbeUpdateCompute = nullptr;
+
+	// misc parameters
+	uint probeArrayDims[3] = { 256, 256, 128 };
+	float occlusionDistance = 10000.f;
+	// Slack below the probe grid for eye movement between the grid update and the occlusion render.
+	static constexpr float OCCLUSION_BELOW_GRID_MARGIN = 512.f;
+
+	// cached variables
+	std::atomic_bool queuedResetSkylighting{ true };
+	bool inOcclusion = false;
+	// World height of the probe grid's bottom layer, from the snapped grid origin.
+	float probeGridBottomZ = -FLT_MAX;
+	REX::W32::XMFLOAT4X4 OcclusionTransform;
+	float4 OcclusionSHBasis4Pi;
+	uint frameCount = 0;
+
+	/** @brief Requests a probe rebuild on the render thread. */
+	void ResetSkylighting();
+
+	std::chrono::time_point<std::chrono::system_clock> lastUpdateTimer = std::chrono::system_clock::now();
+
+	//////////////////////////////////////////////////////////////////////////////////
+
+	// Hooks
+	struct BSLightingShaderProperty_GetPrecipitationOcclusionMapRenderPassesImpl
+	{
+		static RE::BSShaderProperty::RenderPassArray* thunk(RE::BSLightingShaderProperty* property, RE::BSGeometry* geometry, uint32_t renderMode, RE::BSGraphics::BSShaderAccumulator* accumulator);
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	/** @brief Renders the skylighting occlusion map using the precipitation rendering system. */
+	void RenderOcclusion();
+
+	struct Main_Precipitation_RenderOcclusion
+	{
+		static void thunk();
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	/** @brief Forces two-sided utility rendering while the interior occlusion mask is built. */
+	struct BSUtilityShader_SetupGeometry
+	{
+		static void thunk(RE::BSShader* a_shader, RE::BSRenderPass* a_pass, uint32_t a_renderFlags);
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	/** @brief Restores utility raster state after interior occlusion geometry. */
+	struct BSUtilityShader_RestoreGeometry
+	{
+		static void thunk(RE::BSShader* a_shader, RE::BSRenderPass* a_pass, uint32_t a_renderFlags);
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct SetViewFrustum
+	{
+		static void thunk(RE::NiCamera* a_camera, RE::NiFrustum* a_frustum);
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct SetViewFrustumVR
+	{
+		static void thunk(RE::NiCamera* a_camera, RE::NiFrustum* a_frustum, uint a_eyeIndex);
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+private:
+	bool HasShadowData() const;
+	static constexpr uint probeHistoryWarmupFrames = 60;
+	float3 GetProbeCellSize() const;
+	float3 GetProbeCell(float3 eyePosition) const;
+	bool HasProbeResources() const;
+	void ClearProbes();
+	bool probeDataReady = false;
+	float3 previousProbeCell = {};
+	float3 pendingProbeCell = {};
+	uint sliceCursor = 0;
+	uint sliceCaptureMask = 0;
+	uint activeSliceCount = 0;
+	uint forcedFullUpdateFrames = probeHistoryWarmupFrames;
+	uint dispatchSliceStart = 0;
+	uint dispatchSliceCount = 0;
+	uint lastProbeUpdateCapture = static_cast<uint>(-1);
+	uint lastProbeUpdateFrame = static_cast<uint>(-1);
+	uint occlusionCaptureCorner = 0;
+	uint nextOcclusionCorner = 0;
+	static std::array<uint, 3> GetProbeArrayDims(uint quality);
+	void CreateProbeResources(const std::array<uint, 3>& dimensions);
+	void ApplyProbeGrid();
+	uint activeProbeGridQuality = 2;
+	uint32_t* GetRasterCullMode() const;
+	void BeginInteriorOcclusionGeometry();
+	void EndInteriorOcclusionGeometry();
+
+	uint lastOcclusionRenderFrame = static_cast<uint>(-1);
+	std::optional<bool> previousInteriorState;
+	bool previousShadowDataAvailable = true;
+	bool forceInteriorOcclusionTwoSided = false;
+	uint32_t savedRasterCullMode = 0;
+	uint32_t rasterCullOverrideDepth = 0;
+};

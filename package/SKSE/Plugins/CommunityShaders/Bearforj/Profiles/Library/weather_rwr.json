@@ -1,0 +1,25 @@
+{
+  "id": "weather_rwr",
+  "name": "Real Weathers Remastered (2026)",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/168776",
+  "plugins": [
+    "Real Weathers Remastered.esp",
+    "RealWeathersRemastered.esp",
+    "Real Weathers.esp",
+    "RealWeathers.esp",
+    "Real Weathers Remastered - Natural and Realistic Weathers for Skyrim - Powered by Community Shaders.esp"
+  ],
+  "notes": "Newest hyped CS weather (v2.1.0, Jul 2026). Photoreal post-processing of its own -> Bearforj look almost off. Requires Smoother Skies. Author: Jiaye builds unsupported, LL/IBL experimental.",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.05,
+      "Warmth": 0.2,
+      "NightLift": 0.2,
+      "TonemapMix": 15
+    },
+    "PhysicalSky": {
+      "vanillaMix": 0.5
+    }
+  }
+}

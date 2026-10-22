@@ -1,0 +1,19 @@
+{
+  "id": "weather_vanilla_cs",
+  "name": "Vanilla Weathers for CS",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/165393",
+  "plugins": [
+    "Vanilla Weathers for CS.esp",
+    "Vanilla CS.esp"
+  ],
+  "notes": "",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.25,
+      "Warmth": 0.45,
+      "NightLift": 0.4,
+      "TonemapMix": 70
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "weather_azurite_cs",
+  "name": "Azurite III CS / Azurite III Enhanced",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/162153",
+  "plugins": [
+    "Azurite Weathers.esp",
+    "Azurite III CS.esp",
+    "Azurite Weathers III - Enhanced.esp"
+  ],
+  "notes": "Enhanced: https://www.nexusmods.com/skyrimspecialedition/mods/150269. Own filmic tonemap.",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.15,
+      "Warmth": 0.4,
+      "NightLift": 0.35,
+      "TonemapMix": 35
+    }
+  }
+}

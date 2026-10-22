@@ -1,0 +1,21 @@
+{
+  "id": "weather_nirn_whispers",
+  "name": "Nirn Whispers Weathers",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/161243",
+  "plugins": [
+    "Nirn Whispers.esp",
+    "NirnWhispers.esp",
+    "Nirn Whispers.esm",
+    "NirnWhispers.esm"
+  ],
+  "notes": "Ships optional CS/OS settings overrides; those load via the Overrides system and win over this profile.",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.2,
+      "Warmth": 0.4,
+      "NightLift": 0.35,
+      "TonemapMix": 60
+    }
+  }
+}

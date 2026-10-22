@@ -1,0 +1,381 @@
+#include "VolumetricLighting.h"
+#include "Bearforj/TipUI.h"
+
+#include "I18n/I18n.h"
+#include "InteriorSun.h"
+#include "ShaderCache.h"
+#include "State.h"
+#include "Utils/Game.h"
+#include "Utils/UI.h"
+
+#define I18N_KEY_PREFIX "feature.volumetric_lighting."
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+	VolumetricLighting::TextureSize,
+	Width,
+	Height,
+	Depth);
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+	VolumetricLighting::Settings,
+	ExteriorEnabled,
+	ExteriorQuality,
+	ExteriorCustomSize,
+	InteriorEnabled,
+	InteriorQuality,
+	InteriorCustomSize);
+
+void VolumetricLighting::DrawSettings()
+{
+	// VR pre-allocates VL render targets at boot, so a runtime toggle can't
+	// resize them -- gate only in VR. Non-VR resizes live.
+	if (BFUI::Checkbox(T(TKEY("enable_exteriors"), "Enable Volumetric Lighting in Exteriors"), &settings.ExteriorEnabled))
+		SetupVL();
+	if (globals::game::isVR)
+		Util::UI::RestartGatedAnnotate(bootSnapshot, settings, &Settings::ExteriorEnabled,
+			T(TKEY("enable_exteriors_tooltip"), "Volumetric god-rays / fog scattering in exterior cells."));
+
+	if (settings.ExteriorEnabled)
+		DrawVolumetricLightingSettings(settings.ExteriorQuality, settings.ExteriorCustomSize, false, !inInterior);
+
+	if (BFUI::Checkbox(T(TKEY("enable_interiors"), "Enable Volumetric Lighting in Interiors"), &settings.InteriorEnabled))
+		SetupVL();
+	if (globals::game::isVR)
+		Util::UI::RestartGatedAnnotate(bootSnapshot, settings, &Settings::InteriorEnabled,
+			T(TKEY("enable_interiors_tooltip"), "Volumetric god-rays / fog scattering in interior cells."));
+
+	if (settings.InteriorEnabled)
+		DrawVolumetricLightingSettings(settings.InteriorQuality, settings.InteriorCustomSize, true, inInterior);
+}
+
+void VolumetricLighting::DrawVolumetricLightingSettings(int32_t& quality, TextureSize& customSize, const bool isInterior, const bool inLocationType)
+{
+	auto& [Width, Height, Depth] = FetchCurrentSizeInUnits(isInterior);
+	const char* qualityNames[] = {
+		T(TKEY("quality_low"), "Low"),
+		T(TKEY("quality_medium"), "Medium"),
+		T(TKEY("quality_high"), "High"),
+		T(TKEY("quality_custom"), "Custom")
+	};
+
+	if (BFUI::SliderInt(isInterior ? T(TKEY("interior_quality"), "Interior Quality") : T(TKEY("exterior_quality"), "Exterior Quality"), &quality, 0, static_cast<uint8_t>(Quality::Count) - 1, qualityNames[std::clamp(quality, 0, static_cast<int32_t>(Quality::Count) - 1)], ImGuiSliderFlags_AlwaysClamp)) {
+		if (inLocationType)
+			SetupVL();
+	}
+
+	const bool isCustomQuality = static_cast<Quality>(quality) == Quality::Custom;
+	if (!isCustomQuality)
+		ImGui::BeginDisabled();
+
+	if (BFUI::SliderInt(isInterior ? T(TKEY("interior_width"), "Interior Width") : T(TKEY("exterior_width"), "Exterior Width"), &Width, 1, 20, FromUnits(Width, 32), ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput)) {
+		customSize.Width = Width * 32;
+		if (inLocationType)
+			SetupVL();
+	}
+
+	if (BFUI::SliderInt(isInterior ? T(TKEY("interior_height"), "Interior Height") : T(TKEY("exterior_height"), "Exterior Height"), &Height, 1, 20, FromUnits(Height, 32), ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput)) {
+		customSize.Height = Height * 32;
+		if (inLocationType)
+			SetupVL();
+	}
+
+	if (BFUI::SliderInt(isInterior ? T(TKEY("interior_depth"), "Interior Depth") : T(TKEY("exterior_depth"), "Exterior Depth"), &Depth, 1, 64, FromUnits(Depth, 10), ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput)) {
+		customSize.Depth = Depth * 10;
+		if (inLocationType)
+			SetupVL();
+	}
+
+	if (!isCustomQuality)
+		ImGui::EndDisabled();
+}
+
+inline const char* VolumetricLighting::FromUnits(const int32_t value, const int32_t unitScale)
+{
+	static std::string s;
+	s = std::to_string(value * unitScale);
+	return s.c_str();
+}
+
+VolumetricLighting::TextureSize& VolumetricLighting::FetchCurrentSizeInUnits(const bool interior)
+{
+	auto& size = interior ? interiorSizeInUnits : exteriorSizeInUnits;
+	if (interior) {
+		switch (static_cast<Quality>(settings.InteriorQuality)) {
+		case Quality::Low:
+			size = *gVolumetricLightingSizeLow;
+			break;
+		case Quality::Medium:
+			size = *gVolumetricLightingSizeMedium;
+			break;
+		case Quality::High:
+			size = defaultSizeHigh;
+			break;
+		case Quality::Custom:
+			size = settings.InteriorCustomSize;
+			break;
+		default:
+			break;
+		}
+	} else {
+		switch (static_cast<Quality>(settings.ExteriorQuality)) {
+		case Quality::Low:
+			size = *gVolumetricLightingSizeLow;
+			break;
+		case Quality::Medium:
+			size = *gVolumetricLightingSizeMedium;
+			break;
+		case Quality::High:
+			size = defaultSizeHigh;
+			break;
+		case Quality::Custom:
+			size = settings.ExteriorCustomSize;
+			break;
+		default:
+			break;
+		}
+	}
+
+	size.Height /= 32;
+	size.Width /= 32;
+	size.Depth /= 10;
+
+	return size;
+}
+
+void VolumetricLighting::LoadSettings(json& o_json)
+{
+	settings = o_json;
+	settings.ExteriorQuality = std::clamp(settings.ExteriorQuality, 0, static_cast<int32_t>(Quality::Count) - 1);
+	settings.InteriorQuality = std::clamp(settings.InteriorQuality, 0, static_cast<int32_t>(Quality::Count) - 1);
+	// Custom sizes are stored in texels; the sliders only offer whole 32/32/10 texel steps
+	for (auto* size : { &settings.ExteriorCustomSize, &settings.InteriorCustomSize }) {
+		size->Width = std::clamp(size->Width, 32, 640);
+		size->Height = std::clamp(size->Height, 32, 640);
+		size->Depth = std::clamp(size->Depth, 10, 640);
+	}
+	// Mirror the menu toggle's immediate refresh. initialised gates this: EarlyPrepass's
+	// first run always calls SetupVL itself and is what establishes inInterior, so a
+	// settings load before that has run would otherwise set up the wrong interior/exterior.
+	if (loaded && initialised && gVolumetricLightingSizeHigh)
+		SetupVL();
+}
+
+void VolumetricLighting::SaveSettings(json& o_json)
+{
+	o_json = settings;
+}
+
+void VolumetricLighting::RestoreDefaultSettings()
+{
+	settings = {};
+	if (globals::game::isVR)
+		Util::ResetGameSettingsToDefaults(hiddenVRSettings);
+	// Same staleness fix as LoadSettings: without this, "Restore Defaults" doesn't
+	// take effect until the next interior/exterior transition.
+	if (loaded && initialised && gVolumetricLightingSizeHigh)
+		SetupVL();
+}
+
+void VolumetricLighting::PostPostLoad()
+{
+	bootSnapshot.LatchIfNeeded(settings);
+	if (globals::game::isVR) {
+		if (settings.ExteriorEnabled || settings.InteriorEnabled)
+			EnableBooleanSettings(hiddenVRSettings, GetName());
+		auto address = REL::RelocationID(100475, 0).address() + 0x45b;  // AE not needed, VR only hook
+		logger::info("[{}] Hooking CopyResource at {:x}", GetName(), address);
+		REL::safe_fill(address, REL::NOP, 7);
+		stl::write_thunk_call<CopyResource>(address);
+
+		// Skip volumetric lighting rendering
+		REL::safe_write(REL::RelocationID(35560, 0).address() + REL::Relocate(0x254, 0), &REL::JMP8, 1);
+		// Move it to render after depth to ensure camera matches rest of scene
+		stl::write_thunk_call<RenderDepth>(REL::RelocationID(35560, 0).address() + REL::Relocate(0x2EE, 0));
+	}
+
+	gVolumetricLightingSizeLow = reinterpret_cast<TextureSize*>(REL::RelocationID(527970, 414916).address());
+	gVolumetricLightingSizeMedium = reinterpret_cast<TextureSize*>(REL::RelocationID(527973, 414919).address());
+	gVolumetricLightingSizeHigh = reinterpret_cast<TextureSize*>(REL::RelocationID(527976, 414922).address());
+	defaultSizeHigh = *gVolumetricLightingSizeHigh;
+
+	// Ensure the VL raymarch compute shader is only dispatched once, rather than once for every level of depth
+	// The updated raymarch shader iterates through the depth now instead
+	// Skip the first call, the second call has read/write texture setup in the correct order
+	REL::safe_fill(REL::RelocationID(100309, 107023).address() + REL::Relocate(0xA4, 0x406), REL::NOP, 3);
+	// Exit the loop after the first iteration
+	REL::safe_fill(REL::RelocationID(100309, 107023).address() + REL::Relocate(0x147, 0x4A9), REL::NOP, 6);
+}
+
+void VolumetricLighting::SetupResources()
+{
+	vlDataCB = new ConstantBuffer(ConstantBufferDesc<VLData>());
+}
+
+void VolumetricLighting::EarlyPrepass()
+{
+	// globals::game::graphicsState->screenWidth/Height is the desktop preview window's resolution on
+	// VR, not the HMD's -- use the same nominal size UpdateGrass/HiZPyramid derive from the live
+	// render target.
+	int32_t width = static_cast<int32_t>(globals::state->screenSize.x);
+	int32_t height = static_cast<int32_t>(globals::state->screenSize.y);
+
+	if (width != fullScreenX || height != fullScreenY) {
+		blurHCS = nullptr;
+		blurVCS = nullptr;
+	}
+
+	fullScreenX = width;
+	fullScreenY = height;
+
+	// The blur targets are allocated at the full screen size, but under dynamic resolution only
+	// the top-left render area holds valid data. Clamping and dispatching against the full size
+	// makes the blur taps read stale pixels from outside that area along the right/bottom edges.
+	const float2 renderSize = Util::ConvertToDynamic(float2{ (float)width, (float)height });
+
+	vlData.screenX = std::max(1, static_cast<int32_t>(renderSize.x));
+	vlData.screenY = std::max(1, static_cast<int32_t>(renderSize.y));
+	vlData.screenXMin1 = vlData.screenX - 1;
+	vlData.screenYMin1 = vlData.screenY - 1;
+	vlData.eyeWidth = globals::game::isVR ? vlData.screenX / 2 : vlData.screenX;
+	const int32_t maximumEyeWidth = globals::game::isVR ? vlData.screenX - vlData.eyeWidth : vlData.screenX;
+	vlData.horizontalGroupsPerEye =
+		(maximumEyeWidth + BlurThreadGroupSizeX - BlurWindow * 2u - 1u) / (BlurThreadGroupSizeX - BlurWindow * 2u);
+	vlDataCB->Update(vlData);
+
+	const auto interiorCell = RE::TES::GetSingleton()->interiorCell;
+	const bool currentlyInInterior = interiorCell != nullptr;
+
+	const bool currentlyInInteriorWithSun = InteriorSun::IsInteriorWithSun(interiorCell);
+
+	if (initialised && currentlyInInterior == inInterior && currentlyInInteriorWithSun == inInteriorWithSun)
+		return;
+
+	initialised = true;
+	inInterior = currentlyInInterior;
+	inInteriorWithSun = currentlyInInteriorWithSun;
+	SetupVL();
+}
+
+void VolumetricLighting::SetupVL()
+{
+	if (inInterior) {
+		if (globals::game::isVR)
+			SetBooleanSettings(hiddenVRSettings, GetName(), settings.InteriorEnabled && inInteriorWithSun);
+		else
+			*globals::game::bEnableVolumetricLighting = settings.InteriorEnabled && inInteriorWithSun;
+		*gVolumetricLightingSizeHigh = static_cast<Quality>(settings.InteriorQuality) == Quality::Custom ? settings.InteriorCustomSize : defaultSizeHigh;
+		SetVLQuality(GetVLDescriptor(), settings.InteriorQuality);
+	} else {
+		if (globals::game::isVR)
+			SetBooleanSettings(hiddenVRSettings, GetName(), settings.ExteriorEnabled);
+		else
+			*globals::game::bEnableVolumetricLighting = settings.ExteriorEnabled;
+		*gVolumetricLightingSizeHigh = static_cast<Quality>(settings.ExteriorQuality) == Quality::Custom ? settings.ExteriorCustomSize : defaultSizeHigh;
+		SetVLQuality(GetVLDescriptor(), settings.ExteriorQuality);
+	}
+}
+
+VolumetricLighting::VolumetricLightingDescriptor& VolumetricLighting::GetVLDescriptor()
+{
+	using func_t = decltype(&VolumetricLighting::GetVLDescriptor);
+	static REL::Relocation<func_t> func{ REL::RelocationID(100297, 107014) };
+	return func();
+}
+
+void VolumetricLighting::SetVLQuality(VolumetricLightingDescriptor& descriptor, const uint32_t quality)
+{
+	using func_t = decltype(&VolumetricLighting::SetVLQuality);
+	static REL::Relocation<func_t> func{ REL::RelocationID(100299, 107016).address() };
+	func(descriptor, std::clamp<uint32_t>(quality, 0, 2));
+}
+
+void VolumetricLighting::RenderVolumetricLighting(VolumetricLightingDescriptor* descriptor, RE::NiCamera* camera, bool flag)
+{
+	using func_t = decltype(&VolumetricLighting::RenderVolumetricLighting);
+	static REL::Relocation<func_t> func{ REL::RelocationID(100306, 0) };
+	func(descriptor, camera, flag);
+}
+
+void VolumetricLighting::RenderDepth::thunk()
+{
+	func();
+	if (globals::game::bEnableVolumetricLighting && *globals::game::bEnableVolumetricLighting)
+		RenderVolumetricLighting(&GetVLDescriptor(), RE::Main::WorldRootCamera(), false);
+}
+
+RE::BSImagespaceShader* VolumetricLighting::CreateShader(const std::string_view& name, const std::string_view& fileName, RE::BSComputeShader* computeShader)
+{
+	auto shader = RE::BSImagespaceShader::Create();
+	shader->shaderType = RE::BSShader::Type::ImageSpace;
+	shader->fxpFilename = fileName.data();
+	shader->name = name.data();
+	shader->originalShaderName = fileName.data();
+	shader->computeShader = computeShader;
+	shader->isComputeShader = true;
+	return shader;
+}
+
+RE::BSImagespaceShader* VolumetricLighting::GetOrCreateGenerateCS(RE::BSComputeShader* computeShader)
+{
+	if (generateCS == nullptr)
+		generateCS = CreateShader("BSImagespaceShaderVolumetricLightingGenerateCS", "ISVolumetricLightingGenerateCS", computeShader);
+	return generateCS;
+}
+
+RE::BSImagespaceShader* VolumetricLighting::GetOrCreateRaymarchCS(RE::BSComputeShader* computeShader)
+{
+	if (raymarchCS == nullptr)
+		raymarchCS = CreateShader("BSImagespaceShaderVolumetricLightingRaymarchCS", "ISVolumetricLightingRaymarchCS", computeShader);
+	return raymarchCS;
+}
+
+RE::BSImagespaceShader* VolumetricLighting::GetOrCreateBlurHCS(RE::BSComputeShader* computeShader)
+{
+	if (blurHCS == nullptr)
+		blurHCS = CreateShader("BSImagespaceShaderVolumetricLightingBlurHCS", "ISVolumetricLightingBlurHCS", computeShader);
+	return blurHCS;
+}
+
+RE::BSImagespaceShader* VolumetricLighting::GetOrCreateBlurVCS(RE::BSComputeShader* computeShader)
+{
+	if (blurVCS == nullptr)
+		blurVCS = CreateShader("BSImagespaceShaderVolumetricLightingBlurVCS", "ISVolumetricLightingBlurVCS", computeShader);
+	return blurVCS;
+}
+
+void VolumetricLighting::SetDimensionsCB() const
+{
+	auto cb = vlDataCB->CB();
+	globals::d3d::context->CSSetConstantBuffers(1, 1, &cb);
+}
+
+void VolumetricLighting::SetGroupCountsHCS(uint32_t& threadGroupCountX, uint32_t& threadGroupCountY) const
+{
+	threadGroupCountX = globals::game::isVR ? 2u * vlData.horizontalGroupsPerEye :
+	                                          (vlData.screenX + BlurThreadGroupSizeX - BlurWindow * 2u - 1u) / (BlurThreadGroupSizeX - BlurWindow * 2u);
+	// One group per row, so the game's full-height count would blur rows outside the dynamic resolution area.
+	threadGroupCountY = static_cast<uint32_t>(vlData.screenY);
+}
+
+void VolumetricLighting::SetGroupCountsVCS(uint32_t& threadGroupCountX, uint32_t& threadGroupCountY) const
+{
+	// One group per column, so the game's full-width count would blur columns outside the dynamic resolution area.
+	threadGroupCountX = static_cast<uint32_t>(vlData.screenX);
+	threadGroupCountY = (vlData.screenY + BlurThreadGroupSizeY - BlurWindow * 2u - 1u) / (BlurThreadGroupSizeY - BlurWindow * 2u);
+}
+
+void VolumetricLighting::CopyResource::thunk(ID3D11DeviceContext* a_this, ID3D11Resource* a_renderTarget, ID3D11Resource* a_renderTargetSource)
+{
+	// In VR with dynamic resolution enabled, there's a bug with the depth stencil.
+	// The depth stencil passed to IsFullScreenVR is scaled down incorrectly.
+	// The fix is to stop a CopyResource from replacing kMAIN_COPY with kMAIN after
+	// ISApplyVolumetricLighting because it clobbers a properly scaled kMAIN_COPY.
+	// The kMAIN_COPY does not appear to be used in the remaining frame after
+	// ISApplyVolumetricLighting except for IsFullScreenVR.
+	// But, the copy might have to be done manually later after IsFullScreenVR if
+	// used in the next frame.
+
+	if (!(Util::IsDynamicResolution() && globals::game::bEnableVolumetricLighting && *globals::game::bEnableVolumetricLighting)) {
+		a_this->CopyResource(a_renderTarget, a_renderTargetSource);
+	}
+}

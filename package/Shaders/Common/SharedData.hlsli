@@ -1,0 +1,972 @@
+#ifndef __SHARED_DATA_DEPENDENCY_HLSL__
+#define __SHARED_DATA_DEPENDENCY_HLSL__
+
+#include "Common/FrameBuffer.hlsli"
+#include "Common/ReverseZ.hlsli"
+#include "Common/Spherical Harmonics/SphericalHarmonics.hlsli"
+#include "Common/TransientWindImpulse.hlsli"
+#include "Common/VR.hlsli"
+#include "Common/WindFieldTypes.hlsli"
+
+namespace SharedData
+{
+	cbuffer SharedData : register(b5)
+	{
+		float4 WaterData[25];
+		float4 DirLightDirection;
+		float4 DirLightColor;
+		float4 SunDirection;
+		float4 SunColor;
+		float4 MasserDirection;
+		float4 MasserColor;
+		float4 SecundaDirection;
+		float4 SecundaColor;
+		float4 CameraData;
+		float4 BufferDim;
+		float Timer;
+		uint FrameCount;
+		uint FrameCountAlwaysActive;
+		bool InInterior;  // If the current cell is an interior
+		bool HasDirectionalShadows;
+		bool InMapMenu;           // If the world/local map is open (note that the renderer is still deferred here)
+		bool HideSky;             // HideSky flag in WorldSpace, e.g. Blackreach
+		float MipBias;            // Offset to mip level for TAA sharpness
+		float WaterSystemHeight;  // TES::GetWaterHeight at eye-0 in camera-relative Z; -FLT_MAX when no water body found (VR only)
+		float3 pad0;
+		float4 AmbientSHR;
+		float4 AmbientSHG;
+		float4 AmbientSHB;
+		float4 VRFoveationData0;          // x=center coverage scale, y=feather, z=horizontal scale, w=SSR raymarch mode (0 off, 1 feathered, 2 hard cutoff)
+		float4 VRFoveationCenterOffsets;  // xy=left eye center offset, zw=right eye center offset
+		float4 HDRData;
+		float RefractionScale;
+		float3 pad1;
+		WindField::WindTuning WindFieldTuning;
+		float4 WindFieldAmbient;
+		float4 WindFieldPreviousAmbient;
+		WindField::Field WindFieldCurrent;
+		WindField::Field WindFieldPrevious;
+		WindField::Field WindFieldTransition;
+		WindField::Field WindFieldPreviousTransition;
+		float4 WindFieldTransitionData;  // x/y: current/previous blend, z/w: reserved
+		float4 WindFieldSpringDebug;     // xy: field minimum, z: field size, w: maximum tilt radians
+		uint4 WindFieldActiveCounts;     // x/y: current/previous transient impulse counts, z/w: reserved
+		WindField::TransientWindSource WindFieldTransientImpulses[WindField::TransientImpulseCapacity];
+		WindField::TransientWindSource WindFieldPreviousTransientImpulses[WindField::TransientImpulseCapacity];
+	};
+
+	struct GrassLightingSettings
+	{
+		float Glossiness;
+		float SpecularStrength;
+		float SubsurfaceScatteringAmount;
+		bool OverrideComplexGrassSettings;
+
+		float BasicGrassBrightness;
+		bool EnableWrappedLighting;
+		float ComplexGrassThreshold;
+		// Only read by the GRASS_OPTIMIZATIONS permutation, for grass drawn with an LOD mesh.
+		float MidLODBrightness;
+		float FarLODBrightness;
+		float3 pad0;
+	};
+
+	struct CPMSettings
+	{
+		bool EnableComplexMaterial;
+		bool EnableParallax;
+		bool EnableTerrainParallax;
+		bool EnableHeightBlending;
+		bool EnableShadows;
+		bool EnableParallaxWarpingFix;
+		uint2 pad0;
+	};
+
+	struct CubemapCreatorSettings
+	{
+		uint Enabled;
+		float3 pad0;
+
+		float4 CubemapColor;
+	};
+
+	struct TerraOccSettings
+	{
+		bool EnableTerrainShadow;
+		float3 Scale;
+		float2 ZRange;
+		float2 Offset;
+		float ZBlur;
+		float3 pad0;
+	};
+
+	struct LightLimitFixSettings
+	{
+		uint EnableContactShadows;
+		uint ContactShadowMaxSteps;
+		float ContactShadowMaxDistance;
+		float ContactShadowLength;
+		float ContactShadowDepthThickness;
+		float ContactShadowMinIntensity;
+		uint ShadowMapSlots;  // total shadow map texture-array capacity
+		// Removing this shifts ClusterSize off its required 16-byte boundary and the GPU
+		// reads the cluster config from the wrong offsets. The C++ mirror has the same hole.
+		float pad0;
+		// Cluster config (computed)
+		uint4 ClusterSize;
+		// Debug (last)
+		uint EnableLightsVisualisation;
+		uint LightsVisualisationMode;
+		uint EnableParticleContactShadows;
+		uint pad1;
+	};
+
+	struct WetnessEffectsSettings
+	{
+		row_major float4x4 OcclusionViewProj;
+
+		float Time;
+		float Raining;
+		float Wetness;
+		float PuddleWetness;
+
+		bool EnableWetnessEffects;
+		float MaxRainWetness;
+		float MaxPuddleWetness;
+		float MaxShoreWetness;
+		float GrassWetnessRoughness;
+
+		uint ShoreRange;
+		float PuddleRadius;
+		float PuddleMaxAngle;
+		float PuddleMinWetness;
+
+		float MinRainWetness;
+		float HairWetness;
+		float WeatherTransitionSpeed;
+		bool EnableRaindropFx;
+
+		bool EnableSplashes;
+		bool EnableRipples;
+		uint EnableVanillaRipples;
+		float RaindropFxRange;
+
+		float RaindropGridSizeRcp;
+		float RaindropIntervalRcp;
+		float RaindropChance;
+		float SplashesLifetime;
+
+		float SplashesStrength;
+		float SplashesMinRadius;
+		float SplashesMaxRadius;
+		float RippleStrength;
+
+		float RippleRadius;
+		float RippleBreadth;
+		float RippleLifetimeRcp;
+
+		uint EnableCharacterRainSpots;
+		float CharacterSpotDensity;
+		float CharacterSpotRadius;
+		float CharacterSpotStrength;
+		float CharacterSpotRoughness;
+		float CharacterSpotNormalStrength;
+		uint CharacterSpotDebug;
+		float CharacterCoatIntensity;
+		float CharacterWetSheen;
+		float CharacterRainActivityMultiplier;
+		float CharacterDryTime;
+		uint EnableWeaponRainDrops;
+		float CharacterImpactIntensity;
+		float CharacterRetainedWetness;
+		float2 CharacterStatePadding;
+
+		// Bearforj: Surface Rain Flow (CS PR #2912)
+		float WallRainDensity;
+		float WallRainDropSize;
+		float WallRainSpeed;
+		float WallRainLayering;
+
+		float WallRainNormalStrength;
+		float WallRainWetness;
+		float WallRainDarkening;
+		uint EnableWallRain;
+
+		float WallRainTrailLength;
+		float3 WallRainPad;
+	};
+
+	struct SkylightingSettings
+	{
+		row_major float4x4 OcclusionViewProj;
+		float4 OcclusionSHBasis4Pi;
+
+		float4 PosOffset;   // xyz: cell origin in camera model space
+		uint4 ArrayOrigin;  // xyz: array origin
+		int4 ValidMargin;
+
+		float MinDiffuseVisibility;
+		float MinSpecularVisibility;
+		uint ProbeDataReady;
+		uint ShadowDataAvailable;
+		uint3 ArrayDims;
+		float ProbeArrayWorldSize;
+
+		uint Enabled;
+		uint3 pad0;
+
+		uint SliceStart;
+		uint SliceCount;
+		uint2 pad1;
+	};
+
+	struct CloudShadowsSettings
+	{
+		float Opacity;
+		float3 pad0;
+	};
+
+	struct CloudRelightSettings
+	{
+		uint enabled;
+		float cloudRelightMix;
+		float cloudOriginalMix;
+		float silverLiningMix;
+
+		float silverLiningSpread;
+		float3 celestialLightWeights;
+	};
+
+	struct ProceduralSunSettings
+	{
+		uint enabled;
+		float sunDiskCos;
+		float diskIntensity;
+		float edgeSoftness;
+
+		uint haloEnabled;
+		float sunHaloCos;
+		float haloIntensity;
+		float haloFalloff;
+
+		float cloudOcclusionStrength;
+		float sunQuadModelRadius;
+		float2 pad0;
+	};
+
+	struct LODBlendingSettings
+	{
+		float LODTerrainBrightness;
+		float LODObjectBrightness;
+		float LODObjectSnowBrightness;
+		bool DisableTerrainVertexColors;
+		float LODTerrainGamma;
+		float LODObjectGamma;
+		float LODObjectSnowGamma;
+		float pad0;
+	};
+
+	struct HairSpecularSettings
+	{
+		uint Enabled;
+		float HairGlossiness;
+		float SpecularMult;
+		float DiffuseMult;
+		uint EnableTangentShift;
+		float PrimaryTangentShift;
+		float SecondaryTangentShift;
+		float HairSaturation;
+		float SpecularIndirectMult;
+		float DiffuseIndirectMult;
+		float BaseColorMult;
+		float Transmission;
+		uint EnableSelfShadow;
+		float SelfShadowStrength;
+		float SelfShadowExponent;
+		float SelfShadowScale;
+		uint HairMode;  // 0: Kajiya-Kay, 1: Marschner
+		uint3 pad;
+	};
+
+	/** @brief Terrain Variation feature settings. */
+	struct TerrainVariationSettings
+	{
+		uint enableLODTerrainTilingFix;  ///< 1 = apply variation to LOD terrain.
+		uint enableMeshSupport;          ///< 1 = apply variation to landscape-textured meshes.
+		uint2 pad;
+	};
+
+	struct IBLSettings
+	{
+		uint EnableIBL;
+		uint PreserveFogLuminance;
+		uint UseStaticIBL;
+		float DALCAmount;
+		float EnvIBLScale;
+		float SkyIBLScale;
+		float EnvIBLSaturation;
+		float SkyIBLSaturation;
+		float FogAmount;
+		uint DALCMode;  // 0: Luminance Ratio, 1: Color Ratio, 2: DALC + Sky, 3: DALC + Sky (Directional)
+		float AdditiveAmount;
+		float ReflectiveAmount;
+	};
+
+	struct ExtendedTranslucencySettings
+	{
+		uint MaterialModel;  // [0,1,2,3] The MaterialModel
+		float Reduction;     // [0, 1.0] The factor to reduce the transparency to matain the average transparency [0,1]
+		float Softness;      // [0, 2.0] The soft remap upper limit [0,2]
+		float Strength;      // [0, 1.0] The inverse blend weight of the effect
+	};
+
+	struct CSUtilitySettings
+	{
+		float skyBrightness;
+		float ambientLightMult;
+		float directionalLightMult;
+		float pointLightMult;
+		float linearPointLightMult;
+		float spotlightMult;
+		float linearSpotlightMult;
+		float omnidirectionalBulbMult;
+		float linearOmnidirectionalBulbMult;
+		float waterBrightness;
+		float waterReflectionAmount;
+		float waterRefractionAmount;
+		float waterSunSpecularMultiplier;
+		float waterWaveAmplitude;
+		float waterFresnelMin;
+		float waterFresnelMax;
+		float waterMuddiness;
+		float emitColorMult;
+		float glowmapMult;
+		float effectLightingMult;
+		float skyGammaOffset;
+		float fogGammaOffset;
+		float fogAlphaGammaOffset;
+		float waterGammaOffset;
+		float vlGammaOffset;
+		float waterCausticsStrength;
+		float waterCausticsTiling;
+		float waterCausticsSpeed;
+		float waterCausticsDispersion;
+		float waterParallaxStrength;
+		float skySaturation;
+		uint waterParallaxQuality;
+		float cloudBrightness;
+		float cloudSaturation;
+		float cloudGammaOffset;
+		float fogIntensity;
+		float vlIntensity;
+		float sunGlareIntensity;
+		uint useAmbientEffectLighting;
+		float skyStaticTransparency;
+		float effectBrightness;
+		float skyStaticBrightness;
+		float fogSaturation;
+		float vlSaturation;
+		float2 ambientLightColor;
+		float2 directionalLightColor;
+		float2 pointLightColor;
+		float2 linearPointLightColor;
+		float2 spotlightColor;
+		float2 linearSpotlightColor;
+		float2 omnidirectionalBulbColor;
+		float2 linearOmnidirectionalBulbColor;
+		float2 emitColor;
+		float2 glowmapColor;
+		float2 effectLightingColor;
+		float2 effectColor;
+		float2 skyStaticColor;
+		float2 sunGlareColor;
+		float waterSaturation;
+		float padding;
+		float2 sceneColor;
+	};
+
+	struct WindSettings
+	{
+		uint windFieldDebugEnabled;
+		uint windFieldDebugView;
+		float2 padding;
+	};
+
+	struct LinearLightingSettings
+	{
+		uint enableLinearLighting;
+		uint enableACEScg;
+		uint isDirLightLinear;
+		float dirLightMult;
+		float diffuseGamma;
+		float diffuseCurve;
+		float diffuseWhiteReflectance;
+		float conversionSaturation;
+		float3 effectLightingColor;
+		float ambientMult;
+		float3 skyStaticsColor;
+		float pad;
+	};
+
+	struct ENBSettings
+	{
+		uint Enable;
+		float ColorPow;
+		float LightSpriteIntensity;
+		float FireIntensity;
+
+		float FireCurve;
+		float3 pad0;
+
+		float CloudsCurve;
+		float CloudsDesaturation;
+		float CloudsEdgeIntensity;
+		float CloudsEdgeMoonMultiplier;
+
+		uint EnableProceduralSun;
+		float ProceduralSunDiskRadiusSq;
+		float ProceduralSunDiskEdgeScale;
+		float ProceduralSunGlowIntensity;
+
+		float ProceduralSunCoronaFalloff;
+		float ProceduralSunCoronaScale;
+		float SkyScaleMultiplier;
+		float ProceduralSunPad;
+
+		uint UseProceduralGradientWeights;
+		float ProceduralGradientWeightCurve;
+		float LightSpriteCurve;
+		uint EnableParticle;
+
+		float ParticleIntensity;
+		float ParticleLightingInfluence;
+		float ParticleAmbientInfluence;
+		float ParticlePointLightingInfluence;
+
+		uint EnableVolumetricRays;
+		float VolumetricRaysIntensity;
+		float VolumetricRaysDensity;
+		float VolumetricRaysSkyColorAmount;
+
+		float VolumetricRaysDesaturation;
+		float3 VolumetricRaysColorFilter;
+
+		uint EnableWater;
+		float WaterWavesAmplitude;
+		float WaterMuddiness;
+		float WaterSunLightingMultiplier;
+
+		float WaterSunSpecularMultiplier;
+		float WaterFresnelMin;
+		float WaterFresnelMax;
+		float WaterFresnelMultiplier;
+
+		float WaterReflectionAmount;
+		float WaterPad0;
+		float WaterPad1;
+		float WaterPad2;
+
+		uint EnableCloudsScattering;
+		float SkyScatteringIntensity;
+		float SkyScatteringShadowAmount;
+		float SkyScatteringAmount;
+
+		float3 SkyScatteringColor;
+		float SkyScatteringDustDarkening;
+
+		float3 SkyScatteringDustTint;
+		float SkyScatteringDustVolume;
+
+		float3 SkyScatteringSunDirection;
+		float SkyScatteringSunVisibility;
+
+		float SkyScatteringHorizonRange;
+		float SkyScatteringAtmosphereThickness;
+		float SkyScatteringAirGlowIntensity;
+		float SkyScatteringAirGlowRange;
+
+		float SkyScatteringSunGlowIntensity;
+		float SkyScatteringSunGlowRange;
+		float SkyScatteringMoonGlowAmount;
+		float SkyScatteringMoonGlowRange;
+
+		float SkyScatteringSunIntensity;
+		float CloudsLightingSunIntensity;
+		float CloudsLightingMoonIntensity;
+		uint EnableCloudsLightingFromMoon;
+
+		uint CalculateCloudsEdgeFromScattering;
+		float CloudsLightingDesaturation;
+		float CloudsLightingForwardScattering;
+		float CloudsLightingDensity;
+
+		float3 CloudsColorFilter;
+		float CloudsIntensity;
+
+		float CloudsVertexAlphaBoost;
+		float CloudsEdgeClamp;
+		float CloudsEdgeFadePower;
+		float SunBillboardTan;
+
+		float MasserBillboardTan;
+		float SecundaBillboardTan;
+		float SkyScatteringPad0;
+		float SkyScatteringPad1;
+
+		float3 VolumetricFogColorFilter;
+		float VolumetricFogIntensity;
+
+		float VolumetricFogCurve;
+		float VolumetricFogOpacity;
+		float VolumetricFogShadowAmount;
+		uint VolumetricFogEnableLighting;
+
+		float3 VolumetricRaysSkyColor;
+		uint VolumetricFogEnableShadows;
+
+		float StarsCurve;
+		float StarsIntensity;
+		float MoonCurve;
+		uint EnableAnimatedStars;
+
+		float StarsAnimationTime;
+		float StarsAnimationDensity;
+		float StarsAnimationIntensity;
+		float AuroraIntensity;
+
+		float AuroraCurve;
+		float3 NightSkyPad;
+
+		uint VolumetricRaysSampleCount;
+		uint GameVolumetricRaysDisableDithering;
+		float2 GameVolumetricRaysPad0;
+
+		float3 GameVolumetricRaysLightScale;
+		float GameVolumetricRaysCustomContribution;
+
+		float3 GameVolumetricRaysCustomColor;
+		float GameVolumetricRaysPad1;
+	};
+	struct TerrainBlendingSettings
+	{
+		uint Enabled;
+		uint3 _padding;
+	};
+
+	struct ExponentialHeightFogSettings
+	{
+		uint enabled;
+		uint useDynamicCubemaps;
+		float startDistance;
+		float fogHeight;
+		float fogHeightFalloff;
+		float fogDensity;
+		float fogHeight2;
+		float fogHeightFalloff2;
+		float fogDensity2;
+		float directionalInscatteringMultiplier;
+		float directionalInscatteringAnisotropy;
+		uint useSkyIBL;
+		float4 inscatteringTint;
+		float cubemapMipLevel;
+		float sunlightAttenuationAmount;
+		uint respectVanillaFogFade;
+		uint disableVanillaFog;
+		float4 fogInscatteringColor;
+		float originalFogColorAmount;
+		uint volumetricFogEnabled;
+		uint volumetricGridPixelSize;
+		uint volumetricGridSizeZ;
+		float volumetricFogDistance;
+		float volumetricFogStartDistance;
+		float volumetricFogNearFadeInDistance;
+		float volumetricFogExtinctionScale;
+		float4 volumetricFogAlbedo;
+		float4 volumetricFogEmissive;
+		float volumetricDirectionalScatteringIntensity;
+		float volumetricShadowBias;
+		float volumetricDepthDistributionScale;
+		float volumetricSkyLightingIntensity;
+		float volumetricFogScatteringDistribution;
+		float volumetricHistoryWeight;
+		uint volumetricHistoryMissSampleCount;
+		float volumetricSampleJitterMultiplier;
+		float volumetricUpsampleJitterMultiplier;
+		float volumetricNearGridDistance;
+		uint volumetricFarGridPixelSize;
+		uint volumetricFarGridSizeZ;
+		float volumetricLocalLightScatteringIntensity;
+		uint useVanillaFogSettings;
+		float vanillaFogMaxOpacity;
+		float vanillaFogDensity;
+		float vanillaFogNear;
+		float vanillaFogFar;
+		float vanillaFogPower;
+		float vanillaFogStrength;
+		float3 pad0;
+		float4 vanillaFogNearColor;
+		float4 vanillaFogFarColor;
+		float fogLightingInfluence;
+		float distanceHazeMaxOpacity;
+		float distanceHazeStartDistance;
+		float distanceHazeFadeDistance;
+		float volumetricFogNoiseScale;
+		float volumetricFogNoiseThreshold;
+		float2 pad3;
+		float3 volumetricFogNoiseVelocity;
+		uint volumetricFogNoiseType;
+		uint mistsEnabled;
+		float mistStrength;
+		float mistRange;
+		float mistSize;
+		float mistDriftSpeed;
+		uint mistFollowWind;
+		float mistWindMultiplier;
+		float pad5;
+	};
+
+	struct TruePBRSettings
+	{
+		float VertexAOStrength;
+		uint EnableMicroShadows;
+		float MicroShadowStrength;
+		uint pad;
+	};
+
+	struct FoliageLightingSettings
+	{
+		uint EnableFoliageScattering;
+		uint EnableFoliageAmbientBoost;
+		uint EnableFoliageAmbientFlip;
+		float FoliageAmbientAmount;
+		uint EnableGrassScattering;
+		uint3 pad;
+	};
+
+	struct SkinData
+	{
+		float4 skinParams;
+		float4 skinParams2;
+		float4 skinDetailParams;
+		float4 sssParams;
+		float4 fuzzParams;
+		float4 physicalParams;
+		float4 wetParams;
+	};
+
+	struct VanillaFresnelSettings
+	{
+		uint Enable;
+		uint EnableGGX;
+		uint EnableGGXOnGrass;
+		uint EnableDynamicCubemapsConversion;
+		uint EnableEyeSpecialHandling;
+		float RoughnessMultiplier;
+		float SpecularRoughnessBlend;
+		float BaseF0Multiplier;
+		float MinF0;
+		float CubemapToF0Multiplier;
+		float ComplexMaterialF0Multiplier;
+		float pad;
+	};
+
+	struct BloomSettings
+	{
+		uint Enabled;
+		float EnhancementIntensity;
+		float HaloRadius;
+		float HaloSpread;
+
+		float BloomSaturation;
+		float3 BloomTint;
+		float CompressionThreshold;
+		float CompressionCeiling;
+		float2 pad;
+	};
+
+	struct PostProcessingSettings
+	{
+		uint DisableVanillaTonemapping;
+		uint3 pad0;
+	};
+
+	struct GrassCollisionData
+	{
+		float2 PosOffset;
+		uint2 ArrayOrigin;
+		float2 PreviousPosOffset;
+		uint2 PreviousArrayOrigin;
+		float CompressionHeight;
+		float MaximumCompressibleGrassHeight;
+		float2 pad0;
+	};
+
+	struct HorizonFixSettings
+	{
+		float farWaterDistance;
+		float3 pad;
+	};
+
+	// BearForge: Physical Sky (Jiaye). Appended at the end of FeatureData so existing offsets are unchanged.
+	struct PhysSkyData
+	{
+		// DYNAMIC
+		float2 texDim;
+		float2 rcpTexDim;  //
+		float2 frameDim;
+		float2 rcpFrameDim;  //
+
+		float zCameraPlanet;
+		float3 sunDir;  //
+		float3 sunlightColor;
+		float trMix;  //
+		float3 masserDir;
+		float apLumMix;  //
+		float3 masserColor;
+		float apTrMix;  //
+		float3 secundaDir;
+		float sunDiskCos;  //
+		float3 secundaColor;
+
+		// GENERAL
+		uint enabled;  //
+		int tonemapper;
+		float vanillaMix;
+
+		// WORLD
+		float zBottom;
+		float rPlanet;  //
+		float rAtmosphere;
+		float3 groundAlbedo;  //
+
+		// ATMOSPHERE
+		float2 cloudShadowRemapRange;
+
+		float aerosolFalloff;
+		float aerosolPhaseG;  //
+		float3 aerosolScatter;
+		uint halfResApShadow;  //
+		float3 aerosolAbsorption;
+
+		float rayleighFalloff;
+		float3 rayleighScatter;  //
+
+		float ozoneAltitude;  //
+		float ozoneThickness;
+		float3 ozoneAbsorption;  //
+
+		// CLOUDS (VANILLA)
+		uint enableVanillaClouds;
+		float cloudRelightMix;
+		float cloudOriginalMix;
+		float silverLiningMix;  //
+		float silverLiningSpread;
+
+		// VOLUMETRIC CLOUDS
+		uint enableVolumetricClouds;
+		float shadowVolumeRange;
+		float lowestCloudAltitude;  //
+		float highestCloudAltitude;
+		float3 volCloudScatter;
+		float volCloudAverageDensity;  //
+		float3 volCloudAbsorption;
+
+		// SETTINGS
+		uint lightSkyStatics;  //
+		float skyStaticsBrightness;
+		uint2 pad0;
+	};
+
+	struct PseudoSunBounceSettings
+	{
+		float3 groundAlbedo;
+		float intensity;
+		float3 wallAlbedo;
+		float windowWidth;
+	};
+
+	struct RainRefractionSettings
+	{
+		uint Enable;
+		float MotionStretch;
+		float MotionTransparency;
+		float pad0;
+	};
+
+	struct HairBacklightingSettings
+	{
+		uint Enable;
+		float Strength;
+		float ScatterWidth;
+		float EdgeFalloff;
+		float InteriorGlow;
+		float Absorption;
+		float DarkBoost;
+		float DarkThreshold;
+		float HeadOcclusion;
+		uint3 pad;
+	};
+
+	struct BearforjLookSettings
+	{
+		uint Enable;
+		float TonemapStrength;
+		float Warmth;
+		float NightFactor;
+		float3 NightTint;
+		float NightLift;
+		float3 AuroraTint;
+		float AuroraSnow;
+	};
+
+	struct ProceduralAuroraSettings
+	{
+		float4 FringeColor;  // xyz: lower edge color, w: lower edge amount
+		float4 BodyColor;    // xyz: main curtain color, w: storm level of the current night (0..1)
+		float4 CrownColor;   // xyz: top color in display space, w: height where the top color starts
+		float Brightness;
+		float Time;  // animation clock (speed and night strength already applied)
+		float RayDetail;
+		float Softness;  // 0 crisp .. 1 soft and see-through
+		float FoldStrength;
+		float RayStrength;
+		float Seed;
+		uint Enabled;
+		float3 Atmosphere;  // x: vanilla aurora visibility (0..1), y: haze amount, z: nebula glow
+		float CurtainSize;  // curtain width and height relative to the default
+		float CurtainCount;  // curtains drawn, 1 .. 7; a fraction fades the last one in or out
+		float3 BodyDisplayColor;  // main curtain color in display space
+	};
+
+	cbuffer FeatureData : register(b6)
+	{
+		GrassLightingSettings grassLightingSettings;
+		CPMSettings extendedMaterialSettings;
+		CubemapCreatorSettings cubemapCreatorSettings;
+		TerraOccSettings terraOccSettings;
+		LightLimitFixSettings lightLimitFixSettings;
+		WetnessEffectsSettings wetnessEffectsSettings;
+		SkylightingSettings skylightingSettings;
+		CloudShadowsSettings cloudShadowsSettings;
+		CloudRelightSettings cloudRelightSettings;
+		ProceduralSunSettings proceduralSunSettings;
+		LODBlendingSettings lodBlendingSettings;
+		HairSpecularSettings hairSpecularSettings;
+		TerrainVariationSettings terrainVariationSettings;
+		IBLSettings iblSettings;
+		ExtendedTranslucencySettings extendedTranslucencySettings;
+		CSUtilitySettings csUtilitySettings;
+		WindSettings windSettings;
+		LinearLightingSettings linearLightingSettings;
+		ENBSettings enbSettings;
+		TerrainBlendingSettings terrainBlendingSettings;
+		ExponentialHeightFogSettings exponentialHeightFogSettings;
+		TruePBRSettings truePBRSettings;
+		FoliageLightingSettings foliageLightingSettings;
+		SkinData skinData;
+		VanillaFresnelSettings vanillaFresnelSettings;
+		BloomSettings bloomSettings;
+		PostProcessingSettings postProcessingSettings;
+		GrassCollisionData grassCollisionData;
+		HorizonFixSettings horizonFixSettings;
+		RainRefractionSettings rainRefractionSettings;
+		PseudoSunBounceSettings pseudoSunBounceSettings;
+		PhysSkyData physSkyData;
+		HairBacklightingSettings hairBacklightingSettings;
+		BearforjLookSettings bearforjLook;
+		ProceduralAuroraSettings proceduralAuroraSettings;
+	};
+
+	Texture2D<float4> DepthTexture : register(t17);
+
+	/**
+	 * @brief Dynamic-resolution adjusted UV for a per-eye mono UV, for callers that need the texel
+	 * grid (Gather footprints, bilinear weights). Point loads use ConvertUVToSampleCoord.
+	 */
+	float2 ConvertUVToSampleUV(float2 uv, uint a_eyeIndex)
+	{
+		uv = Stereo::ConvertToStereoUV(uv, a_eyeIndex);
+		return FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(uv);
+	}
+
+	// Get a int3 to be used as texture sample coord. [0,1] in uv space
+	int3 ConvertUVToSampleCoord(float2 uv, uint a_eyeIndex)
+	{
+		return int3(ConvertUVToSampleUV(uv, a_eyeIndex) * BufferDim.xy, 0);
+	}
+
+	// Get a raw depth from the depth buffer. [0,1] in uv space
+	float GetDepth(float2 uv, uint a_eyeIndex = 0)
+	{
+		return DepthTexture.Load(ConvertUVToSampleCoord(uv, a_eyeIndex)).x;
+	}
+
+	float GetScreenDepth(float depth)
+	{
+#ifdef REVERSE_Z
+#	if defined(PSHADER) || defined(VSHADER)
+		if (!FrameBuffer::IsReverseProjection())
+			return (CameraData.w / (-depth * CameraData.z + CameraData.x));
+#	endif
+		return (CameraData.w / (depth * CameraData.z + CameraData.y));
+#else
+		return (CameraData.w / (-depth * CameraData.z + CameraData.x));
+#endif
+	}
+
+	float4 GetScreenDepths(float4 depths)
+	{
+#ifdef REVERSE_Z
+#	if defined(PSHADER) || defined(VSHADER)
+		if (!FrameBuffer::IsReverseProjection())
+			return (CameraData.w / (-depths * CameraData.z + CameraData.x));
+#	endif
+		return (CameraData.w / (depths * CameraData.z + CameraData.y));
+#else
+		return (CameraData.w / (-depths * CameraData.z + CameraData.x));
+#endif
+	}
+
+	float GetScreenDepth(float2 uv, uint a_eyeIndex = 0)
+	{
+		float depth = GetDepth(uv, a_eyeIndex);
+		return GetScreenDepth(depth);
+	}
+
+	// Returns water data for the tile containing worldPosition (camera-relative XY).
+	// The .w component (water surface height) is stored in C++ as camera-relative Z of
+	// eye 0 (left eye).  Pass eyeIndex to have .w corrected into the current eye's
+	// camera-relative frame; defaults to 0 (no correction, backwards-compatible).
+	float4 GetWaterData(float3 worldPosition, uint eyeIndex = 0)
+	{
+		float2 cellF = (((worldPosition.xy + FrameBuffer::CameraPosAdjust[0].xy)) / 4096.0) + 64.0;  // always positive
+		int2 cellInt;
+		float2 cellFrac = modf(cellF, cellInt);
+
+		cellF = worldPosition.xy / float2(4096.0, 4096.0);  // remap to cell scale
+		cellF += 2.5;                                       // 5x5 cell grid
+		cellF -= cellFrac;                                  // align to cell borders
+		cellInt = round(cellF);
+
+		uint waterTile = (uint)clamp(cellInt.x + (cellInt.y * 5), 0, 24);  // remap xy to 0-24
+
+		float4 waterData = float4(1.0, 1.0, 1.0, -2147483648);
+
+		[flatten] if (cellInt.x < 5 && cellInt.x >= 0 && cellInt.y < 5 && cellInt.y >= 0)
+			waterData = WaterData[waterTile];
+
+#if defined(VR)
+		// Correct .w from eye-0 camera-relative Z to the current eye's camera-relative Z.
+		// No-op when eyeIndex == 0 (both terms are identical).
+		waterData.w += FrameBuffer::CameraPosAdjust[0].z - FrameBuffer::CameraPosAdjust[eyeIndex].z;
+#endif
+
+		return waterData;
+	}
+
+	float3 GetAmbient(float3 normal)
+	{
+		return SphericalHarmonics::Unproject(AmbientSHR, AmbientSHG, AmbientSHB, normal);
+	}
+}
+#endif  // __SHARED_DATA_DEPENDENCY_HLSL__

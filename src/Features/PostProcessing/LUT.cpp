@@ -1,0 +1,294 @@
+#include "LUT.h"
+#include "Bearforj/TipUI.h"
+
+#include "Features/PostProcessing.h"
+#include "GpuPass.h"
+#include "PostProcessingUI.h"
+#include "RasterPass.h"
+#include "ShaderCache.h"
+#include "State.h"
+#include "Util.h"
+
+#include <DDSTextureLoader.h>
+#include <DirectXTex.h>
+
+#include "I18n/I18n.h"
+#include <algorithm>
+#include <cctype>
+#include <imgui_stdlib.h>
+
+namespace
+{
+	constexpr float kLUTInputDragSpeed = 1e-3f;
+}
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+	LUT::Settings,
+	LutPath,
+	InputMin,
+	InputMax)
+
+void LUT::DrawSettings()
+{
+	ImGui::TextWrapped("%s", T("feature.post_processing.lut.relative_path_starts_from_game_executable_directory_supports", "Relative path starts from game executable directory. Supports dds/bmp/png format."));
+	ImGui::BulletText("%s", T("feature.post_processing.lut.1d_lut_n_x_1_sized_images", "1D LUT: N x 1 sized images."));
+	ImGui::BulletText("%s", T("feature.post_processing.lut.3d_lut_in_2d_format_n_r_x", "3D LUT in 2D format: N (R) x N (G) sized images, stacked horizontally along blue axis."));
+	ImGui::BulletText("%s", T("feature.post_processing.lut.3d_lut_3d_dds_only", "3D LUT: 3D dds only."));
+
+	ImGui::InputText(T("feature.post_processing.lut.lut_texture_path", "LUT Texture Path"), &tempPath);
+
+	if (ImGui::Button(T("feature.post_processing.lut.load", "Load")))
+		ReadTexture(tempPath);
+	ImGui::SameLine();
+	if (ImGui::Button(T("feature.post_processing.lut.clear", "Clear"))) {
+		Clear();
+		tempPath = "";
+	}
+	if (!errMsg.empty()) {
+		ImGui::SameLine();
+		Util::Text::Error("%s", errMsg.c_str());
+	}
+
+	if (LutType == -1)
+		ImGui::TextUnformatted(T("feature.post_processing.lut.loaded_texture_none", "Loaded Texture: None"));
+	else
+		ImGui::Text(T("feature.post_processing.lut.loaded_texture", "Loaded Texture: %s"), settings.LutPath.c_str());
+
+	ImGui::Separator();
+
+	if (LutType == 0 || LutType == 1)
+		if (ImGui::BeginTable("##1d", 2)) {
+			ImGui::TableNextColumn();
+			BFUI::RadioButton(T("feature.post_processing.lut.map_luma", "Map Luma"), &LutType, 0);
+			ImGui::TableNextColumn();
+			BFUI::RadioButton(T("feature.post_processing.lut.map_per_channel", "Map Per Channel"), &LutType, 1);
+			ImGui::EndTable();
+		}
+	PostProcessingUI::RGBFloatDrag3(T("feature.post_processing.lut.input_min", "Input Min"), &settings.InputMin.x, kLUTInputDragSpeed);
+	PostProcessingUI::RGBFloatDrag3(T("feature.post_processing.lut.input_max", "Input Max"), &settings.InputMax.x, kLUTInputDragSpeed);
+}
+
+void LUT::RestoreDefaultSettings()
+{
+	settings = {};
+	tempPath = {};
+	Clear();
+}
+
+void LUT::LoadSettings(json& o_json)
+{
+	const auto oldPath = settings.LutPath;
+	settings = o_json;
+
+	tempPath = settings.LutPath;
+
+	try {
+		if (tempPath.empty()) {
+			Clear();
+		} else if (tempPath != oldPath || LutType == -1) {
+			logger::debug("Loading LUT texture: {}", tempPath);
+			ReadTexture(tempPath);
+		}
+	} catch (const std::exception& e) {
+		logger::warn("Failed to load LUT settings: {}", e.what());
+	}
+}
+
+void LUT::SaveSettings(json& o_json)
+{
+	o_json = settings;
+}
+
+void LUT::SetupResources()
+{
+	if (!settings.LutPath.empty())
+		ReadTexture(settings.LutPath);
+
+	logger::debug("Creating buffers...");
+	{
+		lutCB = eastl::make_unique<ConstantBuffer>(ConstantBufferDesc<LUTCB>(), "Post Processing LUT CB");
+	}
+
+	logger::debug("Creating 2D textures...");
+	{
+		auto texDesc = owner->GetPipelineTextureDesc();
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+			.Format = texDesc.Format,
+			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+			.Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 }
+		};
+
+		D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {
+			.Format = texDesc.Format,
+			.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D,
+			.Texture2D = { .MipSlice = 0 }
+		};
+
+		texDesc.MipLevels = srvDesc.Texture2D.MipLevels = 1;
+		texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+		texDesc.MiscFlags = 0;
+
+		texOutput = eastl::make_unique<Texture2D>(texDesc, "Post Processing LUT Output");
+		texOutput->CreateSRV(srvDesc);
+		texOutput->CreateRTV(rtvDesc);
+	}
+
+	CompileRasterShaders();
+}
+
+void LUT::ReadTexture(std::filesystem::path path)
+{
+	constexpr auto comErrMsg = "Failed to create texture! Error: {}";
+
+	auto device = globals::d3d::device;
+
+	Clear();
+
+	auto extension = path.extension().string();
+	std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+	if (extension != ".dds" && extension != ".png" && extension != ".bmp") {
+		errMsg = std::format("Invalid extension: {}! Only dds/png/bmp are supported.", path.extension().string());
+		logger::warn("Invalid extension: {}! Only dds/png/bmp are supported.", path.extension().string());
+		return;
+	}
+	if (!std::filesystem::exists(path)) {
+		errMsg = "The file does not exist.";
+		logger::warn("The file does not exist.");
+		return;
+	}
+
+	if (extension == ".dds") {
+		ID3D11Resource* pRsrc = nullptr;
+		ID3D11ShaderResourceView* pSrv = nullptr;
+		try {
+			DX::ThrowIfFailed(DirectX::CreateDDSTextureFromFile(device, path.c_str(), &pRsrc, &pSrv));
+		} catch (std::runtime_error& e) {
+			errMsg = std::format(comErrMsg, e.what());
+			logger::warn(comErrMsg, e.what());
+			return;
+		}
+
+		D3D11_RESOURCE_DIMENSION texType;
+		pRsrc->GetType(&texType);
+		if (texType == D3D11_RESOURCE_DIMENSION_TEXTURE2D) {
+			texLUT2D = eastl::make_unique<Texture2D>(reinterpret_cast<ID3D11Texture2D*>(pRsrc), "Post Processing LUT 2D");
+			texLUT2D->srv.attach(pSrv);
+			LutType = texLUT2D->desc.Height == 1 ? 0 : 2;
+		} else if (texType == D3D11_RESOURCE_DIMENSION_TEXTURE3D) {
+			texLUT3D = eastl::make_unique<Texture3D>(reinterpret_cast<ID3D11Texture3D*>(pRsrc), "Post Processing LUT 3D");
+			texLUT3D->srv.attach(pSrv);
+			LutType = 3;
+		} else {
+			errMsg = std::format("Invalid texture dimension: {}! Only 2D/3D textures are supported.", magic_enum::enum_name(texType));
+			logger::warn("Invalid texture dimension: {}! Only 2D/3D textures are supported.", magic_enum::enum_name(texType));
+			return;
+		}
+	} else {
+		DirectX::ScratchImage image;
+		try {
+			DX::ThrowIfFailed(DirectX::LoadFromWICFile(path.c_str(), DirectX::WIC_FLAGS_NONE, nullptr, image));
+		} catch (std::runtime_error& e) {
+			errMsg = std::format(comErrMsg, e.what());
+			logger::warn(comErrMsg, e.what());
+			return;
+		}
+
+		ID3D11Resource* pRsrc = nullptr;
+		try {
+			DX::ThrowIfFailed(CreateTexture(device, image.GetImages(), image.GetImageCount(), image.GetMetadata(), &pRsrc));
+		} catch (std::runtime_error& e) {
+			errMsg = std::format(comErrMsg, e.what());
+			logger::warn(comErrMsg, e.what());
+			return;
+		}
+
+		texLUT2D = eastl::make_unique<Texture2D>(reinterpret_cast<ID3D11Texture2D*>(pRsrc), "Post Processing LUT 2D");
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+			.Format = texLUT2D->desc.Format,
+			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+			.Texture2D = {
+				.MostDetailedMip = 0,
+				.MipLevels = 1 }
+		};
+		texLUT2D->CreateSRV(srvDesc);
+
+		LutType = texLUT2D->desc.Height == 1 ? 0 : 2;
+	}
+
+	settings.LutPath = path.string();
+}
+
+void LUT::ClearShaderCache()
+{
+	BumpShaderGeneration();
+	{
+		std::lock_guard lock(shaderMutex);
+		Util::ClearShaders<ID3D11PixelShader>({ lutPS });
+	}
+
+	globals::shaderCache->ClearStandaloneComputeCache(L"PostProcessing/LUT");
+	CompileRasterShaders();
+}
+
+void LUT::CompileRasterShaders()
+{
+	const std::vector<PixelShaderCompileInfo> shaderInfos = {
+		{ &lutPS, "lut.ps.hlsl" },
+	};
+
+	CompileRasterShadersAsync(L"Data\\Shaders\\PostProcessing\\LUT", {}, shaderInfos);
+}
+
+void LUT::Draw(TextureInfo& inout_tex)
+{
+	if (LutType == -1)
+		return;
+
+	if (!owner || !owner->GetFullscreenVS())
+		return;
+	if (!AllShadersReady({ &lutPS }))
+		return;
+
+	CS_GPU_PASS("PostProcessing::LUT");
+	auto context = globals::d3d::context;
+
+	float2 res = { (float)texOutput->desc.Width, (float)texOutput->desc.Height };
+	res = Util::ConvertToDynamic(res);
+
+	LUTCB data = {
+		.InputMin = settings.InputMin,
+		.InputGamut = static_cast<uint>(inout_tex.gamut),
+		.InputMax = settings.InputMax,
+		.LutType = LutType
+	};
+	lutCB->Update(data);
+
+	{
+		PostProcessingRaster::RasterPass pass(context);
+
+		ID3D11ShaderResourceView* srv[3] = {
+			inout_tex.srv,
+			LutType == 3 ? nullptr : texLUT2D->srv.get(),
+			LutType == 3 ? texLUT3D->srv.get() : nullptr
+		};
+
+		ID3D11Buffer* cb = lutCB->CB();
+
+		context->PSSetConstantBuffers(1, 1, &cb);
+		context->PSSetShaderResources(0, 3, srv);
+		pass.SetTargets({ texOutput->rtv.get() }, res.x, res.y);
+		pass.SetShaders(owner->GetFullscreenVS(), lutPS.get());
+		pass.Draw();
+
+		// clean up
+		std::fill(srv, srv + 3, nullptr);
+		cb = nullptr;
+		context->PSSetShaderResources(0, 3, srv);
+		context->PSSetConstantBuffers(1, 1, &cb);
+	}
+
+	inout_tex = { texOutput->resource.get(), texOutput->srv.get() };
+}

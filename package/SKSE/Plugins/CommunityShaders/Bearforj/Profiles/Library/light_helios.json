@@ -1,0 +1,17 @@
+{
+  "id": "light_helios",
+  "name": "Helios (interior weathers)",
+  "kind": "lighting",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/181533",
+  "plugins": [
+    "Helios.esp",
+    "Helios.esl",
+    "Helios.esm"
+  ],
+  "notes": "Already drives interior ambient from exterior weather; Pseudo Sun Bounce lowered to avoid double window light. Needs MMSF, Luma Utility, XEMI. Oct 2026: Helios 1.01 breaks with Skyrim 1.7 / Luma 2.0.",
+  "patch": {
+    "PseudoSunBounce": {
+      "intensity": 0.15
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "weather_faithful",
+  "name": "Faithful Weathers",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/119387",
+  "plugins": [
+    "Faithful Weathers.esp"
+  ],
+  "notes": "Ships an HDR plugin/ini with filmic tonemap for CS.",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.3,
+      "Warmth": 0.4,
+      "NightLift": 0.3,
+      "TonemapMix": 35
+    }
+  }
+}

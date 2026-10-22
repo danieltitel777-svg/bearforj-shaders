@@ -1,0 +1,609 @@
+#include "D3D.h"
+
+#include "Deferred.h"
+#include "Features/TerrainBlending.h"
+#include "ShaderCache.h"
+#include "State.h"
+#include "Utils/Format.h"
+#include <DDSTextureLoader.h>
+#include <DirectXTex.h>
+#include <cassert>
+#include <d3dcompiler.h>
+#include <mutex>
+#include <unordered_set>
+
+namespace Util
+{
+	namespace
+	{
+		std::mutex multithreadScopeMutex;
+		int multithreadScopeHolders = 0;
+		BOOL multithreadScopePriorProtection = FALSE;
+	}
+
+	MultithreadScope::MultithreadScope(ID3D11DeviceContext* context)
+	{
+		if (!context || FAILED(context->QueryInterface(multithread.put()))) {
+			multithread = nullptr;
+			return;
+		}
+		{
+			std::lock_guard lock(multithreadScopeMutex);
+			const BOOL prior = multithread->SetMultithreadProtected(TRUE);
+			if (multithreadScopeHolders++ == 0)
+				multithreadScopePriorProtection = prior;
+		}
+		multithread->Enter();
+	}
+
+	MultithreadScope::~MultithreadScope()
+	{
+		if (!multithread)
+			return;
+		multithread->Leave();
+		std::lock_guard lock(multithreadScopeMutex);
+		if (--multithreadScopeHolders == 0)
+			multithread->SetMultithreadProtected(multithreadScopePriorProtection);
+	}
+
+	ID3D11ShaderResourceView* GetCurrentSceneDepthSRV(bool prefer16bit)
+	{
+		auto renderer = globals::game::renderer;
+		if (!renderer)
+			return nullptr;
+		auto& zPrepassCopy = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kPOST_ZPREPASS_COPY];
+		if (globals::deferred && globals::deferred->sceneDepthFinal)
+			return Util::AsReal(zPrepassCopy.depthSRV);
+
+		auto& tb = globals::features::terrainBlending;
+		if (tb.loaded && tb.settings.Enabled) {
+			auto* srv = prefer16bit ? (tb.blendedDepthTexture16 ? tb.blendedDepthTexture16->srv.get() : nullptr) : (tb.blendedDepthTexture ? tb.blendedDepthTexture->srv.get() : nullptr);
+			if (srv)
+				return srv;
+		}
+		return Util::AsReal(zPrepassCopy.depthSRV);
+	}
+
+	ID3D11ShaderResourceView* GetSRVFromRTV(const ID3D11RenderTargetView* a_rtv)
+	{
+		if (a_rtv) {
+			if (auto r = globals::game::renderer) {
+				for (int i = 0; i < GetRenderTargetCount(); i++) {
+					auto rt = r->GetRuntimeData().renderTargets[i];
+					if (a_rtv == Util::AsReal(rt.RTV)) {
+						return Util::AsReal(rt.SRV);
+					}
+				}
+			}
+		}
+		return nullptr;
+	}
+
+	ID3D11RenderTargetView* GetRTVFromSRV(const ID3D11ShaderResourceView* a_srv)
+	{
+		if (a_srv) {
+			if (auto r = globals::game::renderer) {
+				for (int i = 0; i < GetRenderTargetCount(); i++) {
+					auto rt = r->GetRuntimeData().renderTargets[i];
+					if (a_srv == Util::AsReal(rt.SRV) || a_srv == Util::AsReal(rt.SRVCopy)) {
+						return Util::AsReal(rt.RTV);
+					}
+				}
+			}
+		}
+		return nullptr;
+	}
+
+	std::string GetNameFromSRV(const ID3D11ShaderResourceView* a_srv)
+	{
+		using RENDER_TARGET = RE::RENDER_TARGETS::RENDER_TARGET;
+
+		if (a_srv) {
+			if (auto r = globals::game::renderer) {
+				for (int i = 0; i < GetRenderTargetCount(); i++) {
+					auto rt = r->GetRuntimeData().renderTargets[i];
+					if (a_srv == Util::AsReal(rt.SRV) || a_srv == Util::AsReal(rt.SRVCopy)) {
+						return std::string(magic_enum::enum_name(static_cast<RENDER_TARGET>(i)));
+					}
+				}
+			}
+		}
+		return "NONE";
+	}
+
+	std::string GetNameFromRTV(const ID3D11RenderTargetView* a_rtv)
+	{
+		using RENDER_TARGET = RE::RENDER_TARGETS::RENDER_TARGET;
+		if (a_rtv) {
+			if (auto r = globals::game::renderer) {
+				for (int i = 0; i < GetRenderTargetCount(); i++) {
+					auto rt = r->GetRuntimeData().renderTargets[i];
+					if (a_rtv == Util::AsReal(rt.RTV)) {
+						return std::string(magic_enum::enum_name(static_cast<RENDER_TARGET>(i)));
+					}
+				}
+			}
+		}
+		return "NONE";
+	}
+
+	GUID WKPDID_D3DDebugObjectNameT = { 0x429b8c22, 0x9188, 0x4b0c, { 0x87, 0x42, 0xac, 0xb0, 0xbf, 0x85, 0xc2, 0x00 } };
+
+	void SetResourceName(ID3D11DeviceChild* Resource, const char* Format, ...)
+	{
+		if (!Resource)
+			return;
+
+		char buffer[1024];
+		va_list va;
+
+		va_start(va, Format);
+		int len = _vsnprintf_s(buffer, _TRUNCATE, Format, va);
+		va_end(va);
+
+		if (len < 0)
+			len = static_cast<int>(strnlen(buffer, sizeof(buffer)));
+		Resource->SetPrivateData(WKPDID_D3DDebugObjectNameT, static_cast<UINT>(len), buffer);
+	}
+
+	bool GetTexture2DDesc(ID3D11View* View, D3D11_TEXTURE2D_DESC& OutDesc)
+	{
+		if (!View)
+			return false;
+
+		winrt::com_ptr<ID3D11Resource> resource;
+		View->GetResource(resource.put());
+		if (!resource)
+			return false;
+
+		winrt::com_ptr<ID3D11Texture2D> texture;
+		if (FAILED(resource->QueryInterface(IID_PPV_ARGS(texture.put()))))
+			return false;
+
+		texture->GetDesc(&OutDesc);
+		return true;
+	}
+
+	void LogShaderCompileWarnings(ID3DBlob* ErrorBlob, const std::string& Context)
+	{
+		if (ErrorBlob)
+			logger::debug("[{}] Shader logs:\n{}", Context, static_cast<char*>(ErrorBlob->GetBufferPointer()));
+	}
+
+	// Per-frame getters would otherwise retry a failed compile every frame.
+	namespace
+	{
+		std::mutex shaderCompileFailuresMutex;
+		std::unordered_set<std::string> shaderCompileFailures;
+	}
+
+	void ClearShaderCompileFailures()
+	{
+		std::lock_guard lock(shaderCompileFailuresMutex);
+		shaderCompileFailures.clear();
+	}
+
+	winrt::com_ptr<ID3DBlob> CompileShaderBlob(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program)
+	{
+		std::string failureKey = std::format("{}|{}|{}", Util::WStringToString(FilePath), ProgramType, Program);
+		for (auto& i : Defines) {
+			if (!i.first || _stricmp(i.first, "") == 0)
+				logger::error("Failed to process shader defines for {}", Util::WStringToString(FilePath));
+			else
+				failureKey += std::format("|{}={}", i.first, i.second ? i.second : "");
+		}
+		{
+			std::lock_guard lock(shaderCompileFailuresMutex);
+			if (shaderCompileFailures.contains(failureKey))
+				return nullptr;
+		}
+		auto blob = globals::shaderCache->CompileStandaloneBlobCached(FilePath, Defines, ProgramType, Program);
+		if (!blob) {
+			std::lock_guard lock(shaderCompileFailuresMutex);
+			shaderCompileFailures.insert(failureKey);
+		}
+		return blob;
+	}
+
+	ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program)
+	{
+		auto device = globals::d3d::device;
+		auto shaderBlob = CompileShaderBlob(FilePath, Defines, ProgramType, Program);
+		if (!shaderBlob)
+			return nullptr;
+
+		std::string str = Util::WStringToString(FilePath);
+		HRESULT hr = S_OK;
+		ID3D11DeviceChild* regShader = nullptr;
+		if (!_stricmp(ProgramType, "ps_5_0") || !_stricmp(ProgramType, "ps_4_0")) {
+			ID3D11PixelShader* shader = nullptr;
+			hr = device->CreatePixelShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &shader);
+			regShader = shader;
+		} else if (!_stricmp(ProgramType, "vs_5_0") || !_stricmp(ProgramType, "vs_4_0")) {
+			ID3D11VertexShader* shader = nullptr;
+			hr = device->CreateVertexShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &shader);
+			regShader = shader;
+		} else if (!_stricmp(ProgramType, "hs_5_0")) {
+			ID3D11HullShader* shader = nullptr;
+			hr = device->CreateHullShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &shader);
+			regShader = shader;
+		} else if (!_stricmp(ProgramType, "ds_5_0")) {
+			ID3D11DomainShader* shader = nullptr;
+			hr = device->CreateDomainShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &shader);
+			regShader = shader;
+		} else if (!_stricmp(ProgramType, "cs_5_0") || !_stricmp(ProgramType, "cs_4_0")) {
+			ID3D11ComputeShader* shader = nullptr;
+			hr = device->CreateComputeShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &shader);
+			regShader = shader;
+		} else {
+			return nullptr;
+		}
+
+		if (FAILED(hr)) {
+			logger::error("Failed to create shader object for {}:{}", str, Program);
+			return nullptr;
+		}
+		SetResourceName(regShader, "%s:%s", str.c_str(), Program);
+		return regShader;
+	}
+
+	// RAII wrapper for D3D mapped resources
+	class ScopedD3DMap
+	{
+	public:
+		ScopedD3DMap(ID3D11DeviceContext* context, ID3D11Resource* resource, UINT subresource, D3D11_MAP mapType, UINT mapFlags) :
+			context_(context), resource_(resource), subresource_(subresource), mapped_(false)
+		{
+			if (context && resource) {
+				HRESULT hr = context->Map(resource, subresource, mapType, mapFlags, &mappedResource_);
+				mapped_ = SUCCEEDED(hr);
+			}
+		}
+
+		~ScopedD3DMap()
+		{
+			if (mapped_ && context_ && resource_) {
+				context_->Unmap(resource_, subresource_);
+			}
+		}
+
+		// Non-copyable, non-movable for simplicity
+		ScopedD3DMap(const ScopedD3DMap&) = delete;
+		ScopedD3DMap& operator=(const ScopedD3DMap&) = delete;
+
+		bool IsValid() const { return mapped_; }
+		D3D11_MAPPED_SUBRESOURCE* GetMappedResource() { return mapped_ ? &mappedResource_ : nullptr; }
+
+	private:
+		ID3D11DeviceContext* context_;
+		ID3D11Resource* resource_;
+		UINT subresource_;
+		bool mapped_;
+		D3D11_MAPPED_SUBRESOURCE mappedResource_{};
+	};
+
+	// Helper function to validate highlight color components
+	bool ValidateHighlightColor(const std::array<float, 4>& color)
+	{
+		for (size_t i = 0; i < 4; ++i) {
+			if (color[i] < 0.0f || color[i] > 1.0f || !std::isfinite(color[i])) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	void ApplyHighlightTintToTexture(ID3D11Texture2D* texture, bool isHighlighted, const std::array<float, 4>& highlightColor)
+	{
+		if (!isHighlighted || !texture)
+			return;
+
+		// Validate input color values
+		if (!ValidateHighlightColor(highlightColor)) {
+			logger::error("ApplyHighlightTintToTexture: Invalid highlight color values. All components must be finite and in range [0.0, 1.0]");
+			return;
+		}
+
+		// Get texture description and validate dimensions
+		D3D11_TEXTURE2D_DESC desc;
+		texture->GetDesc(&desc);
+
+		// Performance consideration: warn about large textures (only once)
+		const UINT pixelCount = desc.Width * desc.Height;
+		const UINT largeTextureThreshold = 1024 * 1024;  // 1 megapixel
+		if (pixelCount > largeTextureThreshold) {
+			static std::once_flag largeTextureWarning;
+			std::call_once(largeTextureWarning, [&]() {
+				logger::warn("ApplyHighlightTintToTexture: Processing large texture ({}x{} = {} pixels). Consider using compute shader for better performance. This warning will only be shown once.",
+					desc.Width, desc.Height, pixelCount);
+			});
+		}  // Create a temporary staging texture to read from
+		ID3D11Texture2D* stagingTexture = nullptr;
+		desc.Usage = D3D11_USAGE_STAGING;
+		desc.BindFlags = 0;
+		desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+
+		HRESULT hr = globals::d3d::device->CreateTexture2D(&desc, nullptr, &stagingTexture);
+		if (FAILED(hr)) {
+			logger::error("ApplyHighlightTintToTexture: Failed to create staging texture (HRESULT: 0x{:08X})", static_cast<uint32_t>(hr));
+			return;
+		}
+
+		// RAII wrapper ensures staging texture is always released
+		std::unique_ptr<ID3D11Texture2D, void (*)(ID3D11Texture2D*)> stagingGuard(
+			stagingTexture, [](ID3D11Texture2D* tex) { if (tex) tex->Release(); });
+
+		// Copy the original texture to staging
+		globals::d3d::context->CopyResource(stagingTexture, texture);
+
+		// Use RAII wrapper for mapping/unmapping
+		ScopedD3DMap scopedMap(globals::d3d::context, stagingTexture, 0, D3D11_MAP_READ_WRITE, 0);
+		if (!scopedMap.IsValid()) {
+			logger::error("ApplyHighlightTintToTexture: Failed to map staging texture");
+			return;
+		}
+
+		D3D11_MAPPED_SUBRESOURCE* mapped = scopedMap.GetMappedResource();
+		if (!mapped || !mapped->pData) {
+			logger::error("ApplyHighlightTintToTexture: Invalid mapped resource data");
+			return;
+		}
+
+		// Apply highlight tint to each pixel
+		uint8_t* pixels = static_cast<uint8_t*>(mapped->pData);
+		const float blendAlpha = highlightColor[3];
+
+		for (UINT y = 0; y < desc.Height; ++y) {
+			for (UINT x = 0; x < desc.Width; ++x) {
+				uint8_t* pixel = pixels + (y * mapped->RowPitch + x * 4);
+
+				// Only tint non-transparent pixels (alpha > 0)
+				if (pixel[3] > 0) {
+					// Apply configurable highlight tint
+					// Blend the original color with the highlight color
+					float originalR = pixel[0] / 255.0f;
+					float originalG = pixel[1] / 255.0f;
+					float originalB = pixel[2] / 255.0f;
+
+					// Blend: original * (1 - alpha) + highlight * alpha
+					pixel[0] = static_cast<uint8_t>((originalR * (1.0f - blendAlpha) + highlightColor[0] * blendAlpha) * 255.0f);
+					pixel[1] = static_cast<uint8_t>((originalG * (1.0f - blendAlpha) + highlightColor[1] * blendAlpha) * 255.0f);
+					pixel[2] = static_cast<uint8_t>((originalB * (1.0f - blendAlpha) + highlightColor[2] * blendAlpha) * 255.0f);
+					// Alpha stays the same
+				}
+			}
+		}
+
+		// ScopedD3DMap destructor will automatically unmap the resource
+		// Copy the modified texture back
+		globals::d3d::context->CopyResource(texture, stagingTexture);
+
+		// stagingGuard destructor will automatically release the staging texture
+	}
+
+	HRESULT CreateOverlayTextureAndRTV(ID3D11Device* device, int width, int height, ID3D11Texture2D** outTex, ID3D11RenderTargetView** outRTV)
+	{
+		// Input validation
+		if (!device) {
+			logger::error("CreateOverlayTextureAndRTV: device parameter is null");
+			return E_INVALIDARG;
+		}
+
+		if (!outTex || !outRTV) {
+			logger::error("CreateOverlayTextureAndRTV: output parameters cannot be null");
+			return E_INVALIDARG;
+		}
+
+		if (width <= 0 || height <= 0) {
+			logger::error("CreateOverlayTextureAndRTV: invalid dimensions ({}x{})", width, height);
+			return E_INVALIDARG;
+		}
+
+		// Initialize output parameters
+		*outTex = nullptr;
+		*outRTV = nullptr;
+
+		D3D11_TEXTURE2D_DESC desc = {};
+		desc.Width = width;
+		desc.Height = height;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.SampleDesc.Count = 1;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+		HRESULT hr = device->CreateTexture2D(&desc, nullptr, outTex);
+		if (FAILED(hr)) {
+			logger::error("CreateOverlayTextureAndRTV: Failed to create texture (HRESULT: 0x{:08X})", static_cast<uint32_t>(hr));
+			return hr;
+		}
+
+		hr = device->CreateRenderTargetView(*outTex, nullptr, outRTV);
+		if (FAILED(hr)) {
+			logger::error("CreateOverlayTextureAndRTV: Failed to create render target view (HRESULT: 0x{:08X})", static_cast<uint32_t>(hr));
+			// Clean up the texture if RTV creation failed
+			if (*outTex) {
+				(*outTex)->Release();
+				*outTex = nullptr;
+			}
+			return hr;
+		}
+
+		return S_OK;
+	}
+
+	HRESULT SaveTextureToFile(ID3D11Device* device, ID3D11DeviceContext* context, const std::filesystem::path& path, ID3D11Texture2D* tex)
+	{
+		// Input validation
+		if (!device) {
+			logger::error("SaveTextureToFile: device parameter is null");
+			return E_INVALIDARG;
+		}
+
+		if (!context) {
+			logger::error("SaveTextureToFile: context parameter is null");
+			return E_INVALIDARG;
+		}
+
+		if (!tex) {
+			logger::error("SaveTextureToFile: texture paramater is null");
+			return E_INVALIDARG;
+		}
+
+		if (path.empty()) {
+			logger::error("SaveTextureToFile: path parameter is empty");
+			return E_INVALIDARG;
+		}
+
+		namespace fs = std::filesystem;
+
+		DirectX::ScratchImage cpuImage;
+		if (const auto hr = CaptureTexture(device, context, tex, cpuImage); FAILED(hr))
+			return hr;
+
+		const auto parent = path.parent_path();
+		std::error_code ec;
+		if (!parent.empty() && !fs::exists(parent, ec)) {
+			if (!fs::create_directories(parent, ec)) {
+				logger::error("SaveTextureToFile: failed to create directories");
+				return HRESULT_FROM_WIN32(static_cast<DWORD>(ec.value()));
+			}
+		}
+
+		const std::wstring tmp = path.wstring().append(L".tmp");
+		if (const auto hr = SaveToDDSFile(cpuImage.GetImages(), cpuImage.GetImageCount(), cpuImage.GetMetadata(), DirectX::DDS_FLAGS_NONE, tmp.c_str()); FAILED(hr)) {
+			logger::error("SaveTextureToFile: failed to save to file");
+			fs::remove(tmp);
+			return hr;
+		}
+
+		fs::rename(tmp, path, ec);
+		if (ec) {
+			fs::remove(path, ec);
+			if (ec) {
+				logger::error("SaveTextureToFile: failed to remove existing file");
+				fs::remove(tmp);
+				return HRESULT_FROM_WIN32(static_cast<DWORD>(ec.value()));
+			}
+			fs::rename(tmp, path, ec);
+			if (ec) {
+				logger::error("SaveTextureToFile: failed to rename file");
+				fs::remove(tmp);
+				return HRESULT_FROM_WIN32(static_cast<DWORD>(ec.value()));
+			}
+		}
+
+		return S_OK;
+	}
+
+	HRESULT LoadTextureFromFile(ID3D11Device* device, const std::filesystem::path& path, ID3D11Texture2D** outTex, ID3D11ShaderResourceView** outSRV)
+	{
+		// Input validation
+		if (!device) {
+			logger::error("LoadTextureFromFile: device parameter is null");
+			return E_INVALIDARG;
+		}
+
+		if (path.empty()) {
+			logger::error("LoadTextureFromFile: path parameter is empty");
+			return E_INVALIDARG;
+		}
+
+		*outTex = nullptr;
+		*outSRV = nullptr;
+
+		ID3D11Resource* resource;
+		if (const auto hr = DirectX::CreateDDSTextureFromFile(device, path.wstring().c_str(), &resource, outSRV); FAILED(hr)) {
+			logger::error("LoadTextureFromFile: failed to load resource from file");
+			return hr;
+		}
+
+		const auto hr = resource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(outTex));
+		resource->Release();
+		resource = nullptr;
+
+		if (FAILED(hr)) {
+			logger::error("LoadTextureFromFile: failed to query texture interface");
+			(*outSRV)->Release();
+			*outSRV = nullptr;
+			*outTex = nullptr;
+			return hr;
+		}
+
+		return S_OK;
+	}
+
+	FullscreenPassScope::FullscreenPassScope(ID3D11DeviceContext* a_context, UINT a_psSRVCount, UINT a_psCBStart, UINT a_psCBCount) :
+		ctx(a_context),
+		psSRVCount(a_psSRVCount),
+		psCBStart(a_psCBStart),
+		psCBCount(a_psCBCount)
+	{
+		assert(ctx && psSRVCount <= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT &&
+			   psCBStart <= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT &&
+			   psCBCount <= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT - psCBStart);
+		// Save all MRT slots, not just slot 0 — a caller may enter with multiple RTVs bound.
+		ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTV, &savedDSV);
+		ctx->RSGetViewports(&numVP, savedVP);
+		ctx->OMGetBlendState(&savedBlend, savedBlendFactor, &savedSampleMask);
+		ctx->OMGetDepthStencilState(&savedDSState, &savedStencilRef);
+		ctx->VSGetShader(&savedVS, nullptr, nullptr);
+		ctx->PSGetShader(&savedPS, nullptr, nullptr);
+		ctx->GSGetShader(&savedGS, nullptr, nullptr);
+		ctx->HSGetShader(&savedHS, nullptr, nullptr);
+		ctx->DSGetShader(&savedDS, nullptr, nullptr);
+		ctx->RSGetState(&savedRS);
+		ctx->PSGetSamplers(0, 1, &savedSampler0);
+		ctx->PSGetShaderResources(0, psSRVCount, savedPSSRVs);
+		ctx->PSGetConstantBuffers(psCBStart, psCBCount, savedPSCBs);
+		ctx->IAGetInputLayout(&savedIL);
+		ctx->IAGetVertexBuffers(0, D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT, savedVB, savedVBStride, savedVBOffset);
+		ctx->IAGetIndexBuffer(&savedIB, &savedIBFormat, &savedIBOffset);
+		ctx->IAGetPrimitiveTopology(&savedTopology);
+	}
+
+	FullscreenPassScope::~FullscreenPassScope()
+	{
+		// Restore targets before SRVs so an outgoing target cannot suppress a saved input.
+		ID3D11ShaderResourceView* nullSRVs[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
+		ctx->PSSetShaderResources(0, psSRVCount, nullSRVs);
+
+		ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTV, savedDSV);
+		ctx->PSSetShaderResources(0, psSRVCount, savedPSSRVs);
+		ctx->RSSetViewports(numVP, savedVP);
+		ctx->OMSetBlendState(savedBlend, savedBlendFactor, savedSampleMask);
+		ctx->OMSetDepthStencilState(savedDSState, savedStencilRef);
+		ctx->VSSetShader(savedVS, nullptr, 0);
+		ctx->PSSetShader(savedPS, nullptr, 0);
+		ctx->GSSetShader(savedGS, nullptr, 0);
+		ctx->HSSetShader(savedHS, nullptr, 0);
+		ctx->DSSetShader(savedDS, nullptr, 0);
+		ctx->RSSetState(savedRS);
+		ctx->PSSetSamplers(0, 1, &savedSampler0);
+		ctx->PSSetConstantBuffers(psCBStart, psCBCount, savedPSCBs);
+		ctx->IASetInputLayout(savedIL);
+		ctx->IASetVertexBuffers(0, D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT, savedVB, savedVBStride, savedVBOffset);
+		ctx->IASetIndexBuffer(savedIB, savedIBFormat, savedIBOffset);
+		ctx->IASetPrimitiveTopology(savedTopology);
+
+		SafeReleaseArray(savedRTV);
+		SafeRelease(savedDSV);
+		SafeRelease(savedBlend);
+		SafeRelease(savedDSState);
+		SafeRelease(savedVS);
+		SafeRelease(savedPS);
+		SafeRelease(savedGS);
+		SafeRelease(savedHS);
+		SafeRelease(savedDS);
+		SafeRelease(savedRS);
+		SafeRelease(savedSampler0);
+		for (UINT i = 0; i < psSRVCount; ++i)
+			SafeRelease(savedPSSRVs[i]);
+		for (UINT i = 0; i < psCBCount; ++i)
+			SafeRelease(savedPSCBs[i]);
+		SafeRelease(savedIL);
+		SafeReleaseArray(savedVB);
+		SafeRelease(savedIB);
+	}
+}  // namespace Util

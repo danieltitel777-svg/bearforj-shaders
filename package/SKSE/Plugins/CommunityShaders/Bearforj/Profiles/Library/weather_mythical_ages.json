@@ -1,0 +1,22 @@
+{
+  "id": "weather_mythical_ages",
+  "name": "Mythical Ages + Patka's Imagespaces for CS",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/11578",
+  "plugins": [
+    "Mythical Ages.esp",
+    "Patka's Mythical Ages Imagespaces.esp"
+  ],
+  "notes": "Imagespaces: https://www.nexusmods.com/skyrimspecialedition/mods/155146. Very intense storms -> more wetness. Darker fantasy look.",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.25,
+      "Warmth": 0.35,
+      "NightLift": 0.25,
+      "TonemapMix": 80
+    },
+    "WetnessEffects": {
+      "MaxRainWetness": 1.2
+    }
+  }
+}

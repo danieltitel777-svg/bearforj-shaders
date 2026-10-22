@@ -1,0 +1,131 @@
+#include "GrassLighting.h"
+#include "Bearforj/TipUI.h"
+
+#include "GrassOptimizations.h"
+#include "I18n/I18n.h"
+#include "Utils/UI.h"
+
+#define I18N_KEY_PREFIX "feature.grass_lighting."
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+	GrassLighting::Settings,
+	Glossiness,
+	SpecularStrength,
+	SubsurfaceScatteringAmount,
+	OverrideComplexGrassSettings,
+	BasicGrassBrightness,
+	EnableWrappedLighting,
+	ComplexGrassThreshold,
+	MidLODBrightness,
+	FarLODBrightness)
+
+void GrassLighting::DrawSettings()
+{
+	if (ImGui::TreeNodeEx(T(TKEY("complex_grass"), "Complex Grass"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		ImGui::TextWrapped("%s", T(TKEY("specular_desc"), "Specular highlights for complex grass"));
+		BFUI::SliderFloat(T(TKEY("glossiness"), "Glossiness"), &settings.Glossiness, 1.0f, 100.0f);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("glossiness_tooltip"), "Specular highlight glossiness."));
+		}
+
+		BFUI::SliderFloat(T(TKEY("specular_strength"), "Specular Strength"), &settings.SpecularStrength, 0.0f, 1.0f);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("specular_strength_tooltip"), "Specular highlight strength."));
+		}
+
+		ImGui::Spacing();
+		ImGui::TextWrapped("%s", T(TKEY("detection_header"), "Complex Grass Detection"));
+		BFUI::SliderFloat(T(TKEY("detection_threshold"), "Detection Threshold"), &settings.ComplexGrassThreshold, 0.001f, 0.1f, "%.3f");
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("detection_threshold_tooltip"),
+								  "Threshold for detecting complex grass textures. Lower values are more strict."));
+		}
+
+		ImGui::Spacing();
+		ImGui::Spacing();
+		ImGui::TreePop();
+	}
+
+	if (ImGui::TreeNodeEx(T(TKEY("effects"), "Effects"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		BFUI::SliderFloat(T(TKEY("sss_amount"), "SSS Amount"), &settings.SubsurfaceScatteringAmount, 0.0f, 1.0f);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("sss_tooltip"),
+								  "Subsurface Scattering (SSS) amount. "
+								  "Soft lighting controls how evenly lit an object is. "
+								  "Back lighting illuminates the back face of an object. "
+								  "Combined to model the transport of light through the surface."));
+		}
+
+		ImGui::Spacing();
+		ImGui::Spacing();
+		ImGui::TreePop();
+	}
+
+	if (ImGui::TreeNodeEx(T(TKEY("lighting"), "Lighting"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		Util::CheckboxFlag(T(TKEY("enable_wrapped_lighting"), "Enable Wrapped Lighting"), settings.EnableWrappedLighting);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("enable_wrapped_lighting_tooltip"),
+								  "Enables a softer-looking wrapped lighting model from CS 1.3. "
+								  "Useful for certain non-complex grass textures that look too dark during midday, when the sun is directly overhead."));
+		}
+		ImGui::Spacing();
+		ImGui::Spacing();
+		Util::CheckboxFlag(T(TKEY("override_complex"), "Override Complex Grass Lighting Settings"), settings.OverrideComplexGrassSettings);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("override_complex_tooltip"),
+								  "Override the settings set by the grass mesh author. "
+								  "Complex grass authors can define the brightness for their grass meshes. "
+								  "However, some authors may not account for the extra lights available from {brand}. "
+								  "This option will treat their grass settings like non-complex grass. "
+								  "This was the default in Community Shaders < 0.7.0"));
+		}
+		ImGui::Spacing();
+		ImGui::Spacing();
+		ImGui::TextWrapped("%s", T(TKEY("basic_grass"), "Basic Grass"));
+		BFUI::SliderFloat(T(TKEY("brightness"), "Brightness"), &settings.BasicGrassBrightness, 0.0f, 1.0f);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("brightness_tooltip"), "Darkens the grass textures to look better with the new lighting"));
+		}
+
+		if (globals::features::grassOptimizations.loaded) {
+			ImGui::Spacing();
+			ImGui::TextWrapped("%s", T(TKEY("mid_lod_grass"), "Middle LOD Grass"));
+			ImGui::PushID("midlod");
+			BFUI::SliderFloat(T(TKEY("lod_brightness"), "Brightness"), &settings.MidLODBrightness, 0.0f, 2.0f, "%.2f");
+			if (auto _tt = Util::HoverTooltipWrapper()) {
+				ImGui::Text("%s", T(TKEY("mid_lod_brightness_tooltip"),
+									  "Raise or lower until middle-distance LOD grass matches the full-detail grass around it. Requires Grass Optimizations with Middle LOD enabled."));
+			}
+			ImGui::PopID();
+
+			ImGui::Spacing();
+			ImGui::TextWrapped("%s", T(TKEY("far_lod_grass"), "Far LOD Grass"));
+			ImGui::PushID("farlod");
+			BFUI::SliderFloat(T(TKEY("lod_brightness"), "Brightness"), &settings.FarLODBrightness, 0.0f, 2.0f, "%.2f");
+			if (auto _tt = Util::HoverTooltipWrapper()) {
+				ImGui::Text("%s", T(TKEY("far_lod_brightness_tooltip"),
+									  "Raise or lower until the most distant LOD grass matches the middle LOD grass in front of it. Requires Grass Optimizations with Far LOD enabled."));
+			}
+			ImGui::PopID();
+		}
+
+		ImGui::TreePop();
+	}
+}
+
+#undef I18N_KEY_PREFIX
+
+void GrassLighting::LoadSettings(json& o_json)
+{
+	settings = o_json;
+}
+
+void GrassLighting::SaveSettings(json& o_json)
+{
+	o_json = settings;
+}
+
+void GrassLighting::RestoreDefaultSettings()
+{
+	settings = {};
+}

@@ -1,0 +1,22 @@
+{
+  "id": "weather_obsidian_cs",
+  "name": "Obsidian Weathers + Obsidian CS",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/162627",
+  "plugins": [
+    "Obsidian Weathers.esp",
+    "Obsidian CS.esp"
+  ],
+  "notes": "Filmic tonemap + new VL in Obsidian CS; moody/dark nights so moderate lift, slightly thinner height fog over its volumetric mists.",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.1,
+      "Warmth": 0.45,
+      "NightLift": 0.35,
+      "TonemapMix": 30
+    },
+    "ExponentialHeightFog": {
+      "fogDensity": 0.004
+    }
+  }
+}

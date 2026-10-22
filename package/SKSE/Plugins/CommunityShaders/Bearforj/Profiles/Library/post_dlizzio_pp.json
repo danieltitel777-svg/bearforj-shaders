@@ -1,0 +1,15 @@
+{
+  "id": "post_dlizzio_pp",
+  "name": "Dlizzio's Post Processing (Open Shaders, Sep 2026)",
+  "kind": "post",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/193337",
+  "plugins": [
+    "Dlizzio's Post Processing.esp"
+  ],
+  "notes": "Full post-processing chain for OS (Azurite III CS / NAT.CS III / Astralite / Vanilla CS). Bearforj tonemap mix set to 0% so the image is not tonemapped twice. Detection: plugin name guessed; pick it in the installer to be sure.",
+  "patch": {
+    "BearforjLook": {
+      "TonemapMix": 0
+    }
+  }
+}

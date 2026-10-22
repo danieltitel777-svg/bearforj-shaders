@@ -1,0 +1,14 @@
+SKSE/Plugins/CommunityShaders/Themes/Default.json	package/SKSE/Plugins/CommunityShaders/Themes/Default.json
+SKSE/Plugins/CommunityShaders/Translations/en.json	package/SKSE/Plugins/CommunityShaders/Translations/en.json
+SKSE/Plugins/CommunityShaders/Translations/ru.json	package/SKSE/Plugins/CommunityShaders/Translations/ru.json
+Shaders/Common/LightingEval.hlsli	package/Shaders/Common/LightingEval.hlsli
+Shaders/Common/SharedData.hlsli	package/Shaders/Common/SharedData.hlsli
+Shaders/DeferredCompositeCS.hlsl	package/Shaders/DeferredCompositeCS.hlsl
+Shaders/DistantTree.hlsl	package/Shaders/DistantTree.hlsl
+Shaders/Effect.hlsl	package/Shaders/Effect.hlsl
+Shaders/ExponentialHeightFog/VolumetricFogLightScatteringCS.hlsl	features/Exponential Height Fog/Shaders/ExponentialHeightFog/VolumetricFogLightScatteringCS.hlsl
+Shaders/Lighting.hlsl	package/Shaders/Lighting.hlsl
+Shaders/Particle.hlsl	package/Shaders/Particle.hlsl
+Shaders/RunGrass.hlsl	package/Shaders/RunGrass.hlsl
+Shaders/Sky.hlsl	package/Shaders/Sky.hlsl
+Shaders/Water.hlsl	package/Shaders/Water.hlsl

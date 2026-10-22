@@ -1,0 +1,24 @@
+{
+  "id": "weather_cathedral_cs",
+  "name": "Cathedral Weathers + Cathedral CS",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/162681",
+  "plugins": [
+    "Cathedral Weathers.esp",
+    "Cathedral CS.esp",
+    "Cathedral CS.esl",
+    "Cathedral Weathers.esl"
+  ],
+  "notes": "Cathedral CS 2.0 already brightened nights + DALC; low night lift.",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.15,
+      "Warmth": 0.35,
+      "NightLift": 0.15,
+      "TonemapMix": 40
+    },
+    "SkySync": {
+      "FullMoonIntensity": 1.0
+    }
+  }
+}

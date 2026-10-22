@@ -1,0 +1,24 @@
+{
+  "id": "weather_vespro_cs",
+  "name": "Vespro + Vespro Weather - CS (Oct 2026)",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/194707",
+  "plugins": [
+    "Vespro.esp",
+    "Vespro Weather.esp",
+    "Vespro Weather - CS.esp",
+    "Vespro CS.esp"
+  ],
+  "notes": "Vespro (https://www.nexusmods.com/skyrimspecialedition/mods/194250, 8 Oct 2026) + CS tonemap patch (10 Oct 2026). Own CS tonemap -> Bearforj tonemap mix 30%. Cloudy/foggy nights are meant to be very dark: low night lift. Needs Helios (vanilla option) + Moons and Stars. Built for ENB; with Effects 11 the CS patch is not needed.",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.3,
+      "Warmth": 0.35,
+      "NightLift": 0.25,
+      "TonemapMix": 30
+    },
+    "PseudoSunBounce": {
+      "intensity": 0.2
+    }
+  }
+}

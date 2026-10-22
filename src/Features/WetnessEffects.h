@@ -1,0 +1,272 @@
+#pragma once
+
+#include "Buffer.h"
+#include "Utils/FrameLatch.h"
+
+/** @brief Adds dynamic weather-driven wetness, puddle formation, shore wetness, and raindrop effects. */
+struct WetnessEffects : Feature
+{
+private:
+	static constexpr std::string_view MOD_ID = "112739";
+
+public:
+	virtual inline std::string GetName() override { return "Wetness Effects"; }
+	virtual std::string GetDisplayName() override { return T("feature.wetness_effects.name", "Wetness Effects"); }
+	/** @brief Returns the short identifier used for file paths and logging. */
+	virtual inline std::string GetShortName() override { return "WetnessEffects"; }
+	virtual inline std::string GetFeatureModLink() override { return MakeNexusModURL(MOD_ID); }
+	virtual inline std::string_view GetShaderDefineName() override { return "WETNESS_EFFECTS"; }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kWater; }
+
+	/** @brief Returns a summary description and list of key features for the UI. */
+	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
+	{
+		return { T("feature.wetness_effects.description", "Adds weather-driven environmental wetness plus model-attached water drops and trails on characters."),
+			{ T("feature.wetness_effects.key_feature_1", "Dynamic surface wetness based on weather conditions"),
+				T("feature.wetness_effects.key_feature_2", "Realistic puddle formation and shore wetness effects"),
+				T("feature.wetness_effects.key_feature_3", "Animated raindrop effects with splashes and ripples"),
+				T("feature.wetness_effects.key_feature_4", "Configurable wetness intensity and weather transitions"),
+				T("feature.wetness_effects.key_feature_5", "Model-attached character droplets, trails, and wet-surface lighting") } };
+	};
+
+	bool HasShaderDefine(RE::BSShader::Type) override { return true; };
+
+	struct Settings
+	{
+		uint EnableWetnessEffects = true;
+		float MaxRainWetness = 1.0f;
+		float MaxPuddleWetness = 1.5f;
+		float MaxShoreWetness = 1.0f;
+		float GrassWetnessRoughness = 0.12f;
+		uint ShoreRange = 32;
+		float PuddleRadius = 1.0f;
+		float PuddleMaxAngle = 0.95f;
+		float PuddleMinWetness = 0.85f;
+		float MinRainWetness = 0.65f;
+		float HairWetness = 0.5f;
+		float WeatherTransitionSpeed = 3.0f;
+
+		// Raindrop fx settings
+		uint EnableRaindropFx = true;
+		uint EnableSplashes = true;
+		uint EnableRipples = true;
+		uint EnableVanillaRipples = false;
+		float RaindropFxRange = 1000.f;
+		float RaindropGridSize = 4.f;
+		float RaindropInterval = 1.0f;
+		float RaindropChance = 1.0f;
+		float SplashesLifetime = 10.0f;
+		float SplashesStrength = 1.05f;
+		float SplashesMinRadius = .3f;
+		float SplashesMaxRadius = .5f;
+		float RippleStrength = 1.f;
+		float RippleRadius = 1.f;
+		float RippleBreadth = .5f;
+		float RippleLifetime = .5f;
+
+		uint EnableCharacterRainSpots = true;
+		float CharacterSpotDensity = 1.0f;
+		float CharacterSpotRadius = 0.75f;
+		float CharacterSpotStrength = 1.0f;
+		float CharacterSpotRoughness = 0.1f;
+		float CharacterSpotNormalStrength = 0.75f;
+		uint CharacterSpotDebug = 0u;
+		float CharacterCoatIntensity = 5.0f;
+		float CharacterWetSheen = 0.55f;
+		float CharacterRainActivityMultiplier = 2.5f;
+		// Used by CPU wetness decay; retained here to preserve the mirrored settings layout.
+		float CharacterDryTime = 10.0f;
+		uint EnableWeaponRainDrops = true;
+	};
+
+	/** @brief Stable debug-mode ordering shared by the character-rain UI and frame upload. */
+	enum class CharacterDebugMode : std::uint32_t
+	{
+		Shading,
+		Combined,
+		Settled,
+		Impacts,
+		Flow,
+		Surfaces,
+		Weapons,
+		Count
+	};
+	static_assert(sizeof(Settings) == 160);
+
+	struct alignas(16) PerFrame
+	{
+		REX::W32::XMFLOAT4X4 OcclusionViewProj;
+		float Time;
+		float Raining;
+		float Wetness;
+		float PuddleWetness;
+		Settings settings;
+		float CharacterImpactIntensity;
+		float CharacterRetainedWetness;
+		float2 CharacterStatePadding;
+		// Bearforj: Surface Rain Flow (CS PR #2912) layered on this wetness system. Appended so the
+		// existing PerFrame offsets are unchanged.
+		struct SurfaceRainFlowData
+		{
+			float WallRainDensity;
+			float WallRainDropSize;
+			float WallRainSpeed;
+			float WallRainLayering;
+			float WallRainNormalStrength;
+			float WallRainWetness;
+			float WallRainDarkening;
+			uint EnableWallRain;
+			float WallRainTrailLength;
+			float pad[3];
+		} rainFlow;
+	};
+	STATIC_ASSERT_ALIGNAS_16(PerFrame);
+	static_assert(sizeof(PerFrame) == 304);
+
+	/** @brief Bearforj: Surface Rain Flow settings (drops and streaks on roofs, walls and rocks). */
+	struct RainFlowSettings
+	{
+		uint EnableWallRain = true;
+		float WallRainDensity = 1.0f;
+		float WallRainDropSize = 1.0f;
+		float WallRainTrailLength = 1.0f;
+		float WallRainSpeed = 1.0f;
+		float WallRainLayering = 1.0f;
+		float WallRainNormalStrength = 2.0f;
+		float WallRainWetness = 1.0f;
+		float WallRainDarkening = 0.65f;
+	} rainFlowSettings;
+	void DrawRainFlowSettings();
+
+	struct DebugSettings
+	{
+		bool EnableWetnessOverride = false;
+		bool EnablePuddleOverride = false;
+		bool EnableRainOverride = false;
+		bool EnableIntExOverride = false;
+		float2 WetnessOverride = float2(0.0f, 0.0f);
+		float2 PuddleWetnessOverride = float2(0.0f, 0.0f);
+		float2 RainOverride = float2(0.0f, 0.0f);
+	} debugSettings;
+
+	Settings settings;
+	// Climate preset system
+	enum class ClimatePreset : uint32_t
+	{
+		Custom = 0,
+		Legacy = 1,
+		NordicStandard = 2,
+		ArcticTundra = 3,
+		TemperateCoastal = 4,
+		MonsoonExtreme = 5
+	};
+	struct ClimateSettings
+	{
+		float wetnessMultiplier;
+		float puddleMultiplier;
+		float transitionSpeed;
+		float raindropChance;
+		float raindropGridSize;
+		float raindropInterval;
+	};
+	static constexpr ClimatePreset defaultPreset = ClimatePreset::NordicStandard;
+	ClimatePreset climatePreset = defaultPreset;
+
+	/**
+	 * @brief Builds the per-frame constant buffer data including weather state and settings.
+	 * Animation and retained-wetness state advance at most once per rendered frame, however often this is called.
+	 */
+	PerFrame GetCommonBufferData() const;
+
+	/** @brief Updates wetness state and binds the per-frame constant buffer. */
+	virtual void Prepass() override;
+	/** @brief Detects Splashes of Storms mod presence for compatibility handling. */
+	virtual void PostPostLoad() override;
+	/** @brief Registers character geometry lifecycle listeners after data loading. */
+	virtual void DataLoaded() override;
+	/** @brief Queues actors already loaded with the current save. */
+	virtual void GameLoaded() override;
+
+	/** @brief Draws the ImGui settings panel for wetness effects configuration. */
+	virtual void DrawSettings() override;
+
+	virtual void LoadSettings(json& o_json) override;
+	virtual void SaveSettings(json& o_json) override;
+
+	virtual void RestoreDefaultSettings() override;
+
+	virtual bool SupportsVR() override { return true; };
+
+	/** @brief Returns the weather analysis configuration for the debug weather analysis panel. */
+	virtual WeatherAnalysisConfig GetWeatherAnalysisConfig() const override;
+
+	// Constants and utilities for rain intensity calculations
+	static constexpr float MAX_RAIN_PARTICLE_DENSITY = 3.0f;
+
+	/**
+	 * @brief Extracts rain intensity from the active precipitation geometry and weather.
+	 * @param precipObject The precipitation particle geometry.
+	 * @param weather The current weather form.
+	 * @return Normalized rain intensity in the range [0, 1].
+	 */
+	static float GetRainIntensity(RE::NiPointer<RE::BSGeometry> precipObject, RE::TESWeather* weather);
+	/**
+	 * @brief Calculates the precipitation rate in mm/hr from raindrop shader parameters.
+	 * @param raindropChance Probability of a raindrop spawning per grid cell per interval.
+	 * @param raindropGridSizeGameUnits Size of each raindrop grid cell in game units.
+	 * @param raindropIntervalSeconds Time between raindrop spawn attempts in seconds.
+	 * @param mlPerDrop Volume of each raindrop in milliliters.
+	 * @return Estimated precipitation rate in mm/hr.
+	 */
+	float CalculatePrecipitationRate(float raindropChance, float raindropGridSizeGameUnits, float raindropIntervalSeconds, float mlPerDrop = 0.01f) const;
+	/**
+	 * @brief Returns the climate settings for a given preset.
+	 * @param preset The climate preset to look up.
+	 * @return Reference to the preset's climate settings.
+	 */
+	static const ClimateSettings& GetClimateSettings(ClimatePreset preset);
+	/**
+	 * @brief Applies a climate preset, overwriting the current wetness and raindrop settings.
+	 * @param preset The climate preset to apply.
+	 */
+	void ApplyClimatePreset(ClimatePreset preset);
+	/**
+	 * @brief Checks whether the current settings exactly match a given climate preset.
+	 * @param preset The climate preset to compare against.
+	 * @return True if all settings match the preset values.
+	 */
+	bool DoesCurrentSettingsMatchPreset(ClimatePreset preset) const;
+	/** @brief Detects which climate preset matches the current settings, if any. */
+	void DetectCurrentPreset();
+	/** @brief Returns whether render-pass geometry needs character rain surface classification. */
+	bool ShouldClassifyCharacterRainSurfaces() const
+	{
+		const bool characterEffectsEnabled = settings.EnableWetnessEffects && settings.EnableCharacterRainSpots;
+		const bool characterWaterVisible = characterSurfaceWetness > 0.0f || settings.CharacterSpotDebug != 0u;
+		return loaded && characterEffectsEnabled && characterWaterVisible;
+	}
+
+	/** @brief Bearforj: retained character rain wetness (0..1), used by Submersion Wetness for the rain coat. */
+	float GetCharacterRetainedWetness() const { return characterSurfaceWetness; }
+
+private:
+	void DrawEnvironmentWetnessSettings();
+	void DrawCharacterRainSettings();
+	void RestoreCharacterRainDefaults();
+	void UpdateCharacterRainData(PerFrame& a_data) const;
+	void DrawWeatherAnalysis() const;
+
+	mutable float characterSurfaceWetness = 0.0f;
+	mutable Util::FrameLatch characterWetnessFrame;
+	mutable Util::FrameLatch rainTimerFrame;
+	bool splashesOfStormsLoaded = false;
+
+	// Weather wetness calculation result for debug display
+	struct WeatherWetnessResult
+	{
+		float wetness = 0.0f;
+		float puddleWetness = 0.0f;
+	};
+
+	WeatherWetnessResult CalculateWeatherWetness(RE::TESWeather* weather, float weatherPct, bool isCurrentWeather) const;
+};

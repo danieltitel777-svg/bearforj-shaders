@@ -1,0 +1,18 @@
+{
+  "id": "light_lux_cs",
+  "name": "Lux + Lux CS",
+  "kind": "lighting",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/153919",
+  "plugins": [
+    "Lux.esp",
+    "Lux - Master plugin.esm",
+    "Lux CS.esp",
+    "Lux - Resources.esp"
+  ],
+  "notes": "Lux: https://www.nexusmods.com/skyrimspecialedition/mods/43158. Lux CS adds ISL + tonemap. NOT compatible with True Light, WSU, ATLM. Reinstall Lux without 'optimized' meshes.",
+  "patch": {
+    "PseudoSunBounce": {
+      "intensity": 0.25
+    }
+  }
+}

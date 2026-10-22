@@ -1,0 +1,19 @@
+{
+  "id": "weather_astralite",
+  "name": "Astralite Weathers",
+  "kind": "weather",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/156979",
+  "plugins": [
+    "Astralite Weathers.esp",
+    "Astralite.esp"
+  ],
+  "notes": "High-fantasy CS weather; needs Cloud Shadows + Sky Sync (Bearforj has both).",
+  "patch": {
+    "BearforjLook": {
+      "TonemapStrength": 0.15,
+      "Warmth": 0.3,
+      "NightLift": 0.3,
+      "TonemapMix": 40
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "light_lux_via",
+  "name": "Lux Via (roads)",
+  "kind": "lighting",
+  "url": "https://www.nexusmods.com/skyrimspecialedition/mods/63588",
+  "plugins": [
+    "Lux Via.esp",
+    "Lux Via - Master plugin.esm",
+    "Lux Via - Lanterns.esm"
+  ],
+  "notes": "Road lanterns; no Bearforj changes needed.",
+  "patch": {}
+}

@@ -1,0 +1,894 @@
+import importlib.util
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+
+ROOT = Path(__file__).parents[1]
+GENERATOR_PATH = ROOT / "cmake" / "generate_scene_settings_catalog.py"
+SPEC = importlib.util.spec_from_file_location("scene_catalog_generator", GENERATOR_PATH)
+GENERATOR = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader
+SPEC.loader.exec_module(GENERATOR)
+
+
+SYNTHETIC_HEADER = r'''
+struct SyntheticFeature : Feature
+{
+    struct NestedSettings
+    {
+        float amount = 0.0f;
+    };
+
+    struct Settings
+    {
+        float regular = 0.0f;
+        NestedSettings nested{};
+        float guardSentinel = 0.0f;
+        float2 unboundedRange{};
+        float constrained = 0.0f;
+        int iterations = 0;
+        float3 standardColor3{};
+        float4 standardColor4{};
+        float3 hdrColor3{};
+        float4 hdrColor4{};
+        uint32_t wrappedToggle = 0;
+        float wrappedFloat = 0.0f;
+        float3 wrappedColor3{};
+        float4 wrappedColor4{};
+        uint32_t proxyToggle = 0;
+        uint32_t proxySteps = 0;
+        uint32_t tableMode = 0;
+        bool fallbackToggle = false;
+        int fallbackInteger = 0;
+        float fallbackFloat = 0.0f;
+        std::string fallbackText;
+    } settings;
+
+    std::string GetShortName() { return "Synthetic"; }
+    std::string GetName() { return "Synthetic Feature"; }
+};
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+    SyntheticFeature::NestedSettings,
+    amount)
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+    SyntheticFeature::Settings,
+    regular,
+    nested,
+    guardSentinel,
+    unboundedRange,
+    constrained,
+    iterations,
+    standardColor3,
+    standardColor4,
+    hdrColor3,
+    hdrColor4,
+    wrappedToggle,
+    wrappedFloat,
+    wrappedColor3,
+    wrappedColor4,
+    proxyToggle,
+    proxySteps,
+    tableMode,
+    fallbackToggle,
+    fallbackInteger,
+    fallbackFloat,
+    fallbackText)
+'''
+
+
+SYNTHETIC_SOURCE = r'''
+#define I18N_KEY_PREFIX "feature.synthetic."
+
+constexpr uint32_t kModeFirst = 2;
+constexpr uint32_t kModeSecond = 5;
+constexpr uint32_t kModeThird = 9;
+constexpr uint32_t kModeFourth = 14;
+constexpr uint32_t kProxyMaximum = 12;
+
+namespace Synthetic::Wrappers
+{
+bool Checkbox(const char* label, Feature* feature, const char* settingName, bool* value)
+{
+    return ImGui::Checkbox(label, value);
+}
+
+bool SliderFloat(const char* label, Feature* feature, const char* settingName, float* value,
+                 float minimum, float maximum, const char* format)
+{
+    return ImGui::SliderFloat(
+        label, value, minimum, maximum, format);
+}
+
+bool ColorEdit3(const char* label, Feature* feature, const char* settingName, float values[3])
+{
+    return ImGui::ColorEdit3(label, values);
+}
+
+bool ColorEdit4(const char* label, Feature* feature, const char* settingName, float values[4])
+{
+    return ImGui::ColorEdit4(label, values);
+}
+}
+
+namespace Synthetic::Decoys
+{
+bool Checkbox(const char* label, Feature* feature, const char* settingName, bool* value)
+{
+    return ImGui::Checkbox(label, value);
+}
+
+bool SliderFloat(const char* label, Feature* feature, const char* settingName, float* value,
+                 float minimum, float maximum, const char* format)
+{
+    return ImGui::SliderFloat(label, value, -100.0f, 100.0f, format);
+}
+
+bool ColorEdit3(const char* label, Feature* feature, const char* settingName, float values[3])
+{
+    return ImGui::ColorEdit3(label, values, ImGuiColorEditFlags_HDR);
+}
+
+bool ColorEdit4(const char* label, Feature* feature, const char* settingName, float values[4])
+{
+    return ImGui::ColorEdit4(label, values, ImGuiColorEditFlags_HDR);
+}
+}
+
+void DrawGuardedSlider(const char* label, float& value, float minimum, float maximum)
+{
+    ImGui::SliderFloat(label, &value, minimum, maximum);
+}
+
+void SyntheticFeature::DrawSettings()
+{
+    if (ImGui::BeginTabItem(T(TKEY("advanced"), "Advanced"))) {
+        ImGui::SeparatorText(T(TKEY("shape"), "Shape"));
+        ImGui::SliderFloat(
+            T(TKEY("regular"), "Regular"), &settings.regular, -1.0f, 1.0f);
+        ImGui::InputFloat2(
+            T(TKEY("unbounded_range"), "Unbounded Range"),
+            &settings.unboundedRange.x, "%.3f");
+
+        const ImGuiSliderFlags constrainedFlags = ImGuiSliderFlags_AlwaysClamp;
+        ImGui::SliderFloat(
+            T(TKEY("constrained"), "Constrained"),
+            &settings.constrained, -2.0f, 2.0f, "%.3f", constrainedFlags);
+        ImGui::SliderInt(
+            T(TKEY("iterations"), "Iterations"), &settings.iterations, 1, 8);
+        ImGui::ColorEdit3(
+            T(TKEY("standard_color_3"), "Standard Color 3"),
+            &settings.standardColor3.x);
+        ImGui::ColorEdit4(
+            T(TKEY("standard_color_4"), "Standard Color 4"),
+            &settings.standardColor4.x);
+        ImGui::ColorEdit3(
+            T(TKEY("hdr_color_3"), "HDR Color 3"),
+            &settings.hdrColor3.x, ImGuiColorEditFlags_HDR);
+        ImGui::ColorEdit4(
+            T(TKEY("hdr_color_4"), "HDR Color 4"),
+            &settings.hdrColor4.x, ImGuiColorEditFlags_HDR);
+        Synthetic::Wrappers::Checkbox(
+            T(TKEY("wrapped_toggle"), "Wrapped Toggle"), this,
+            "wrappedToggle", (bool*)&settings.wrappedToggle);
+        Synthetic::Wrappers::SliderFloat(
+            T(TKEY("wrapped_float"), "Wrapped Float"), this,
+            "wrappedFloat", &settings.wrappedFloat, -4.0f, 9.0f, "%.2f");
+        Synthetic::Wrappers::ColorEdit3(
+            T(TKEY("wrapped_color_3"), "Wrapped Color 3"), this,
+            "wrappedColor3", &settings.wrappedColor3.x);
+        Synthetic::Wrappers::ColorEdit4(
+            T(TKEY("wrapped_color_4"), "Wrapped Color 4"), this,
+            "wrappedColor4", &settings.wrappedColor4.x);
+        bool proxyToggle = settings.proxyToggle != 0;
+        if (ImGui::Checkbox(
+                T(TKEY("proxy_toggle"), "Proxy Toggle"), &proxyToggle)) {
+            settings.proxyToggle = proxyToggle ? 1u : 0u;
+        }
+        int proxySteps = (int)settings.proxySteps;
+        if (ImGui::SliderInt(
+                T(TKEY("proxy_steps"), "Proxy Steps"), &proxySteps,
+                2, (int)kProxyMaximum)) {
+            settings.proxySteps = (uint)std::clamp(
+                proxySteps, 2, (int)kProxyMaximum);
+        }
+        struct TableOption
+        {
+            uint32_t value;
+            const char* label;
+        };
+        const TableOption tableOptions[][2] = {
+            {
+                { kModeFirst, T(TKEY("mode_first"), "First") },
+                { kModeSecond, T(TKEY("mode_second"), "Second") },
+            },
+            {
+                { kModeThird, T(TKEY("mode_third"), "Third") },
+                { kModeFourth, T(TKEY("mode_fourth"), "Fourth") },
+            },
+        };
+        int tableMode = static_cast<int>(settings.tableMode);
+        if (ImGui::BeginTable("##TableOptions", 2)) {
+            for (const auto& row : tableOptions) {
+                for (const auto& option : row) {
+                    ImGui::TableNextColumn();
+                    if (ImGui::RadioButton(
+                            option.label, &tableMode,
+                            static_cast<int>(option.value))) {
+                        settings.tableMode = static_cast<uint32_t>(tableMode);
+                    }
+                }
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndTabItem();
+    }
+
+    DrawNestedSettings();
+}
+
+void SyntheticFeature::DrawNestedSettings()
+{
+    if (!ImGui::BeginTabItem(T(TKEY("nested"), "Nested Group")))
+        return;
+
+    auto& nested = settings.nested;
+    ImGui::SeparatorText(T(TKEY("section"), "Section"));
+    DrawGuardedSlider(
+        T(TKEY("nested_amount"), "Nested Amount"), nested.amount, 0.0f, 2.0f);
+    ImGui::EndTabItem();
+
+    settings.guardSentinel = settings.guardSentinel;
+}
+
+void SyntheticFeature::SaveSettings(json& output)
+{
+    output = settings;
+}
+'''
+
+
+def write_synthetic_source(root: Path) -> None:
+    source_dir = root / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "SyntheticFeature.h").write_text(
+        SYNTHETIC_HEADER, encoding="utf-8")
+    (source_dir / "SyntheticFeature.cpp").write_text(
+        SYNTHETIC_SOURCE, encoding="utf-8")
+
+
+class SceneSettingsCatalogGeneratorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_directory = tempfile.TemporaryDirectory()
+        cls.synthetic_root = Path(cls.temp_directory.name)
+        write_synthetic_source(cls.synthetic_root)
+        cls.entries = GENERATOR.build_entries(cls.synthetic_root)
+        cls.entries_by_id = {
+            (entry["path"], entry["key"]): entry
+            for entry in cls.entries
+        }
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temp_directory.cleanup()
+
+    def test_numeric_widgets_preserve_source_and_input_policy(self):
+        regular = self.entries_by_id[("", "regular")]
+        constrained = self.entries_by_id[("", "constrained")]
+        integer = self.entries_by_id[("", "iterations")]
+
+        self.assertEqual(regular["sourceWidget"], "SliderFloat")
+        self.assertEqual((regular["minimum"], regular["maximum"]), (-1.0, 1.0))
+        self.assertFalse(regular["clampNumericInput"])
+
+        self.assertEqual(constrained["sourceWidget"], "SliderFloat")
+        self.assertEqual(
+            (constrained["minimum"], constrained["maximum"]), (-2.0, 2.0))
+        self.assertTrue(constrained["clampNumericInput"])
+
+        self.assertEqual(integer["sourceWidget"], "SliderInt")
+        self.assertEqual(integer["type"], "Integer")
+        self.assertEqual((integer["minimum"], integer["maximum"]), (1.0, 8.0))
+
+    def test_unbounded_aggregate_uses_default_component_labels_without_bounds(self):
+        entries = [
+            self.entries_by_id[("unboundedRange", component)]
+            for component in ("x", "y")
+        ]
+
+        self.assertEqual(
+            [entry["componentDisplayName"] for entry in entries],
+            ["", ""])
+        self.assertTrue(all(entry["componentDisplayNameKey"] == "" for entry in entries))
+        self.assertTrue(all(entry["sourceWidget"] == "InputFloat2" for entry in entries))
+        self.assertTrue(all(not entry["hasNumericBounds"] for entry in entries))
+
+    def test_early_return_tab_and_nested_draw_helper_are_discovered(self):
+        guarded = self.entries_by_id[("nested", "amount")]
+        sentinel = self.entries_by_id[("", "guardSentinel")]
+
+        self.assertEqual(guarded["selectorPath"], "Nested Group")
+        self.assertEqual(guarded["displayName"], "Nested Amount")
+        self.assertEqual(guarded["displayPath"], "Section/nested")
+        self.assertEqual(guarded["displayPathKeys"], "feature.synthetic.section/-")
+        self.assertEqual(guarded["sourceWidget"], "SliderFloat")
+        self.assertEqual((guarded["minimum"], guarded["maximum"]), (0.0, 2.0))
+        self.assertEqual(sentinel["selectorPath"], "")
+
+    def test_component_discovery_tracks_factories_in_assigned_expressions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "src"
+            root.mkdir()
+            header = root / "FactoryFeature.h"
+            source = root / "FactoryFeature.cpp"
+            header.write_text(r'''
+struct FactoryFeature : Feature
+{
+    std::string GetShortName() { return "Factory"; }
+    std::string GetName() { return "Factory Feature"; }
+};
+''', encoding="utf-8")
+            paths = [header, source]
+            for name in ("Unique", "Shared"):
+                component_header = root / f"{name}Component.h"
+                component_header.write_text(f'''
+struct {name}Component
+{{
+    struct Settings {{ float amount = 1.0f; }} settings;
+    std::string GetType() {{ return "{name}"; }}
+    std::string GetDisplayName() {{ return "{name} Component"; }}
+}};
+''', encoding="utf-8")
+                paths.append(component_header)
+            features = GENERATOR.collect_features([header])
+            cases = {
+                "direct": (r'''
+pipeline[0] = std::make_unique<UniqueComponent>();
+pipeline[1] = std::make_shared<SharedComponent>();
+''', {"UniqueComponent", "SharedComponent"}),
+                "conditional_reuse": (r'''
+pipeline[indices[0]] = reuse ? previous.effects[indices[0]] :
+    std::make_shared<SharedComponent>();
+pipeline[1] = reuse ? std::make_unique<UniqueComponent>() : nullptr;
+''', {"UniqueComponent", "SharedComponent"}),
+                "conditional_factories": (r'''
+pipeline[0] = (useUnique ? std::make_unique<UniqueComponent>() :
+    (useShared ? std::make_shared<SharedComponent>() : nullptr));
+''', {"UniqueComponent", "SharedComponent"}),
+                "nested_factory_argument": (r'''
+pipeline[0] = std::make_shared<SharedComponent>(
+    std::make_unique<UniqueComponent>());
+''', {"SharedComponent"}),
+                "indexed_read_before_assignment": (r'''
+Inspect(previous[0], pipeline[indices[1]] = std::make_shared<SharedComponent>());
+''', {"SharedComponent"}),
+                "comments_and_statement_boundaries": (r'''
+// pipeline[0] = std::make_unique<UniqueComponent>();
+/* pipeline[0] = std::make_unique<UniqueComponent>(); */
+const char* example = "pipeline[0] = std::make_unique<UniqueComponent>();";
+pipeline[0] = nullptr;
+auto unrelated = std::make_unique<UniqueComponent>();
+if (pipeline[0] == std::make_unique<UniqueComponent>()) {}
+pipeline[1] = /* std::make_unique<UniqueComponent>(); */
+    std::make_shared<SharedComponent>();
+''', {"SharedComponent"}),
+            }
+            for name, (assignments, expected) in cases.items():
+                with self.subTest(name=name):
+                    source.write_text('''
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(UniqueComponent::Settings, amount)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SharedComponent::Settings, amount)
+void FactoryFeature::Setup() {
+''' + assignments + "\n}", encoding="utf-8")
+                    components = GENERATOR.collect_settings_components(features, paths)
+                    self.assertEqual(
+                        {component[0] for component in components["FactoryFeature"]},
+                        expected)
+                    self.assertTrue(all(component[2] == "pipeline"
+                                        for component in components["FactoryFeature"]))
+
+                    entries = GENERATOR.build_entries(root.parent)
+                    GENERATOR.validate_entries(entries, 1)
+                    self.assertEqual({entry["componentClass"] for entry in entries}, expected)
+                    for entry in entries:
+                        self.assertEqual(entry["key"], "amount")
+                        self.assertEqual(entry["path"], f'{entry["componentType"]}/settings')
+                        self.assertIn("SettingFlag::SceneControllable", entry["flags"])
+
+    def test_member_tab_helpers_preserve_controls_with_name_collisions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "src/TabbedFeature.h").write_text(r'''
+struct TabbedFeature : Feature
+{
+    struct Settings
+    {
+        uint32_t enabled = 1;
+        uint32_t detailEnabled = 0;
+        float amount = 0.5f;
+        float4 tint{};
+    } settings;
+    std::string GetShortName() { return "Tabbed"; }
+    std::string GetName() { return "Tabbed Feature"; }
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+    TabbedFeature::Settings, enabled, detailEnabled, amount, tint)
+''', encoding="utf-8")
+            (root / "src/TabbedFeature.cpp").write_text(r'''
+#define I18N_KEY_PREFIX "feature.tabbed."
+void TabbedFeature::DrawSettings()
+{
+    if (!ImGui::BeginTabBar("tabs"))
+        return;
+    if (ImGui::BeginTabItem(T(TKEY("general"), "General"))) {
+        DrawGeneralSettings();
+        ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem(T(TKEY("details"), "Details"))) {
+        ImGui::BeginDisabled(settings.enabled == 0);
+        DrawDetailSettings();
+        ImGui::EndDisabled();
+        ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
+}
+void TabbedFeature::DrawGeneralSettings()
+{
+    Util::CheckboxFlag(T(TKEY("enabled"), "Enable Effect"), settings.enabled);
+    ImGui::SeparatorText(T(TKEY("shape"), "Shape"));
+    ImGui::SliderFloat(T(TKEY("amount"), "Effect Amount"), &settings.amount,
+        0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+}
+void TabbedFeature::DrawDetailSettings()
+{
+    Util::UI::CheckboxUint(T(TKEY("detail_enabled"), "Enable Details"), settings.detailEnabled);
+    if (ImGui::BeginTabItem(T(TKEY("color"), "Color"))) {
+        DrawTint();
+        ImGui::EndTabItem();
+    }
+}
+void TabbedFeature::DrawTint()
+{
+    ImGui::ColorEdit4(T(TKEY("tint"), "Effect Tint"), (float*)&settings.tint);
+    DrawDetailSettings();
+}
+void UnrelatedPage::DrawGeneralSettings()
+{
+    ImGui::SliderFloat("Wrong Amount", &settings.amount, -100.0f, 100.0f);
+}
+''', encoding="utf-8")
+            entries = GENERATOR.build_entries(root)
+            GENERATOR.validate_entries(entries, 7)
+            by_key = {(entry["path"], entry["key"]): entry for entry in entries}
+            enabled = by_key[("", "enabled")]
+            self.assertEqual(enabled["displayName"], "Enable Effect")
+            self.assertEqual(enabled["displayNameKey"], "feature.tabbed.enabled")
+            self.assertEqual(enabled["editorSemantic"], "Toggle")
+            self.assertEqual(enabled["sourceWidget"], "CheckboxFlag")
+            self.assertEqual(enabled["selectorPath"], "General")
+            details = by_key[("", "detailEnabled")]
+            self.assertEqual(details["editorSemantic"], "Toggle")
+            self.assertEqual(details["selectorPath"], "Details")
+            amount = by_key[("", "amount")]
+            self.assertEqual(amount["displayName"], "Effect Amount")
+            self.assertEqual(amount["displayPath"], "Shape")
+            self.assertEqual(amount["selectorPath"], "General")
+            self.assertEqual((amount["minimum"], amount["maximum"]), (0.0, 2.0))
+            self.assertTrue(amount["clampNumericInput"])
+            for component in "xyzw":
+                tint = by_key[("tint", component)]
+                self.assertEqual(tint["sourceWidget"], "ColorEdit4")
+                self.assertEqual(tint["selectorPath"], "Details/Color")
+                self.assertEqual(tint["selectorPathKeys"], "feature.tabbed.details/feature.tabbed.color")
+
+    def test_integer_checkbox_adapter_preserves_existing_direct_control(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "Controls.cpp"
+            source.write_text(r'''
+#define I18N_KEY_PREFIX "feature.shared."
+void SharedFeature::DrawSettings()
+{
+    ImGui::SeparatorText(T(TKEY("general"), "General"));
+    Util::CheckboxFlag(T(TKEY("enabled"), "Enable Effect"), settings.enabled);
+    DrawDetails();
+}
+void SharedFeature::DrawDetails()
+{
+    ImGui::SeparatorText(T(TKEY("details"), "Details"));
+    bool enabled = settings.enabled != 0;
+    if (ImGui::Checkbox(T(TKEY("enabled"), "Enable Effect"), &enabled))
+        settings.enabled = enabled;
+}
+''', encoding="utf-8")
+            binding = GENERATOR.collect_control_index([source]).bindings[("SharedFeature", ("enabled",))]
+            self.assertEqual(binding.source_widget, "Checkbox")
+            self.assertEqual(binding.label.text, "Enable Effect")
+            self.assertEqual(binding.category.text, "Details")
+
+    def test_feature_type_aliases_resolve_to_their_underlying_struct(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            header = root / "AliasFeature.h"
+            header.write_text(r'''
+struct AliasFeature : Feature
+{
+    struct RealType
+    {
+        float value = 0.0f;
+    };
+
+    using AliasedType = RealType;
+
+    struct Settings
+    {
+        AliasedType aliased{};
+    } settings;
+
+    std::string GetShortName() { return "Alias"; }
+    std::string GetName() { return "Alias Feature"; }
+};
+''', encoding="utf-8")
+
+            features = GENERATOR.collect_features([header])
+            aliases = GENERATOR.collect_feature_type_aliases([header], features)
+
+            self.assertEqual(aliases["AliasFeature"]["AliasedType"], "RealType")
+
+    def test_standard_colors_are_bounded_and_hdr_colors_are_unbounded(self):
+        for field, component_count in (("standardColor3", 3), ("standardColor4", 4)):
+            entries = [
+                self.entries_by_id[(field, component)]
+                for component in ("x", "y", "z", "w")[:component_count]
+            ]
+            self.assertTrue(all(entry["sourceWidget"] == f"ColorEdit{component_count}"
+                                for entry in entries))
+            self.assertTrue(all(entry["hasNumericBounds"] for entry in entries))
+            self.assertTrue(all((entry["minimum"], entry["maximum"]) == (0.0, 1.0)
+                                for entry in entries))
+            self.assertTrue(all(entry["clampNumericInput"] for entry in entries))
+            self.assertTrue(all(not entry["hdrColor"] for entry in entries))
+
+        for field, component_count in (("hdrColor3", 3), ("hdrColor4", 4)):
+            entries = [
+                self.entries_by_id[(field, component)]
+                for component in ("x", "y", "z", "w")[:component_count]
+            ]
+            self.assertTrue(all(entry["sourceWidget"] == f"ColorEdit{component_count}"
+                                for entry in entries))
+            self.assertTrue(all(not entry["hasNumericBounds"] for entry in entries))
+            self.assertTrue(all(not entry["clampNumericInput"] for entry in entries))
+            self.assertTrue(all(entry["hdrColor"] for entry in entries))
+
+    def test_namespaced_wrappers_preserve_direct_control_metadata(self):
+        toggle = self.entries_by_id[("", "wrappedToggle")]
+        self.assertEqual(toggle["type"], "Integer")
+        self.assertEqual(toggle["editorSemantic"], "Toggle")
+        self.assertEqual(toggle["sourceWidget"], "Checkbox")
+        self.assertIn("BooleanControl", toggle["flags"])
+
+        slider = self.entries_by_id[("", "wrappedFloat")]
+        self.assertEqual(slider["editorSemantic"], "Numeric")
+        self.assertEqual(slider["sourceWidget"], "SliderFloat")
+        self.assertEqual((slider["minimum"], slider["maximum"]), (-4.0, 9.0))
+        self.assertFalse(slider["clampNumericInput"])
+
+        for field, component_count in (("wrappedColor3", 3), ("wrappedColor4", 4)):
+            entries = [
+                self.entries_by_id[(field, component)]
+                for component in ("x", "y", "z", "w")[:component_count]
+            ]
+            self.assertTrue(all(entry["sourceWidget"] == f"ColorEdit{component_count}"
+                                for entry in entries))
+            self.assertTrue(all(entry["aggregateSemantic"] == "Color"
+                                for entry in entries))
+            self.assertTrue(all(entry["aggregatePresentation"] == "ColorPicker"
+                                for entry in entries))
+            self.assertTrue(all((entry["minimum"], entry["maximum"]) == (0.0, 1.0)
+                                for entry in entries))
+            self.assertTrue(all(entry["clampNumericInput"] for entry in entries))
+            self.assertTrue(all(not entry["hdrColor"] for entry in entries))
+
+    def test_local_proxies_preserve_control_semantics_and_bounds(self):
+        toggle = self.entries_by_id[("", "proxyToggle")]
+        self.assertEqual(toggle["type"], "Integer")
+        self.assertEqual(toggle["editorSemantic"], "Toggle")
+        self.assertEqual(toggle["sourceWidget"], "Checkbox")
+        self.assertIn("BooleanControl", toggle["flags"])
+
+        slider = self.entries_by_id[("", "proxySteps")]
+        self.assertEqual(slider["type"], "Integer")
+        self.assertEqual(slider["editorSemantic"], "Numeric")
+        self.assertEqual(slider["sourceWidget"], "SliderInt")
+        self.assertEqual((slider["minimum"], slider["maximum"]), (2.0, 12.0))
+
+    def test_record_array_radio_buttons_emit_choices(self):
+        mode = self.entries_by_id[("", "tableMode")]
+        self.assertEqual(mode["editorSemantic"], "Choice")
+        self.assertEqual(mode["sourceWidget"], "RadioButton")
+        self.assertEqual(
+            mode["choices"],
+            ((2, "First", "feature.synthetic.mode_first"),
+             (5, "Second", "feature.synthetic.mode_second"),
+             (9, "Third", "feature.synthetic.mode_third"),
+             (14, "Fourth", "feature.synthetic.mode_fourth")))
+
+    def test_tabs_select_and_headings_only_label(self):
+        entry = self.entries_by_id[("", "regular")]
+        self.assertEqual(entry["selectorPath"], "Advanced")
+        self.assertEqual(entry["displayPath"], "Shape")
+        self.assertNotIn("Shape", entry["selectorPath"])
+
+    def test_unbound_persisted_primitives_use_generic_fallback(self):
+        expected_types = {
+            "fallbackToggle": "Boolean",
+            "fallbackInteger": "Integer",
+            "fallbackFloat": "Float",
+            "fallbackText": "String",
+        }
+        for key, expected_type in expected_types.items():
+            entry = self.entries_by_id[("", key)]
+            self.assertEqual(entry["type"], expected_type)
+            self.assertEqual(entry["editorSemantic"], "Generic")
+            self.assertEqual(entry["sourceWidget"], "")
+            self.assertIn("SceneControllable", entry["flags"])
+
+    def test_generated_schema_contains_runtime_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            GENERATOR.write_catalog(self.entries, output)
+            header = (output / "SceneSettingsCatalog.generated.h").read_text(
+                encoding="utf-8")
+            source = (output / "SceneSettingsCatalog.generated.cpp").read_text(
+                encoding="utf-8")
+
+        self.assertIn("std::string_view sourceWidget;", header)
+        self.assertIn("bool clampNumericInput;", header)
+        self.assertIn("bool hdrColor;", header)
+        self.assertIn('"SliderInt"', source)
+        self.assertIn('"ColorEdit4"', source)
+
+    def test_scalar_bounds_use_the_correct_imgui_arguments(self):
+        constants = {}
+        slider = GENERATOR.get_control_numeric_metadata(
+            "SliderScalarN",
+            ["Label", "Type", "Data", "3", "-4", "9", "Format", "Flags"],
+            constants)
+        drag = GENERATOR.get_control_numeric_metadata(
+            "DragScalarN",
+            ["Label", "Type", "Data", "3", "Speed", "-7", "11", "Format", "Flags"],
+            constants)
+        self.assertEqual(slider, (-4.0, 9.0, 1.0))
+        self.assertEqual(drag, (-7.0, 11.0, 1.0))
+
+    def test_unknown_control_with_known_storage_has_generic_editor(self):
+        binding = GENERATOR.ControlBinding(
+            "SyntheticFeature", ("flags",), GENERATOR.LocalizedText("Flags"),
+            GENERATOR.LocalizedText(), "CheckboxFlags",
+            source_widget="CheckboxFlags")
+        self.assertEqual(
+            GENERATOR.resolve_editor_semantic(binding, "Integer"), "Generic")
+        self.assertEqual(
+            GENERATOR.resolve_editor_semantic(None, "Integer"), "Generic")
+        self.assertEqual(
+            GENERATOR.resolve_editor_semantic(binding, "Integer", True), "None")
+
+    def test_dynamic_callback_parameters_keep_stable_serialized_addresses(self):
+        header = r'''
+struct SyntheticFeature : Feature {
+    struct Settings {
+        std::array<float4, 2> parameters;
+        std::array<float4, 2> readonly;
+        std::array<float4, 2> copied;
+        std::array<float4, 2> unused;
+    } settings;
+    std::string GetShortName() { return "Synthetic"; }
+    std::string GetName() { return "Synthetic Feature"; }
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+    SyntheticFeature::Settings, parameters, readonly, copied, unused)
+'''
+        source = r'''
+struct DynamicEditor {
+    using Parameters = std::array<float4, 2>;
+    std::function<void(Parameters&)> draw;
+    std::function<void(const Parameters&)> inspect;
+    std::function<void(Parameters)> copy;
+};
+void SyntheticFeature::DrawSettings() {
+    auto& values = settings.parameters;
+    editors[selected].draw(values);
+    editors[selected].inspect(settings.readonly);
+    editors[selected].copy(settings.copied);
+    editors[selected].draw(Clone(settings.unused));
+}
+void SyntheticFeature::Update() {
+    editors[selected].draw(settings.unused);
+}
+void SyntheticFeature::SaveSettings(json& output) { output = settings; }
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "src/SyntheticFeature.h").write_text(header, encoding="utf-8")
+            (root / "src/SyntheticFeature.cpp").write_text(source, encoding="utf-8")
+            entries = GENERATOR.build_entries(root)
+            GENERATOR.validate_entries(entries, 1)
+            dynamic = [entry for entry in entries if entry["path"].startswith("parameters/")]
+            self.assertEqual(len(dynamic), 8)
+            self.assertEqual(len({(entry["path"], entry["key"]) for entry in dynamic}), 8)
+            for entry in dynamic:
+                with self.subTest(path=entry["path"], key=entry["key"]):
+                    self.assertEqual(entry["editorSemantic"], "Generic")
+                    self.assertIn("SettingFlag::SceneControllable", entry["flags"])
+                    self.assertIn("SettingFlag::Transitionable", entry["flags"])
+                    self.assertEqual(entry["serializedPath"], "parameters")
+                    self.assertEqual(entry["serializedKey"], entry["path"].split("/")[-1])
+                    self.assertEqual(entry["serializedComponent"], "xyzw".index(entry["key"]))
+            for entry in entries:
+                if entry not in dynamic:
+                    self.assertIn("SettingFlag::Hidden", entry["flags"])
+
+    def test_split_struct_serialization_maps_back_to_live_fields(self):
+        header = r'''
+struct Curve { float exposure; int32_t mode; float shoulder; float toe; };
+struct FirstPart { float exposure; int32_t mode; };
+struct SecondPart { float shoulder; float toe; };
+struct WrongPart { float unrelated; };
+struct SyntheticFeature : Feature {
+    struct Settings { bool enabled; Curve curve; } settings;
+    std::string GetShortName() { return "Synthetic"; }
+    std::string GetName() { return "Synthetic Feature"; }
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SyntheticFeature::Settings, enabled)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FirstPart, exposure, mode)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SecondPart, shoulder, toe)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(WrongPart, unrelated)
+'''
+        source = r'''
+void SyntheticFeature::SaveSettings(json& output) {
+    output = settings;
+    FirstPart first;
+    SecondPart second;
+    WrongPart wrong;
+    std::memcpy(&first, &settings.curve, sizeof(first));
+    std::memcpy(&second, reinterpret_cast<const char*>(&settings.curve) + sizeof(first), sizeof(second));
+    std::memcpy(&wrong, &settings.curve, sizeof(WrongPart));
+    output["First"] = first;
+    output["Second"] = second;
+    output["Wrong"] = wrong;
+}
+void DrawCurve(Curve& value) {
+    if (ImGui::CollapsingHeader(T("feature.synthetic.section", "Section"))) {
+        ImGui::SliderFloat("Shoulder", &value.shoulder, 0.0f, 2.0f);
+    }
+}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "src/SyntheticFeature.h").write_text(header, encoding="utf-8")
+            (root / "src/SyntheticFeature.cpp").write_text(source, encoding="utf-8")
+            entries = GENERATOR.build_entries(root)
+            GENERATOR.validate_entries(entries, 1)
+            by_id = {(entry["path"], entry["key"]): entry for entry in entries}
+            self.assertEqual(set(by_id), {
+                ("", "enabled"), ("First", "exposure"), ("First", "mode"),
+                ("Second", "shoulder"), ("Second", "toe")})
+            for (path, key), entry in by_id.items():
+                if path:
+                    self.assertEqual(entry["access"], f"settings.curve.{key}")
+                    self.assertEqual((entry["serializedPath"], entry["serializedKey"]), (path, key))
+                    self.assertIn("SettingFlag::SceneControllable", entry["flags"])
+            shoulder = by_id[("Second", "shoulder")]
+            self.assertEqual(shoulder["displayName"], "Shoulder")
+            self.assertEqual(shoulder["displayPath"], "Second/Section")
+            self.assertEqual((shoulder["minimum"], shoulder["maximum"]), (0.0, 2.0))
+
+    def test_suffix_bound_aggregates_preserve_parent_categories(self):
+        header = r'''
+struct Payload {
+    float3 vector;
+    std::array<float, 3> values;
+    std::array<float3, 2> vectors;
+};
+struct SyntheticFeature : Feature {
+    struct Settings { Payload outer; } settings;
+    std::string GetShortName() { return "Synthetic"; }
+    std::string GetName() { return "Synthetic Feature"; }
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Payload, vector, values, vectors)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SyntheticFeature::Settings, outer)
+'''
+        source = r'''
+void SyntheticFeature::SaveSettings(json& output) { output = settings; }
+'''
+        bindings = {}
+        for path in (("vector",), ("values",), ("vectors", "0"), ("vectors", "1")):
+            bindings[("Payload", path)] = GENERATOR.ControlBinding(
+                "Payload", path, GENERATOR.LocalizedText("Amount"),
+                GENERATOR.LocalizedText("Section", "feature.synthetic.section"),
+                "SliderFloat3", 0.0, 1.0, source_widget="SliderFloat3")
+        control_index = GENERATOR.ControlIndex(bindings, {}, {}, {}, set())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "src/SyntheticFeature.h").write_text(header, encoding="utf-8")
+            (root / "src/SyntheticFeature.cpp").write_text(source, encoding="utf-8")
+            with patch.object(GENERATOR, "collect_control_index", return_value=control_index):
+                entries = GENERATOR.build_entries(root)
+            GENERATOR.validate_entries(entries, 12)
+            self.assertEqual(len(entries), 12)
+            for entry in entries:
+                with self.subTest(path=entry["path"], key=entry["key"]):
+                    expected = "outer/Section/vectors" if entry["path"].startswith("outer/vectors/") else "outer/Section"
+                    self.assertEqual(entry["displayPath"], expected)
+                    self.assertEqual(entry["aggregateCount"], 3)
+
+    def test_validation_rejects_inconsistent_input_metadata(self):
+        entry = dict(self.entries_by_id[("", "regular")])
+        entry["clampNumericInput"] = True
+        entry["hasNumericBounds"] = False
+        with self.assertRaisesRegex(ValueError, "clamped numeric input without bounds"):
+            GENERATOR.validate_entries([entry], 1)
+
+        entry = dict(self.entries_by_id[("hdrColor3", "x")])
+        entry["hdrColor"] = True
+        entry["hasNumericBounds"] = True
+        with self.assertRaisesRegex(ValueError, "invalid HDR color metadata"):
+            GENERATOR.validate_entries([entry], 1)
+
+    def test_catalog_paths_are_reversible(self):
+        self.assertEqual(
+            GENERATOR.join_catalog_path(("Group/Heading", "Value~Name")),
+            "Group~1Heading/Value~0Name")
+
+    def test_repository_catalog_validates_without_a_test_inventory(self):
+        entries = GENERATOR.build_entries(ROOT)
+        self.assertTrue(entries)
+        GENERATOR.validate_entries(entries, 1)
+
+    def test_navigation_toggles_do_not_include_runtime_settings(self):
+        source = r'''
+#define I18N_KEY_PREFIX "feature.fixture."
+void Fixture::DrawSettings() {
+    static bool expanded;
+    ImGui::Checkbox(T(TKEY("expanded"), "More Options"), &expanded);
+    if (expanded) { ImGui::TextUnformatted("Details"); }
+    if (available && expanded) { DrawDetails(); }
+    static bool escaped = false;
+    ImGui::Checkbox("Runtime", &escaped);
+    if (escaped) { ImGui::TextUnformatted("Active"); }
+    ApplyRuntimeFlag(escaped);
+    static bool copied{};
+    ImGui::Checkbox("Copied", &copied);
+    if (copied) { ImGui::TextUnformatted("Copied"); }
+    settings.enabled = copied;
+    static bool action;
+    if (ImGui::Checkbox("Action", &action)) { ApplySettings(); }
+    if (action) { ImGui::TextUnformatted("Action"); }
+    static bool runtime;
+    ImGui::Checkbox("Effect", &runtime);
+    if (runtime) { ApplySettings(); }
+}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "Fixture.cpp"
+            path.write_text(source, encoding="utf-8")
+            controls = GENERATOR.collect_navigation_controls([path])
+            self.assertEqual(controls, {
+                "Fixture": (("More Options", "feature.fixture.expanded"),)})
+            entries = [dict(self.entries[0], navigationControls=controls["Fixture"])]
+            GENERATOR.write_catalog(entries, Path(directory))
+            header = (Path(directory) / "SceneSettingsCatalog.generated.h").read_text(encoding="utf-8")
+            output = (Path(directory) / "SceneSettingsCatalog.generated.cpp").read_text(encoding="utf-8")
+            self.assertIn("GetNavigationControls()", header)
+            self.assertIn('"More Options", "feature.fixture.expanded"', output)
+
+
+if __name__ == "__main__":
+    unittest.main()
