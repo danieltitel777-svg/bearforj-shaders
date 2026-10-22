@@ -1,3 +1,4 @@
+#include "Common/BearforjLook.hlsli"
 #include "Common/Color.hlsli"
 #include "Common/DummyVSTexCoord.hlsl"
 #include "Common/FrameBuffer.hlsli"
@@ -305,45 +306,15 @@ PS_OUTPUT main(PS_INPUT input)
 		outputColor = Color::BT709ToBT2020(outputColor);
 		outputColor = exp2(DisplayMapping::RangeCompress(log2(max(0, outputColor)), log2(0.4 * peakWhiteRatio), log2(peakWhiteRatio), log2(100.f)));
 		outputColor = Color::BT2020ToBT709(outputColor);
+		// Linear here; the gamma convert below runs only when linear lighting is off.
+		outputColor = ApplyBearforjCrimson(outputColor, true);
 		if (!ENABLE_LL)
 			outputColor = Color::LinearToGammaSafe(outputColor);
 	} else {
 		outputColor = max(0, outputColor);
-		[branch] if (SharedData::bearforjLook.Enable && SharedData::bearforjLook.TonemapStrength > 0.0)
-		{
-			// Bearforj "Crimson" grade (0.6): filmic toe + soft shoulder (no clipping), deep dense shadows,
-			// warm sunlit highlights vs slightly cool shadows, rich but controlled saturation, gentle mid contrast.
-			// Works in linear after the vanilla tonemap, so LL on/off give the same picture.
-			// TonemapStrength already carries the tonemap mix % (blend with a weather mod's own tonemap).
-			float3 lin = ENABLE_LL ? outputColor : Color::GammaToLinearSafe(outputColor);
-			const float3 hdr = min(lin, 0.96) / (1.0 - min(lin, 0.96));  // undo the vanilla Reinhard-like compression
-			const float w = SharedData::bearforjLook.Warmth;
-			float y = Color::RGBToLuminance(hdr);
-			// gentle midtone contrast around 18% grey
-			const float yc = 0.18 * pow(max(y, 1e-6) / 0.18, 1.06);
-			// Hable filmic curve (toe + long soft shoulder), white point 8
-			const float A = 0.22, B = 0.30, C = 0.10, D = 0.22, E = 0.012, F = 0.30;
-			const float ex = 2.2;
-			float2 v = float2(yc * ex, 8.0);
-			float2 hc = ((v * (A * v + C * B) + D * E) / (v * (A * v + B) + D * F)) - E / F;
-			float yo = saturate(hc.x / hc.y);
-			// luminance-preserving map (no hue skew), highlights desaturate a little towards white like film
-			float3 col = hdr * (yo / max(y, 1e-6));
-			const float hi = smoothstep(0.55, 1.0, yo);
-			col = lerp(col, yo.xxx, hi * 0.35);
-			col = min(col, 1.0);
-			// rich mids: +8% saturation in midtones only
-			const float mid = smoothstep(0.03, 0.25, yo) * (1.0 - hi);
-			col = lerp(yo.xxx, col, 1.0 + 0.08 * mid);
-			// split tone: warm highlights, slightly cool shadows (Warmth scales both)
-			const float sh = 1.0 - smoothstep(0.02, 0.25, yo);
-			const float hl = smoothstep(0.30, 0.85, yo);
-			col *= lerp(1.0.xxx, float3(1.0 + 0.07 * w, 1.0 + 0.015 * w, 1.0 - 0.07 * w), hl);
-			col *= lerp(1.0.xxx, float3(1.0 - 0.03 * w, 1.0 - 0.005 * w, 1.0 + 0.05 * w), sh);
-			col *= yo / max(Color::RGBToLuminance(col), 1e-6);  // keep the curve's luminance
-			float3 look = lerp(lin, max(col, 0.0), SharedData::bearforjLook.TonemapStrength);
-			outputColor = ENABLE_LL ? look : Color::LinearToGammaSafe(look);
-		}
+		// TonemapStrength already carries the tonemap mix %. Post Processing applies the same
+		// grade when it owns the tonemap; this is the vanilla ISHDR path (SDR and, above, HDR).
+		outputColor = ApplyBearforjCrimson(outputColor, ENABLE_LL);
 		if (ENABLE_LL)
 			outputColor = Color::LinearToGammaSafe(outputColor);
 		outputColor = FrameBuffer::ToSRGBColor(outputColor);

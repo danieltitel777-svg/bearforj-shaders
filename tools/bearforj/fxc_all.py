@@ -10,7 +10,7 @@ import sys, os, subprocess, itertools, glob, re
 from concurrent.futures import ThreadPoolExecutor
 root, log = sys.argv[1], sys.argv[2]
 SRC = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-UNIV = "CLOUD_SHADOWS DYNAMIC_CUBEMAPS EXP_HEIGHT_FOG IBL LOD_BLENDING LIGHT_LIMIT_FIX PHYSICAL_SKY SKYLIGHTING SSS TERRAIN_BLENDING TERRAIN_SHADOWS UNIFIED_WATER VANILLA_FRESNEL WETNESS_EFFECTS VOLUMETRIC_SHADOWS WATER_EFFECTS SCREEN_SPACE_SHADOWS".split()
+UNIV = "CLOUD_SHADOWS DYNAMIC_CUBEMAPS EXP_HEIGHT_FOG IBL LOD_BLENDING LIGHT_LIMIT_FIX PHYSICAL_SKY SKYLIGHTING SSS TERRAIN_BLENDING TERRAIN_SHADOWS VANILLA_FRESNEL WETNESS_EFFECTS VOLUMETRIC_SHADOWS WATER_EFFECTS SCREEN_SPACE_SHADOWS".split()
 FEAT = {
  "Lighting": UNIV + "CS_UTILITY HAIR_BACKLIGHTING EXTENDED_MATERIALS EXTENDED_TRANSLUCENCY CS_HAIR CS_SKIN SUBMERSION_WETNESS TERRAIN_DEFORMATION TERRAIN_VARIATION".split(),  # TRUE_PBR is per-material (yaml entries)
  "Water": UNIV + "CS_UTILITY HORIZON_FIX".split(),
@@ -38,9 +38,16 @@ for shd in cfg["shaders"]:
     for st, c in shd["configs"].items():
         common = [d for d in c.get("common_defines", []) if not d.startswith("D3DCOMPILE_")]
         extra = [d for d in FEAT[t] if d not in common] if st != "CSHADER" else []
+        # Utility depth/shadow passes displace landscape when the feature is loaded (HasShaderDefine).
+        if shd["file"] == "Utility.hlsl" and st != "CSHADER" and "TERRAIN_DEFORMATION" not in common and "TERRAIN_DEFORMATION" not in extra:
+            extra.append("TERRAIN_DEFORMATION")
         for e in c["entries"]:
             jobs.append((shd["file"], PROF[st], "main", common + extra + list(e.get("defines") or [])))
 jobs.append(("DeferredCompositeCS.hlsl", "cs_5_0", "main", ["CSHADER"])); jobs.append(("DeferredCompositeCS.hlsl", "cs_5_0", "main", ["CSHADER"] + FEAT["Lighting"]))
+# TerrainDeformation::CompileWorker builds these from the landscape vertex defines plus HSHADER/DSHADER.
+for stage, prof in (("HSHADER", "hs_5_0"), ("DSHADER", "ds_5_0")):
+    jobs.append(("Lighting.hlsl", prof, "main", [stage, "LANDSCAPE", "TERRAIN_DEFORMATION", "VC", "MODELSPACENORMALS"]))
+    jobs.append(("Lighting.hlsl", prof, "main", [stage, "LANDSCAPE", "TERRAIN_DEFORMATION", "VC"]))
 CALL = re.compile(r'L"Data\\\\Shaders\\\\([^"]+\.hlsl)"\s*,\s*(\{(?:[^{}]|\{[^{}]*\})*\}|[\w:.\->]+)\s*,\s*"(\w\w_5_0)"(?:\s*,\s*"(\w+)")?')
 DEF = re.compile(r'\{\s*"(\w+)"\s*,\s*([^{}]*?)\s*\}')
 STAGE = {"ps": "PSHADER", "vs": "VSHADER", "hs": "HULLSHADER", "ds": "DOMAINSHADER", "cs": "COMPUTESHADER"}  # BuildStandaloneCompileKey

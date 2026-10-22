@@ -822,7 +822,7 @@ void WetnessEffects::DrawCharacterRainSettings()
 	if (BFUI::Checkbox(T(TKEY("enable_character_rain_spots"), "Enable Character Wet Drops"), &enabled))
 		settings.EnableCharacterRainSpots = enabled;
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextUnformatted(T(TKEY("character_rain_spots_tooltip"), "Three reflective water layers on compatible opaque skin, clothing and armor: tiny settled beads, fresh arriving drops, and long flowing rivulets. Activity follows Wetness rather than rain-particle visibility. Equipped weapons use stationary beads and a wet sheen instead of trails. All patterns remain attached to their model and require Enable Wetness."));
+		ImGui::TextUnformatted(T(TKEY("character_rain_spots_tooltip"), "Droplets on skin, clothing, armor and hair. In the rain they cover the whole character and run downward. When the rain stops they sit on the wet parts only and fade as those parts dry."));
 	ImGui::EndDisabled();
 
 	const bool characterEffectsDisabled = !settings.EnableWetnessEffects || !settings.EnableCharacterRainSpots;
@@ -834,7 +834,10 @@ void WetnessEffects::DrawCharacterRainSettings()
 	BFUI::SliderFloat(T(TKEY("character_dry_time"), "Character Dry Time"), &settings.CharacterDryTime,
 		CharacterRainSettingLimits::kMinimumDryTime, CharacterRainSettingLimits::kMaximumDryTime, "%.0f sec");
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextUnformatted(T(TKEY("character_dry_time_tooltip"), "How long broad retained character sheen takes to fade after global weather wetness falls. Cover immediately suppresses localized beads, impacts, and rivulets; shelter does not start a separate per-character dry timer."));
+		ImGui::TextUnformatted(T(TKEY("character_dry_time_tooltip"), "Seconds for a soaked character to dry back to damp, then dry, after the rain stops or they leave the water. The drying speed slider and the weather scale this."));
+	BFUI::SliderFloat(T(TKEY("drying_speed"), "Drying Speed"), &dryingSpeed, 0.2f, 4.0f, "%.2fx");
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextUnformatted(T(TKEY("drying_speed_tooltip"), "How fast skin, hair and armor dry after rain or wading. 1 is the dry time above. Drying is faster indoors, in sunlight, and next to a flame, and slower in snow or thick fog."));
 	ImGui::EndDisabled();
 
 	ImGui::Spacing();
@@ -854,7 +857,7 @@ void WetnessEffects::DrawCharacterRainSettings()
 	ImGui::BeginDisabled(!settings.EnableWetnessEffects);
 	BFUI::SliderFloat(T(TKEY("hair_wetness"), "Hair Wetness"), &settings.HairWetness, 0.0f, 1.0f);
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextUnformatted(T(TKEY("hair_wetness_tooltip"), "Controls the existing uniform rain-wetness response on character hair. It is separate from model-attached drops and trails."));
+		ImGui::TextUnformatted(T(TKEY("hair_wetness_tooltip"), "How strongly hair darkens, glosses and clumps when it is wet. Hair uses the same staged soak and dry as the body, and it gets rain droplets too."));
 	ImGui::EndDisabled();
 	ImGui::BeginDisabled(characterEffectsDisabled);
 	BFUI::SliderFloat(T(TKEY("character_coat_intensity"), "Droplet Coat / Highlight Intensity"), &settings.CharacterCoatIntensity,
@@ -1053,6 +1056,86 @@ void WetnessEffects::ApplyClimatePreset(ClimatePreset preset)
 	// Removed clamping for all settings to allow full preset range
 }
 
+namespace
+{
+	bool CarryingFlame(RE::Actor* a_actor)
+	{
+		if (!a_actor)
+			return false;
+		auto flame = [](RE::TESForm* a_form) {
+			auto* light = a_form ? a_form->As<RE::TESObjectLIGH>() : nullptr;
+			return light && !light->GetNoFlicker();
+		};
+		return flame(a_actor->GetEquippedObject(false)) || flame(a_actor->GetEquippedObject(true));
+	}
+
+	bool PlayerNearFlame()
+	{
+		static std::uint32_t lastFrame = 0;
+		static bool cached = false;
+		const std::uint32_t frame = globals::state ? globals::state->frameCount : 0u;
+		if (lastFrame != 0 && frame - lastFrame < 30u)
+			return cached;
+		lastFrame = frame;
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		cached = CarryingFlame(player);
+		if (cached || !player)
+			return cached;
+		if (auto* tes = RE::TES::GetSingleton()) {
+			tes->ForEachReferenceInRange(player, 280.0f, [&](RE::TESObjectREFR* a_ref) {
+				if (!a_ref || a_ref->IsDisabled() || a_ref == player)
+					return RE::BSContainer::ForEachResult::kContinue;
+				auto* base = a_ref->GetBaseObject();
+				auto* light = base ? base->As<RE::TESObjectLIGH>() : nullptr;
+				auto* keywords = base ? base->As<RE::BGSKeywordForm>() : nullptr;
+				if ((light && !light->GetNoFlicker()) || (keywords && keywords->HasKeywordString("Fire"))) {
+					cached = true;
+					return RE::BSContainer::ForEachResult::kStop;
+				}
+				return RE::BSContainer::ForEachResult::kContinue;
+			});
+		}
+		return cached;
+	}
+}
+
+float WetnessEffects::GetDryingScale(RE::Actor* a_actor) const
+{
+	float scale = std::clamp(std::isfinite(dryingSpeed) ? dryingSpeed : 1.0f, 0.2f, 4.0f);
+	const bool interior = a_actor && a_actor->GetParentCell() && a_actor->GetParentCell()->IsInteriorCell();
+	if (interior)
+		scale *= 2.4f;
+
+	bool raining = false;
+	bool snow = false;
+	bool foggy = false;
+	if (auto* sky = RE::Sky::GetSingleton()) {
+		if (auto* weather = sky->currentWeather) {
+			raining = weather->data.flags.any(RE::TESWeather::WeatherDataFlag::kRainy);
+			snow = weather->data.flags.any(RE::TESWeather::WeatherDataFlag::kSnow);
+			foggy = weather->fogData.dayFar > 1.0f && weather->fogData.dayFar < 8000.0f;
+		}
+	}
+	if (snow || foggy)
+		scale *= 0.45f;
+	if (!interior && !raining) {
+		const float hour = RE::Calendar::GetSingleton() ? RE::Calendar::GetSingleton()->GetHour() : 12.0f;
+		if (hour >= 8.0f && hour <= 17.0f)
+			scale *= 1.7f;
+	}
+
+	bool heat = CarryingFlame(a_actor);
+	if (!heat) {
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		if (PlayerNearFlame() && a_actor && player &&
+			(a_actor == player || a_actor->GetPosition().GetDistance(player->GetPosition()) < 400.0f))
+			heat = true;
+	}
+	if (heat)
+		scale *= 2.8f;
+	return std::clamp(scale, 0.15f, 8.0f);
+}
+
 WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 {
 	PerFrame data{};
@@ -1060,6 +1143,9 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 	data.Raining = 0.0f;
 	data.Wetness = 0.0f;
 	data.PuddleWetness = 0.0f;
+	// Precipitation only. The fallback below copies weather wetness into Raining so world ripples
+	// still run, but character rivulets must stop when the rain itself has stopped.
+	float precipRain = 0.0f;
 
 	if (settings.EnableWetnessEffects) {
 		if (auto sky = globals::game::sky) {
@@ -1107,6 +1193,7 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 
 					data.Raining = (currentRaining * currentWeight) + (lastRaining * lastWeight);
 				}
+				precipRain = data.Raining;
 
 				WeatherWetnessResult currentWeatherResult = CalculateWeatherWetness(sky->currentWeather, sky->currentWeatherPct, true);
 				WeatherWetnessResult lastWeatherResult = CalculateWeatherWetness(sky->lastWeather, sky->currentWeatherPct, false);
@@ -1114,6 +1201,10 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 				float combinedPuddleWetness = std::min(1.0f, currentWeatherResult.puddleWetness + lastWeatherResult.puddleWetness);
 				data.Wetness = combinedWetness;
 				data.PuddleWetness = combinedPuddleWetness;
+				// Precip geometry sometimes is not a rain emitter yet (or at all) while the weather
+				// is already flagged rainy. Without Raining, raindrops, ripples and wall beads never run.
+				if (data.Raining <= 0.001f && combinedWetness > 0.02f)
+					data.Raining = combinedWetness;
 				if (debugSettings.EnableWetnessOverride) {
 					data.Wetness = debugSettings.WetnessOverride.y;
 				}
@@ -1137,6 +1228,36 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 		}
 	}
 
+	// Stage the soak. WeatherTransitionSpeed is "how fast wetness appears"; it used to be uploaded
+	// and never read, so surfaces jumped to the weather fade (often instant).
+	{
+		const float targetWetness = data.Wetness;
+		const float targetPuddle = data.PuddleWetness;
+		const std::uint32_t rampFrame = globals::state ? globals::state->frameCount : 0u;
+		const bool rampPaused = globals::game::ui && globals::game::ui->GameIsPaused();
+		if (!wetnessRampInit) {
+			smoothedWetness = 0.0f;
+			smoothedPuddleWetness = 0.0f;
+			wetnessRampInit = true;
+		}
+		if (debugSettings.EnableWetnessOverride)
+			smoothedWetness = targetWetness;
+		if (debugSettings.EnablePuddleOverride)
+			smoothedPuddleWetness = targetPuddle;
+		if (wetnessRampFrame.TryAdvance(rampFrame, !rampPaused) &&
+			(!debugSettings.EnableWetnessOverride || !debugSettings.EnablePuddleOverride)) {
+			const float deltaSeconds = std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, 0.25f);
+			const float tau = 25.0f / std::max(settings.WeatherTransitionSpeed, 0.05f);
+			const float blend = 1.0f - std::exp(-deltaSeconds / tau);
+			if (!debugSettings.EnableWetnessOverride)
+				smoothedWetness += (targetWetness - smoothedWetness) * blend;
+			if (!debugSettings.EnablePuddleOverride)
+				smoothedPuddleWetness += (targetPuddle - smoothedPuddleWetness) * blend;
+		}
+		data.Wetness = smoothedWetness;
+		data.PuddleWetness = smoothedPuddleWetness;
+	}
+
 	static size_t rainTimer = 0;  // size_t for precision
 	const std::uint32_t currentFrame = globals::state ? globals::state->frameCount : 0u;
 	const bool paused = globals::game::ui && globals::game::ui->GameIsPaused();
@@ -1157,6 +1278,7 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 	data.settings.RaindropInterval = 1.0f / settings.RaindropInterval;
 	data.settings.RippleLifetime = settings.RaindropInterval / settings.RippleLifetime;
 	UpdateCharacterRainData(data);
+	data.CharacterStatePadding.x = std::clamp(precipRain, 0.0f, 1.0f);
 
 	return data;
 }
@@ -1204,10 +1326,12 @@ void WetnessEffects::UpdateCharacterRainData(PerFrame& a_data) const
 	if (updateState && !a_data.settings.EnableCharacterRainSpots) {
 		characterSurfaceWetness = 0.0f;
 	} else if (updateState && weatherIntensity >= characterSurfaceWetness) {
+		// weatherIntensity is sqrt of the smoothed exterior wetness, so this tracks the ramp
+		// instead of jumping to 1 on the first rainy frame.
 		characterSurfaceWetness = weatherIntensity;
 	} else if (updateState && (!globals::game::ui || !globals::game::ui->GameIsPaused())) {
 		const float deltaSeconds = std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, kMaximumCharacterFrameDeltaSeconds);
-		const float dryRate = 1.0f / a_data.settings.CharacterDryTime;
+		const float dryRate = GetDryingScale(RE::PlayerCharacter::GetSingleton()) / a_data.settings.CharacterDryTime;
 		characterSurfaceWetness = std::max(weatherIntensity, characterSurfaceWetness - deltaSeconds * dryRate);
 	}
 
@@ -1238,6 +1362,8 @@ void WetnessEffects::LoadSettings(json& o_json)
 		settings.HairWetness = o_json["SkinWetness"].get<float>();
 	if (!o_json.contains("CharacterDryTime") && o_json.contains("CharacterShelterDryTime"))
 		settings.CharacterDryTime = o_json["CharacterShelterDryTime"].get<float>();
+	if (o_json.contains("DryingSpeed"))
+		dryingSpeed = std::clamp(o_json["DryingSpeed"].get<float>(), 0.2f, 4.0f);
 
 	// Auto-detect which preset matches the loaded settings
 	DetectCurrentPreset();
@@ -1252,6 +1378,7 @@ void WetnessEffects::LoadSettings(json& o_json)
 void WetnessEffects::SaveSettings(json& o_json)
 {
 	o_json = settings;
+	o_json["DryingSpeed"] = dryingSpeed;
 	o_json["SurfaceRainFlow"] = rainFlowSettings;
 
 	o_json["DebugSettings"] = debugSettings;
@@ -1260,9 +1387,14 @@ void WetnessEffects::SaveSettings(json& o_json)
 void WetnessEffects::RestoreDefaultSettings()
 {
 	settings = {};
+	dryingSpeed = 1.0f;
 	rainFlowSettings = {};
 	characterSurfaceWetness = 0.0f;
 	characterWetnessFrame.Reset();
+	smoothedWetness = 0.0f;
+	smoothedPuddleWetness = 0.0f;
+	wetnessRampInit = false;
+	wetnessRampFrame.Reset();
 	climatePreset = defaultPreset;
 
 	// Apply the default climate preset to ensure settings reflect the preset values

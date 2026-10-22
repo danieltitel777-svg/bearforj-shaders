@@ -47,8 +47,50 @@ struct ScreenSpacePhysicalParticles : Feature
 		kDust,
 		kBlood,
 		kEmber,  // fire magic
-		kIce     // frost magic
+		kIce,    // frost magic
+		// 0.6.5 types. Bits 0-7 only. Do not renumber: SSPP_TYPES.md is the atlas map.
+		kPollen = 9,
+		kFirefly,
+		kButterfly,
+		kGnat,
+		kFly,
+		kLampInsect,
+		kNeedle,
+		kTwig,
+		kRestoration,
+		kAlteration,
+		kIllusion,
+		kConjuration,
+		kShout,
+		kWardShard,
+		kWardRipple,
+		kBloodStain,
+		kWaterStain,
+		kWaterDrip,
+		kKindCount
 	};
+
+	// Cell in Textures/Bearforj/Particles/atlas.dds. 0 keeps the procedural quad.
+	enum Sprite : uint32_t
+	{
+		kSprRain = 1,
+		kSprSnow,
+		kSprLeaf,
+		kSprLeafNarrow,
+		kSprNeedle,
+		kSprTwig,
+		kSprSpark,
+		kSprEmber,
+		kSprAsh,
+		kSprIce,
+		kSprDust,
+		kSprBlood,
+		kSprWater,
+		kSprPollen,
+		kSprInsect,
+		kSprFly
+	};
+	static constexpr uint32_t WithSprite(uint32_t a_kind, uint32_t a_sprite) { return a_kind | (a_sprite << 16); }
 
 	struct Extra  // Bearforj 0.6 additions (separate struct: nlohmann macro arg limit)
 	{
@@ -69,6 +111,16 @@ struct ScreenSpacePhysicalParticles : Feature
 		float FadeDistance = 6000.0f; // particles fade out smoothly towards this distance (no popping)
 		bool WindDrift = true;        // blowing snow / dust / debris near the ground in wind
 		float WindDriftDensity = 0.5f;
+		// Bit per Kind (1 << kRain ...). Airborne and resting particles of a set bit are pushed by actors, creatures, wind gusts, spells and shouts.
+		uint32_t ReactMask = (1u << 27) - 1u;
+		bool Pollen = true;
+		bool Insects = true;
+		bool WaterDrips = true;
+		bool GroundStains = true;
+		bool SchoolMagic = true;
+		bool ShoutParticles = true;
+		bool WardImpact = true;
+		bool ReactToActors = true;
 		bool SuppressVanilla = true;        // never double precipitation (see cpp)
 		uint32_t ParticleBudget = 160000;  // shared limit for all pools; pools shrink proportionally above it
 		float GlobalDensity = 1.0f;        // multiplies weather precipitation and leaf amounts
@@ -184,6 +236,10 @@ struct ScreenSpacePhysicalParticles : Feature
 		float4 ExtraP2;  // x size variation, y leaf glide, z gust lift, w fade distance
 		float4 ContextA; // x interior, y trees, z conifers, w cold
 		float4 ContextB; // x hour, y location flags, z weather slot, w night
+		float4 InfluencerPos[8];  // xyz world, w radius (0 = empty)
+		float4 InfluencerVel[8];  // xyz motion, w push strength
+		uint32_t ReactMask;
+		uint32_t ReactPad[3];
 	};
 
 	virtual void SetupResources() override;
@@ -208,11 +264,14 @@ struct ScreenSpacePhysicalParticles : Feature
 	std::vector<float> fireTimers;
 	float fireNextScan = 0.0f;
 	void OnHit(const RE::TESHitEvent* a_event);
+	void OnSpellCast(const RE::TESSpellCastEvent* a_event);
+	void UpdateAmbient(float a_dt, float a_rain, float a_snow, bool a_paused, const float3& a_camera);
 
 private:
 	void CreatePool();
 	void ComputeWeather(float& a_rain, float& a_snow, float3& a_wind, float& a_gust) const;
 	bool CompileShaders();
+	void LoadSpriteAtlas();
 
 	winrt::com_ptr<ID3D11Buffer> particleBuffer;
 	winrt::com_ptr<ID3D11ShaderResourceView> particleSRV;
@@ -222,6 +281,9 @@ private:
 	winrt::com_ptr<ID3D11Buffer> eventBuffer;
 	winrt::com_ptr<ID3D11ShaderResourceView> eventSRV;
 	winrt::com_ptr<ID3D11BlendState> blendState;
+	winrt::com_ptr<ID3D11SamplerState> spriteSampler;
+	winrt::com_ptr<ID3D11ShaderResourceView> spriteAtlas;
+	bool spriteLoadTried = false;
 	winrt::com_ptr<ID3D11DepthStencilState> depthState;
 	winrt::com_ptr<ID3D11RasterizerState> rasterState;
 	ConstantBuffer* frameCB = nullptr;
@@ -254,4 +316,8 @@ private:
 	{
 		RE::BSEventNotifyControl ProcessEvent(const RE::BGSFootstepEvent* a_event, RE::BSTEventSource<RE::BGSFootstepEvent>*) override;
 	} footstepSink;
+	struct SpellSink : public RE::BSTEventSink<RE::TESSpellCastEvent>
+	{
+		RE::BSEventNotifyControl ProcessEvent(const RE::TESSpellCastEvent* a_event, RE::BSTEventSource<RE::TESSpellCastEvent>*) override;
+	} spellSink;
 };

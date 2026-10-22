@@ -2,6 +2,7 @@
 
 class Menu;
 struct ImFont;
+struct ID3D11ShaderResourceView;
 
 /**
  * @brief Bearforj Shaders 0.6 main window: strict black & white, category tabs on top,
@@ -9,8 +10,7 @@ struct ImFont;
  * Save / Reset to defaults / Clear shader cache in the footer.
  *
  * Images are loaded from Data/Interface/CommunityShaders/Bearforj/ so they can be swapped
- * without rebuilding: logo.png, head_happy.png, head_grumpy.png, emotions/{thinking,surprised,
- * happy,proud,wink}.png, emotes/{generation,settings}.png.
+ * without rebuilding: logo.png (full helmet, uncropped) and emotions/*.png (straight RGBA).
  *
  * Fonts are never cached across frames: every frame the mono font is looked up in the live
  * atlas (ThemeManager::FindMonoFont), so io.Fonts->Clear() in ReloadFont cannot leave a
@@ -22,8 +22,10 @@ namespace BearforjMenu
 	void Render(Menu& a_menu);
 	/** @brief Releases all textures (menu shutdown / device loss). */
 	void ReleaseAssets();
-	/** @brief Shader-compile overlay body: B/W bar with Mish Mish pushing it. */
-	void DrawCompileOverlay(float a_percent, const char* a_overlay);
+	/** @brief Shader-compile overlay: a small static Mish Mish beside the bar. @p a_caption is the status line under it. */
+	void DrawCompileOverlay(float a_percent, const char* a_overlay, const char* a_caption = nullptr);
+	/** @brief Emotion sprite for setting tooltips. Null until the menu images have loaded. */
+	ID3D11ShaderResourceView* TooltipMascot();
 	/** @brief True if the Performance page was drawn since the last call (resets it). */
 	bool ConsumePerfPageOpen();
 	/** @brief Mish Mish wink toast after a report hotkey press (drawn every frame, inside ImGui). */

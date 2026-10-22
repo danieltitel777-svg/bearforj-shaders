@@ -5,6 +5,7 @@
 #include <string>
 #include <windows.h>
 
+#include "Bearforj/TipUI.h"
 #include "BackgroundBlur.h"
 #include "CursorLoader.h"
 #include "Features/ScreenshotFeature.h"
@@ -181,7 +182,7 @@ namespace
 	bool ComboWithFont(const char* label, int* currentItem, const char* const items[], int itemCount, Menu::FontRole role)
 	{
 		FontRoleGuard guard(role);
-		return ImGui::Combo(label, currentItem, items, itemCount);
+		return BFUI::Combo(label, currentItem, items, itemCount);
 	}
 
 	bool IsPresetThemeSelected()
@@ -220,7 +221,7 @@ void SettingsTabRenderer::RenderShadersTab()
 		auto shaderCache = globals::shaderCache;
 
 		bool useCustomShaders = shaderCache->IsEnabled();
-		if (ImGui::Checkbox(T("menu.settings.use_custom_shaders", "Use Custom Shaders"), &useCustomShaders)) {
+		if (BFUI::Checkbox(T("menu.settings.use_custom_shaders", "Use Custom Shaders"), &useCustomShaders)) {
 			shaderCache->SetEnabled(useCustomShaders);
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -228,7 +229,7 @@ void SettingsTabRenderer::RenderShadersTab()
 		}
 
 		bool useDiskCache = shaderCache->IsDiskCache();
-		if (ImGui::Checkbox(T("menu.settings.enable_disk_cache", "Enable Disk Cache"), &useDiskCache)) {
+		if (BFUI::Checkbox(T("menu.settings.enable_disk_cache", "Enable Disk Cache"), &useDiskCache)) {
 			shaderCache->SetDiskCache(useDiskCache);
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -237,7 +238,7 @@ void SettingsTabRenderer::RenderShadersTab()
 
 		bool skipUnchanged = shaderCache->IsSkipUnchangedShaders();
 		ImGui::BeginDisabled(!useDiskCache);
-		if (ImGui::Checkbox(T("menu.settings.skip_unchanged_shaders", "Skip Unchanged Shaders"), &skipUnchanged)) {
+		if (BFUI::Checkbox(T("menu.settings.skip_unchanged_shaders", "Skip Unchanged Shaders"), &skipUnchanged)) {
 			shaderCache->SetSkipUnchangedShaders(skipUnchanged);
 		}
 		ImGui::EndDisabled();
@@ -252,7 +253,7 @@ void SettingsTabRenderer::RenderShadersTab()
 		}
 
 		bool useAsync = shaderCache->IsAsync();
-		if (ImGui::Checkbox(T("menu.settings.enable_async", "Enable Async"), &useAsync)) {
+		if (BFUI::Checkbox(T("menu.settings.enable_async", "Enable Async"), &useAsync)) {
 			shaderCache->SetAsync(useAsync);
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -383,6 +384,11 @@ void SettingsTabRenderer::RenderKeybindingsTab(
 			settings.ScreenshotKey,
 			state.settingScreenshotKey,
 			"Change##Screenshot");
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::TextUnformatted(T("menu.settings.screenshot_key_tooltip",
+				"Saves a screenshot and a Mish Mish report (settings, fps, conflicts, the last log lines).\n"
+				"Default is F12. Mish Mish winks when the report is written. Nothing is saved until you press the key."));
+		}
 
 		Util::InputComboWidget(
 			T("menu.settings.effects11_toggle_key", "Effects 11 Toggle Key:"),
@@ -462,43 +468,43 @@ void SettingsTabRenderer::RenderBehaviorTab()
 
 		SeparatorTextWithFont(T("menu.settings.ui_behavior", "UI Behavior"), Menu::FontRole::Subheading);
 
-		if (ImGui::Checkbox(T("menu.settings.use_monochrome_icons", "Use Monochrome Icons"), &themeSettings.UseMonochromeIcons)) {
+		if (BFUI::Checkbox(T("menu.settings.use_monochrome_icons", "Use Monochrome Icons"), &themeSettings.UseMonochromeIcons)) {
 			globals::menu->pendingIconReload = true;
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T("menu.settings.use_monochrome_icons_tooltip", "Uses white monochrome icons that adapt to your theme's text color"));
 		}
 		ImGui::SameLine();
-		if (ImGui::Checkbox(T("menu.settings.use_monochrome_cs_logo", "Use Monochrome OS Logo"), &themeSettings.UseMonochromeLogo)) {
+		if (BFUI::Checkbox(T("menu.settings.use_monochrome_cs_logo", "Use Monochrome OS Logo"), &themeSettings.UseMonochromeLogo)) {
 			globals::menu->pendingIconReload = true;
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T("menu.settings.use_monochrome_cs_logo_tooltip", "Uses monochrome version of the logo"));
 		}
 
-		ImGui::Checkbox(T("menu.settings.show_footer", "Show Footer"), &themeSettings.ShowFooter);
+		BFUI::Checkbox(T("menu.settings.show_footer", "Show Footer"), &themeSettings.ShowFooter);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T("menu.settings.show_footer_tooltip", "Shows the footer with game version, swap chain, and GPU information at the bottom of the window"));
 		}
 
-		ImGui::Checkbox(T("menu.settings.center_header_title", "Center Header Title"), &themeSettings.CenterHeader);
+		BFUI::Checkbox(T("menu.settings.center_header_title", "Center Header Title"), &themeSettings.CenterHeader);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T("menu.settings.center_header_title_tooltip", "Centers the title and logo in the header title bar"));
 		}
 
-		ImGui::Checkbox(T("menu.settings.auto_hide_feature_list", "Auto-hide Feature List"), &globals::menu->GetSettings().AutoHideFeatureList);
+		BFUI::Checkbox(T("menu.settings.auto_hide_feature_list", "Auto-hide Feature List"), &globals::menu->GetSettings().AutoHideFeatureList);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T("menu.settings.auto_hide_feature_list_tooltip", "Automatically hides the left feature list panel. Move cursor to the left edge to show it."));
 		}
 
-		if (ImGui::Checkbox(T("menu.settings.require_shift_to_dock", "Require Shift to Dock"), &globals::menu->GetSettings().RequireShiftToDock)) {
+		if (BFUI::Checkbox(T("menu.settings.require_shift_to_dock", "Require Shift to Dock"), &globals::menu->GetSettings().RequireShiftToDock)) {
 			ImGui::GetIO().ConfigDockingWithShift = globals::menu->GetSettings().RequireShiftToDock;
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T("menu.settings.require_shift_to_dock_tooltip", "When enabled, you must hold Shift while dragging to dock/snap windows. Prevents accidental docking."));
 		}
 
-		ImGui::SliderFloat(T("menu.settings.tooltip_hover_delay", "Tooltip Hover Delay"), &themeSettings.TooltipHoverDelay, 0.0f, 2.0f, "%.2f s", ImGuiSliderFlags_AlwaysClamp);
+		BFUI::SliderFloat(T("menu.settings.tooltip_hover_delay", "Tooltip Hover Delay"), &themeSettings.TooltipHoverDelay, 0.0f, 2.0f, "%.2f s", ImGuiSliderFlags_AlwaysClamp);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::TextUnformatted(T("menu.settings.tooltip_hover_delay_tooltip", "Time in seconds to wait before a tooltip appears when hovering over an item."));
 		}
@@ -506,7 +512,7 @@ void SettingsTabRenderer::RenderBehaviorTab()
 		// Skip confirmation when clearing shader cache (UI behavior, not a shader setting).
 		auto& menuSettings = globals::menu->GetSettings();
 		bool skipConfirmation = menuSettings.SkipClearCacheConfirmation;
-		if (ImGui::Checkbox(T("menu.settings.skip_clear_cache_dialogue", "Skip Clear Cache Confirmation"), &skipConfirmation)) {
+		if (BFUI::Checkbox(T("menu.settings.skip_clear_cache_dialogue", "Skip Clear Cache Confirmation"), &skipConfirmation)) {
 			menuSettings.SkipClearCacheConfirmation = skipConfirmation;
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -514,7 +520,7 @@ void SettingsTabRenderer::RenderBehaviorTab()
 		}
 
 		bool smartClearDefault = menuSettings.SmartClearShaderCacheDefault;
-		if (ImGui::Checkbox(T("menu.settings.smart_clear_default", "Smart Clear by Default"), &smartClearDefault)) {
+		if (BFUI::Checkbox(T("menu.settings.smart_clear_default", "Smart Clear by Default"), &smartClearDefault)) {
 			menuSettings.SmartClearShaderCacheDefault = smartClearDefault;
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -524,7 +530,7 @@ void SettingsTabRenderer::RenderBehaviorTab()
 								  "the roles are reversed."));
 		}
 
-		if (ImGui::Checkbox(T("menu.settings.use_custom_cursor", "Use Custom Theme Cursor"), &themeSettings.UseCustomCursor)) {
+		if (BFUI::Checkbox(T("menu.settings.use_custom_cursor", "Use Custom Theme Cursor"), &themeSettings.UseCustomCursor)) {
 			globals::menu->pendingCursorReload = true;
 		}
 		if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -546,7 +552,7 @@ void SettingsTabRenderer::RenderBehaviorTab()
 		SeparatorTextWithFont(T("menu.settings.visual_effects", "Visual Effects"), Menu::FontRole::Subheading);
 
 		ImGui::BeginDisabled(globals::game::isVR);
-		if (ImGui::Checkbox(T("menu.settings.background_blur", "Background Blur"), &themeSettings.BackgroundBlurEnabled)) {
+		if (BFUI::Checkbox(T("menu.settings.background_blur", "Background Blur"), &themeSettings.BackgroundBlurEnabled)) {
 			BackgroundBlur::SetEnabled(themeSettings.BackgroundBlurEnabled);
 		}
 		ImGui::EndDisabled();
@@ -952,7 +958,7 @@ void SettingsTabRenderer::RenderFontsTab()
 		SeparatorTextWithFont(T("menu.settings.font", "Font"), Menu::FontRole::Subheading);
 
 		bool& useAutoFont = menuInstance->GetSettings().UseResolutionFont;
-		if (ImGui::Checkbox(T("menu.settings.use_resolution_based_font_size", "Use resolution-based font size"), &useAutoFont)) {
+		if (BFUI::Checkbox(T("menu.settings.use_resolution_based_font_size", "Use resolution-based font size"), &useAutoFont)) {
 			if (!useAutoFont) {
 				// Seed the fixed-size slider with the current effective size so it doesn't jump
 				float effective = ThemeManager::ResolveFontSize(*menuInstance);
@@ -965,7 +971,7 @@ void SettingsTabRenderer::RenderFontsTab()
 		}
 
 		ImGui::BeginDisabled(useAutoFont);
-		if (ImGui::SliderFloat(T("menu.settings.base_font_size", "Base Font Size"), &themeSettings.FontSize, ThemeManager::Constants::MIN_FONT_SIZE, ThemeManager::Constants::MAX_FONT_SIZE, "%.0f")) {
+		if (BFUI::SliderFloat(T("menu.settings.base_font_size", "Base Font Size"), &themeSettings.FontSize, ThemeManager::Constants::MIN_FONT_SIZE, ThemeManager::Constants::MAX_FONT_SIZE, "%.0f")) {
 			menuInstance->pendingFontReload = true;
 		}
 		ImGui::EndDisabled();
@@ -1038,7 +1044,7 @@ void SettingsTabRenderer::RenderStylingTab()
 		RenderSaveInfoText();
 
 		SeparatorTextWithFont(T("menu.settings.section_main", "Main"), Menu::FontRole::Subheading);
-		if (ImGui::SliderFloat(T("menu.settings.global_scale", "Global Scale"), &themeSettings.GlobalScale, -1.f, 1.f, "%.2f")) {
+		if (BFUI::SliderFloat(T("menu.settings.global_scale", "Global Scale"), &themeSettings.GlobalScale, -1.f, 1.f, "%.2f")) {
 			float trueScale = exp2(themeSettings.GlobalScale);
 
 			ImGui::GetStyle().FontScaleMain = trueScale;
@@ -1046,48 +1052,48 @@ void SettingsTabRenderer::RenderStylingTab()
 
 		SeparatorTextWithFont(T("menu.settings.section_layout", "Layout"), Menu::FontRole::Subheading);
 
-		ImGui::SliderFloat2(T("menu.settings.window_padding", "Window Padding"), (float*)&style.WindowPadding, 0.0f, 20.0f, "%.0f");
-		ImGui::SliderFloat2(T("menu.settings.frame_padding", "Frame Padding"), (float*)&style.FramePadding, 0.0f, 20.0f, "%.0f");
-		ImGui::SliderFloat2(T("menu.settings.item_spacing", "Item Spacing"), (float*)&style.ItemSpacing, 0.0f, 20.0f, "%.0f");
-		ImGui::SliderFloat2(T("menu.settings.item_inner_spacing", "Item Inner Spacing"), (float*)&style.ItemInnerSpacing, 0.0f, 20.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.indent_spacing", "Indent Spacing"), &style.IndentSpacing, 0.0f, 30.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.scrollbar_size", "Scrollbar Size"), &style.ScrollbarSize, 1.0f, 20.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.grab_min_size", "Grab Min Size"), &style.GrabMinSize, 1.0f, 20.0f, "%.0f");
+		BFUI::SliderFloat2(T("menu.settings.window_padding", "Window Padding"), (float*)&style.WindowPadding, 0.0f, 20.0f, "%.0f");
+		BFUI::SliderFloat2(T("menu.settings.frame_padding", "Frame Padding"), (float*)&style.FramePadding, 0.0f, 20.0f, "%.0f");
+		BFUI::SliderFloat2(T("menu.settings.item_spacing", "Item Spacing"), (float*)&style.ItemSpacing, 0.0f, 20.0f, "%.0f");
+		BFUI::SliderFloat2(T("menu.settings.item_inner_spacing", "Item Inner Spacing"), (float*)&style.ItemInnerSpacing, 0.0f, 20.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.indent_spacing", "Indent Spacing"), &style.IndentSpacing, 0.0f, 30.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.scrollbar_size", "Scrollbar Size"), &style.ScrollbarSize, 1.0f, 20.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.grab_min_size", "Grab Min Size"), &style.GrabMinSize, 1.0f, 20.0f, "%.0f");
 
 		SeparatorTextWithFont(T("menu.settings.scrollbar_opacity", "Scrollbar Opacity"), Menu::FontRole::Subheading);
-		ImGui::SliderFloat(T("menu.settings.track_opacity", "Track Opacity"), &themeSettings.ScrollbarOpacity.Background, 0.0f, 1.0f, "%.2f");
+		BFUI::SliderFloat(T("menu.settings.track_opacity", "Track Opacity"), &themeSettings.ScrollbarOpacity.Background, 0.0f, 1.0f, "%.2f");
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T("menu.settings.track_opacity_tooltip", "Controls the opacity of the scrollbar track/channel (the background area behind the scrollbar)."));
-		ImGui::SliderFloat(T("menu.settings.thumb_opacity", "Thumb Opacity"), &themeSettings.ScrollbarOpacity.Thumb, 0.0f, 1.0f, "%.2f");
+		BFUI::SliderFloat(T("menu.settings.thumb_opacity", "Thumb Opacity"), &themeSettings.ScrollbarOpacity.Thumb, 0.0f, 1.0f, "%.2f");
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T("menu.settings.thumb_opacity_tooltip", "Controls the opacity of the scrollbar thumb (the draggable part)."));
-		ImGui::SliderFloat(T("menu.settings.thumb_hovered_opacity", "Thumb Hovered Opacity"), &themeSettings.ScrollbarOpacity.ThumbHovered, 0.0f, 1.0f, "%.2f");
+		BFUI::SliderFloat(T("menu.settings.thumb_hovered_opacity", "Thumb Hovered Opacity"), &themeSettings.ScrollbarOpacity.ThumbHovered, 0.0f, 1.0f, "%.2f");
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T("menu.settings.thumb_hovered_opacity_tooltip", "Controls the opacity of the scrollbar thumb when hovered."));
-		ImGui::SliderFloat(T("menu.settings.thumb_active_opacity", "Thumb Active Opacity"), &themeSettings.ScrollbarOpacity.ThumbActive, 0.0f, 1.0f, "%.2f");
+		BFUI::SliderFloat(T("menu.settings.thumb_active_opacity", "Thumb Active Opacity"), &themeSettings.ScrollbarOpacity.ThumbActive, 0.0f, 1.0f, "%.2f");
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T("menu.settings.thumb_active_opacity_tooltip", "Controls the opacity of the scrollbar thumb when being dragged."));
 
 		SeparatorTextWithFont(T("menu.settings.section_borders", "Borders"), Menu::FontRole::Subheading);
-		ImGui::SliderFloat(T("menu.settings.window_border_size", "Window Border Size"), &style.WindowBorderSize, 0.0f, 5.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.child_border_size", "Child Border Size"), &style.ChildBorderSize, 0.0f, 5.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.popup_border_size", "Popup Border Size"), &style.PopupBorderSize, 0.0f, 5.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.frame_border_size", "Frame Border Size"), &style.FrameBorderSize, 0.0f, 5.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.tab_border_size", "Tab Border Size"), &style.TabBorderSize, 0.0f, 5.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.tab_bar_border_size", "Tab Bar Border Size"), &style.TabBarBorderSize, 0.0f, 5.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.window_border_size", "Window Border Size"), &style.WindowBorderSize, 0.0f, 5.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.child_border_size", "Child Border Size"), &style.ChildBorderSize, 0.0f, 5.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.popup_border_size", "Popup Border Size"), &style.PopupBorderSize, 0.0f, 5.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.frame_border_size", "Frame Border Size"), &style.FrameBorderSize, 0.0f, 5.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.tab_border_size", "Tab Border Size"), &style.TabBorderSize, 0.0f, 5.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.tab_bar_border_size", "Tab Bar Border Size"), &style.TabBarBorderSize, 0.0f, 5.0f, "%.0f");
 
 		SeparatorTextWithFont(T("menu.settings.section_rounding", "Rounding"), Menu::FontRole::Subheading);
-		ImGui::SliderFloat(T("menu.settings.window_rounding", "Window Rounding"), &style.WindowRounding, 0.0f, 12.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.child_rounding", "Child Rounding"), &style.ChildRounding, 0.0f, 12.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.frame_rounding", "Frame Rounding"), &style.FrameRounding, 0.0f, 12.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.popup_rounding", "Popup Rounding"), &style.PopupRounding, 0.0f, 12.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.scrollbar_rounding", "Scrollbar Rounding"), &style.ScrollbarRounding, 0.0f, 12.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.grab_rounding", "Grab Rounding"), &style.GrabRounding, 0.0f, 12.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.tab_rounding", "Tab Rounding"), &style.TabRounding, 0.0f, 12.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.window_rounding", "Window Rounding"), &style.WindowRounding, 0.0f, 12.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.child_rounding", "Child Rounding"), &style.ChildRounding, 0.0f, 12.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.frame_rounding", "Frame Rounding"), &style.FrameRounding, 0.0f, 12.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.popup_rounding", "Popup Rounding"), &style.PopupRounding, 0.0f, 12.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.scrollbar_rounding", "Scrollbar Rounding"), &style.ScrollbarRounding, 0.0f, 12.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.grab_rounding", "Grab Rounding"), &style.GrabRounding, 0.0f, 12.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.tab_rounding", "Tab Rounding"), &style.TabRounding, 0.0f, 12.0f, "%.0f");
 
 		SeparatorTextWithFont(T("menu.settings.section_tables", "Tables"), Menu::FontRole::Subheading);
-		ImGui::SliderFloat2(T("menu.settings.cell_padding", "Cell Padding"), (float*)&style.CellPadding, 0.0f, 20.0f, "%.0f");
-		ImGui::SliderAngle(T("menu.settings.table_angled_headers_angle", "Table Angled Headers Angle"), &style.TableAngledHeadersAngle, -50.0f, +50.0f);
+		BFUI::SliderFloat2(T("menu.settings.cell_padding", "Cell Padding"), (float*)&style.CellPadding, 0.0f, 20.0f, "%.0f");
+		BFUI::SliderAngle(T("menu.settings.table_angled_headers_angle", "Table Angled Headers Angle"), &style.TableAngledHeadersAngle, -50.0f, +50.0f);
 
 		SeparatorTextWithFont(T("menu.settings.section_widgets", "Widgets"), Menu::FontRole::Subheading);
 		{
@@ -1097,23 +1103,23 @@ void SettingsTabRenderer::RenderStylingTab()
 				T("menu.settings.color_button_right", "Right")
 			};
 			int colorButtonPos = (int)style.ColorButtonPosition;
-			if (ImGui::Combo(T("menu.settings.color_button_position", "ColorButtonPosition"), &colorButtonPos, colorButtonPositions, IM_ARRAYSIZE(colorButtonPositions))) {
+			if (BFUI::Combo(T("menu.settings.color_button_position", "ColorButtonPosition"), &colorButtonPos, colorButtonPositions, IM_ARRAYSIZE(colorButtonPositions))) {
 				style.ColorButtonPosition = static_cast<ImGuiDir>(colorButtonPos);
 			}
 		}
-		ImGui::SliderFloat2(T("menu.settings.button_text_align", "Button Text Align"), (float*)&style.ButtonTextAlign, 0.0f, 1.0f, "%.2f");
+		BFUI::SliderFloat2(T("menu.settings.button_text_align", "Button Text Align"), (float*)&style.ButtonTextAlign, 0.0f, 1.0f, "%.2f");
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T("menu.settings.button_text_align_tooltip", "Alignment applies when a button is larger than its text content."));
-		ImGui::SliderFloat2(T("menu.settings.selectable_text_align", "Selectable Text Align"), (float*)&style.SelectableTextAlign, 0.0f, 1.0f, "%.2f");
+		BFUI::SliderFloat2(T("menu.settings.selectable_text_align", "Selectable Text Align"), (float*)&style.SelectableTextAlign, 0.0f, 1.0f, "%.2f");
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T("menu.settings.selectable_text_align_tooltip", "Alignment applies when a selectable is larger than its text content."));
-		ImGui::SliderFloat(T("menu.settings.separator_text_border_size", "Separator Text Border Size"), &style.SeparatorTextBorderSize, 0.0f, 10.0f, "%.0f");
-		ImGui::SliderFloat2(T("menu.settings.separator_text_align", "Separator Text Align"), (float*)&style.SeparatorTextAlign, 0.0f, 1.0f, "%.2f");
-		ImGui::SliderFloat2(T("menu.settings.separator_text_padding", "Separator Text Padding"), (float*)&style.SeparatorTextPadding, 0.0f, 40.0f, "%.0f");
-		ImGui::SliderFloat(T("menu.settings.log_slider_deadzone", "Log Slider Deadzone"), &style.LogSliderDeadzone, 0.0f, 12.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.separator_text_border_size", "Separator Text Border Size"), &style.SeparatorTextBorderSize, 0.0f, 10.0f, "%.0f");
+		BFUI::SliderFloat2(T("menu.settings.separator_text_align", "Separator Text Align"), (float*)&style.SeparatorTextAlign, 0.0f, 1.0f, "%.2f");
+		BFUI::SliderFloat2(T("menu.settings.separator_text_padding", "Separator Text Padding"), (float*)&style.SeparatorTextPadding, 0.0f, 40.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.log_slider_deadzone", "Log Slider Deadzone"), &style.LogSliderDeadzone, 0.0f, 12.0f, "%.0f");
 
 		SeparatorTextWithFont(T("menu.settings.section_docking", "Docking"), Menu::FontRole::Subheading);
-		ImGui::SliderFloat(T("menu.settings.docking_splitter_size", "Docking Splitter Size"), &style.DockingSeparatorSize, 0.0f, 12.0f, "%.0f");
+		BFUI::SliderFloat(T("menu.settings.docking_splitter_size", "Docking Splitter Size"), &style.DockingSeparatorSize, 0.0f, 12.0f, "%.0f");
 
 		ImGui::EndTabItem();
 	}
@@ -1150,47 +1156,47 @@ void SettingsTabRenderer::RenderColorsTab()
 
 		// Background & Text
 		if (colorFilter.PassFilter("Background"))
-			ImGui::ColorEdit4(T("menu.settings.color_background", "Background"), (float*)&themeSettings.Palette.Background);
+			BFUI::ColorEdit4(T("menu.settings.color_background", "Background"), (float*)&themeSettings.Palette.Background);
 		if (colorFilter.PassFilter("Text"))
-			ImGui::ColorEdit4(T("menu.settings.color_text", "Text"), (float*)&themeSettings.Palette.Text);
+			BFUI::ColorEdit4(T("menu.settings.color_text", "Text"), (float*)&themeSettings.Palette.Text);
 
 		if (ImGui::TreeNodeEx(T("menu.settings.borders_and_separators", "Borders & Separators"), ImGuiTreeNodeFlags_DefaultOpen)) {
 			if (colorFilter.PassFilter("Window Border"))
-				ImGui::ColorEdit4(T("menu.settings.color_window_border", "Window Border"), (float*)&themeSettings.Palette.WindowBorder);
+				BFUI::ColorEdit4(T("menu.settings.color_window_border", "Window Border"), (float*)&themeSettings.Palette.WindowBorder);
 			if (colorFilter.PassFilter("Slider & Input Background"))
-				ImGui::ColorEdit4(T("menu.settings.color_slider_input_bg", "Slider & Input Background"), (float*)&themeSettings.Palette.FrameBorder);
+				BFUI::ColorEdit4(T("menu.settings.color_slider_input_bg", "Slider & Input Background"), (float*)&themeSettings.Palette.FrameBorder);
 			if (colorFilter.PassFilter("Separator Line"))
-				ImGui::ColorEdit4(T("menu.settings.color_separator_line", "Separator Line"), (float*)&themeSettings.Palette.Separator);
+				BFUI::ColorEdit4(T("menu.settings.color_separator_line", "Separator Line"), (float*)&themeSettings.Palette.Separator);
 			if (colorFilter.PassFilter("Resize Grip"))
-				ImGui::ColorEdit4(T("menu.settings.color_resize_grip", "Resize Grip"), (float*)&themeSettings.Palette.ResizeGrip);
+				BFUI::ColorEdit4(T("menu.settings.color_resize_grip", "Resize Grip"), (float*)&themeSettings.Palette.ResizeGrip);
 			ImGui::TreePop();
 		}
 
 		if (ImGui::TreeNodeEx(T("menu.settings.feature_headings", "Feature Headings"), ImGuiTreeNodeFlags_DefaultOpen)) {
 			if (colorFilter.PassFilter("Default"))
-				ImGui::ColorEdit4(T("menu.settings.color_default", "Default"), (float*)&themeSettings.FeatureHeading.ColorDefault);
+				BFUI::ColorEdit4(T("menu.settings.color_default", "Default"), (float*)&themeSettings.FeatureHeading.ColorDefault);
 			if (colorFilter.PassFilter("Hovered"))
-				ImGui::ColorEdit4(T("menu.settings.color_hovered", "Hovered"), (float*)&themeSettings.FeatureHeading.ColorHovered);
+				BFUI::ColorEdit4(T("menu.settings.color_hovered", "Hovered"), (float*)&themeSettings.FeatureHeading.ColorHovered);
 			if (colorFilter.PassFilter("Minimized Transparency"))
-				ImGui::SliderFloat(T("menu.settings.color_minimized_transparency", "Minimized Transparency"), &themeSettings.FeatureHeading.MinimizedFactor, 0.0f, 1.0f, "%.2f");
+				BFUI::SliderFloat(T("menu.settings.color_minimized_transparency", "Minimized Transparency"), &themeSettings.FeatureHeading.MinimizedFactor, 0.0f, 1.0f, "%.2f");
 			ImGui::TreePop();
 		}
 
 		if (ImGui::TreeNodeEx(T("menu.settings.status", "Status"), ImGuiTreeNodeFlags_DefaultOpen)) {
 			if (colorFilter.PassFilter("Disabled"))
-				ImGui::ColorEdit4(T("menu.settings.color_disabled", "Disabled"), (float*)&themeSettings.StatusPalette.Disable);
+				BFUI::ColorEdit4(T("menu.settings.color_disabled", "Disabled"), (float*)&themeSettings.StatusPalette.Disable);
 			if (colorFilter.PassFilter("Error"))
-				ImGui::ColorEdit4(T("menu.settings.color_error", "Error"), (float*)&themeSettings.StatusPalette.Error);
+				BFUI::ColorEdit4(T("menu.settings.color_error", "Error"), (float*)&themeSettings.StatusPalette.Error);
 			if (colorFilter.PassFilter("Warning"))
-				ImGui::ColorEdit4(T("menu.settings.color_warning", "Warning"), (float*)&themeSettings.StatusPalette.Warning);
+				BFUI::ColorEdit4(T("menu.settings.color_warning", "Warning"), (float*)&themeSettings.StatusPalette.Warning);
 			if (colorFilter.PassFilter("Restart Needed"))
-				ImGui::ColorEdit4(T("menu.settings.color_restart_needed", "Restart Needed"), (float*)&themeSettings.StatusPalette.RestartNeeded);
+				BFUI::ColorEdit4(T("menu.settings.color_restart_needed", "Restart Needed"), (float*)&themeSettings.StatusPalette.RestartNeeded);
 			if (colorFilter.PassFilter("Current Hotkey"))
-				ImGui::ColorEdit4(T("menu.settings.color_current_hotkey", "Current Hotkey"), (float*)&themeSettings.StatusPalette.CurrentHotkey);
+				BFUI::ColorEdit4(T("menu.settings.color_current_hotkey", "Current Hotkey"), (float*)&themeSettings.StatusPalette.CurrentHotkey);
 			if (colorFilter.PassFilter("Success"))
-				ImGui::ColorEdit4(T("menu.settings.color_success", "Success"), (float*)&themeSettings.StatusPalette.SuccessColor);
+				BFUI::ColorEdit4(T("menu.settings.color_success", "Success"), (float*)&themeSettings.StatusPalette.SuccessColor);
 			if (colorFilter.PassFilter("Info"))
-				ImGui::ColorEdit4(T("menu.settings.color_info", "Info"), (float*)&themeSettings.StatusPalette.InfoColor);
+				BFUI::ColorEdit4(T("menu.settings.color_info", "Info"), (float*)&themeSettings.StatusPalette.InfoColor);
 			ImGui::TreePop();
 		}
 
@@ -1201,7 +1207,7 @@ void SettingsTabRenderer::RenderColorsTab()
 				const char* friendlyName = GetFriendlyColorName(i);
 				if (!colorFilter.PassFilter(friendlyName))
 					continue;
-				ImGui::ColorEdit4(friendlyName, (float*)&colors[i], ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf);
+				BFUI::ColorEdit4(friendlyName, (float*)&colors[i], ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf);
 			}
 			ImGui::TreePop();
 		}

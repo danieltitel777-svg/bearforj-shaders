@@ -226,7 +226,7 @@ namespace Util::CacheInvalidation
 					return std::nullopt;
 				std::string line;
 				while (std::getline(stream, line)) {
-					// Identifier-boundary match: UNIFIED_WATER must not hit UNIFIED_WATERX.
+					// Identifier-boundary match: a token must not hit a longer identifier that merely contains it.
 					for (size_t pos = line.find(token); pos != std::string::npos; pos = line.find(token, pos + 1)) {
 						const auto isIdent = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
 						const bool beforeOk = pos == 0 || !isIdent(line[pos - 1]);

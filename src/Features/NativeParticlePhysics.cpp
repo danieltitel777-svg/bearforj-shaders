@@ -8,6 +8,33 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <unordered_map>
+
+namespace
+{
+	struct SpellImpulse
+	{
+		RE::NiPoint3 pos{};
+		float radius = 0.0f;
+		float strength = 0.0f;
+		float age = 1.0f;
+	};
+	SpellImpulse g_impulses[4]{};
+	std::uint32_t g_impulseWrite = 0;
+	std::unordered_map<RE::FormID, RE::NiPoint3> g_lastPos;
+	std::uint32_t g_influencerFrame = 0;
+
+	struct SpellImpulseSink : RE::BSTEventSink<RE::TESSpellCastEvent>
+	{
+		RE::BSEventNotifyControl ProcessEvent(const RE::TESSpellCastEvent* a_event, RE::BSTEventSource<RE::TESSpellCastEvent>*) override
+		{
+			if (a_event && a_event->object)
+				globals::features::nativeParticlePhysics.AddImpulse(a_event->object->GetPosition(), 320.0f, 1100.0f);
+			return RE::BSEventNotifyControl::kContinue;
+		}
+	};
+	SpellImpulseSink g_spellSink;
+}
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(NativeParticlePhysics::CategorySettings,
 	Enabled, GroundCollision, WaterCollision, DieInWater, Bounce, Friction, Gravity, Drag, Wind, ActorPush)
@@ -26,7 +53,7 @@ std::array<NativeParticlePhysics::CategorySettings, NativeParticlePhysics::kCoun
 	c[kRain] = { true, true, true, true, 0.1f, 0.8f, 0.0f, 0.0f, 0.3f, 0.2f };
 	c[kDust] = { true, true, true, true, 0.1f, 0.7f, 0.0f, 0.5f, 0.8f, 1.0f };
 	c[kWater] = { true, true, false, false, 0.2f, 0.5f, 0.0f, 0.0f, 0.2f, 0.4f };
-	c[kOther] = { false, true, true, false, 0.25f, 0.4f, 0.0f, 0.0f, 0.2f, 0.5f };
+	c[kOther] = { true, true, true, false, 0.25f, 0.4f, 0.0f, 0.0f, 0.2f, 0.5f };
 	return c;
 }
 
@@ -51,13 +78,119 @@ void NativeParticlePhysics::RestoreDefaultSettings() { settings = {}; }
 
 void NativeParticlePhysics::PostPostLoad()
 {
-	// NiAVObject::UpdateDownwardPass is vfunc 0x2C on SE/AE; VR inserts ApplyLocalTransformToWorld after 0x25,
-	// so it is 0x2D there (CommonLibSSE-NG v12.1 RE/N/NiAVObject.h). VTABLE_NiParticleSystem resolves per runtime by ID.
+	// NiParticleSystem::UpdateDownwardPass is the NiAVObject slot. CommonLibSSE-NG (8ffc2b74) marks it // 2C
+	// on SE/AE. VR inserts ApplyLocalTransformToWorld after UpdateControllers (// 25), so the slot is 0x2D there.
+	// VTABLE_NiParticleSystem[0] is Address Library SE 287258 / AE 237888 (Offsets_VTABLE.h). NiParticleSystem::AddModifier
+	// is the sibling check RELOCATION_ID(72799, 74499).
 	if (REL::Module::IsVR())
 		stl::write_vfunc<0x2D, Hooks::NiParticleSystem_UpdateDownwardPass>(RE::VTABLE_NiParticleSystem[0]);
 	else
 		stl::write_vfunc<0x2C, Hooks::NiParticleSystem_UpdateDownwardPass>(RE::VTABLE_NiParticleSystem[0]);
-	logger::info("[Native Particle Physics] Installed NiParticleSystem hook");
+	logger::info("[Native Particle Physics] Installed NiParticleSystem::UpdateDownwardPass (SE/AE slot 0x2C, vtable SE 287258 / AE 237888)");
+	if (auto* holder = RE::ScriptEventSourceHolder::GetSingleton())
+		holder->AddEventSink<RE::TESSpellCastEvent>(&g_spellSink);
+}
+
+void NativeParticlePhysics::AddImpulse(const RE::NiPoint3& a_pos, float a_radius, float a_strength)
+{
+	auto& slot = g_impulses[g_impulseWrite++ & 3u];
+	slot.pos = a_pos;
+	slot.radius = a_radius;
+	slot.strength = a_strength;
+	slot.age = 0.0f;
+}
+
+void NativeParticlePhysics::RefreshInfluencers()
+{
+	const std::uint32_t frame = globals::state ? globals::state->frameCount : 0u;
+	if (frame != 0 && frame == g_influencerFrame)
+		return;
+	g_influencerFrame = frame;
+	influencers = {};
+	const float dt = std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, 0.1f);
+	for (auto& impulse : g_impulses)
+		impulse.age += dt;
+
+	auto* player = RE::PlayerCharacter::GetSingleton();
+	auto* tes = RE::TES::GetSingleton();
+	if (!player || !tes)
+		return;
+
+	std::uint32_t count = 0;
+	auto addActor = [&](RE::Actor* a_actor) {
+		if (!a_actor || count >= kInfluencerCount || !a_actor->Is3DLoaded() || a_actor->IsDead())
+			return;
+		const auto pos = a_actor->GetPosition();
+		if (a_actor != player && pos.GetDistance(player->GetPosition()) > 2500.0f)
+			return;
+		RE::NiPoint3 vel{};
+		if (const auto it = g_lastPos.find(a_actor->GetFormID()); it != g_lastPos.end() && dt > 1.0e-4f)
+			vel = (pos - it->second) / dt;
+		g_lastPos[a_actor->GetFormID()] = pos;
+
+		const float scale = std::clamp(a_actor->GetScale(), 0.3f, 6.0f);
+		float radius = 80.0f * scale;
+		float strength = 220.0f * scale;
+		auto* state = a_actor->AsActorState();
+		if (state && state->IsSprinting()) {
+			radius *= 1.7f;
+			strength *= 2.0f;
+		} else if (a_actor->IsRunning()) {
+			radius *= 1.35f;
+			strength *= 1.5f;
+		} else if (state && state->IsWalking()) {
+			strength *= 0.85f;
+		}
+		if (state && state->GetKnockState() != RE::KNOCK_STATE_ENUM::kNormal) {
+			radius *= 1.8f;
+			strength *= 2.2f;
+		}
+		if (a_actor->WhoIsCasting() != 0) {
+			radius *= 1.5f;
+			strength *= 1.8f;
+		}
+		if (vel.z < -250.0f) {
+			radius *= 1.4f;
+			strength *= 1.7f;
+		}
+		const float speed = std::sqrt(vel.x * vel.x + vel.y * vel.y);
+		const bool stirred = speed >= 15.0f || a_actor->WhoIsCasting() != 0 ||
+		                     (state && state->GetKnockState() != RE::KNOCK_STATE_ENUM::kNormal);
+		if (!stirred)
+			strength *= 0.15f;
+
+		auto& inf = influencers[count++];
+		inf.pos[0] = pos.x;
+		inf.pos[1] = pos.y;
+		inf.pos[2] = pos.z + 40.0f * scale;
+		inf.pos[3] = radius;
+		const float vlen = std::max(speed, 1.0f);
+		inf.vel[0] = vel.x / vlen;
+		inf.vel[1] = vel.y / vlen;
+		inf.vel[2] = 0.0f;
+		inf.vel[3] = strength;
+	};
+	addActor(player);
+	tes->ForEachReferenceInRange(player, 2200.0f, [&](RE::TESObjectREFR* a_ref) {
+		if (count >= kInfluencerCount)
+			return RE::BSContainer::ForEachResult::kStop;
+		if (auto* actor = a_ref ? a_ref->As<RE::Actor>() : nullptr; actor && actor != player)
+			addActor(actor);
+		return RE::BSContainer::ForEachResult::kContinue;
+	});
+	for (const auto& impulse : g_impulses) {
+		if (count >= kInfluencerCount || impulse.strength <= 0.0f || impulse.age > 0.5f)
+			continue;
+		const float fade = 1.0f - impulse.age / 0.5f;
+		auto& inf = influencers[count++];
+		inf.pos[0] = impulse.pos.x;
+		inf.pos[1] = impulse.pos.y;
+		inf.pos[2] = impulse.pos.z;
+		inf.pos[3] = impulse.radius;
+		inf.vel[3] = impulse.strength * fade;
+	}
+	if (g_lastPos.size() > 64)
+		g_lastPos.clear();
 }
 
 void NativeParticlePhysics::DrawSettings()
@@ -222,8 +355,6 @@ void NativeParticlePhysics::Simulate(RE::NiParticleSystem* a_system)
 	const RE::NiPoint3 wind = windVelocity * c.Wind;
 	const float drag = std::clamp(c.Drag * dt, 0.0f, 1.0f);
 	const float windBlend = std::clamp(c.Wind * dt * 2.0f, 0.0f, 1.0f);
-	const float pushR = settings.PushRadius;
-	const float pushK = settings.PushStrength * c.ActorPush;
 
 	for (uint16_t i = 0; i < n; i++) {
 		auto& pInfo = sd.particleInfo[i];
@@ -243,15 +374,26 @@ void NativeParticlePhysics::Simulate(RE::NiParticleSystem* a_system)
 			vel.y += (wind.y - vel.y) * windBlend;
 		}
 
-		// player push (vertical capsule)
-		if (playerValid && pushK > 0.0f && pos.z > playerPos.z - 10.0f && pos.z < playerPos.z + playerHeight) {
-			const float dx = pos.x - playerPos.x, dy = pos.y - playerPos.y;
-			const float d2 = dx * dx + dy * dy;
-			if (d2 < pushR * pushR && d2 > 1.0e-4f) {
-				const float d = std::sqrt(d2);
-				const float k = pushK * (1.0f - d / pushR) * dt;
-				vel.x += dx / d * k;
-				vel.y += dy / d * k;
+		// Actors, creatures, spells and shouts. Resting and airborne particles both get the push.
+		RefreshInfluencers();
+		if (c.ActorPush > 0.0f) {
+			for (const auto& inf : influencers) {
+				const float radius = inf.pos[3];
+				const float strength = inf.vel[3] * c.ActorPush;
+				if (radius < 1.0f || strength <= 0.0f)
+					continue;
+				const float dx = pos.x - inf.pos[0];
+				const float dy = pos.y - inf.pos[1];
+				if (std::abs(pos.z - inf.pos[2]) > radius * 1.4f)
+					continue;
+				const float d2 = dx * dx + dy * dy;
+				if (d2 < radius * radius && d2 > 1.0e-4f) {
+					const float d = std::sqrt(d2);
+					const float k = strength * (1.0f - d / radius) * dt;
+					vel.x += (dx / d) * k + (-dy / d) * k * 0.35f;
+					vel.y += (dy / d) * k + (dx / d) * k * 0.35f;
+					vel.z += k * 0.25f;
+				}
 			}
 		}
 

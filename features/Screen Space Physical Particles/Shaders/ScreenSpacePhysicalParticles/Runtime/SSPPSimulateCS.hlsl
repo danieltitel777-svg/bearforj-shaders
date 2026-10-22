@@ -94,6 +94,45 @@ void SpawnDynamic(uint a_kind, float3 a_pos, float3 a_vel, float a_life, float a
 		Particles[slot] = p;
 }
 
+// Actors, creatures, gusts, spells and shouts. Resting debris is lifted; airborne particles are pushed and swirled.
+void ReactToBodies(inout Particle p, uint kind, inout bool settled)
+{
+	if ((ReactMask & (1u << kind)) == 0u)
+		return;
+	float3 push = 0;
+	float lift = 0;
+	[unroll] for (uint i = 0; i < 8; i++) {
+		float radius = InfluencerPos[i].w;
+		float strength = InfluencerVel[i].w;
+		if (radius < 1.0 || strength <= 0.0)
+			continue;
+		float3 delta = p.Position - InfluencerPos[i].xyz;
+		float horizontal = length(delta.xy);
+		if (horizontal > radius || abs(delta.z) > radius * 1.4)
+			continue;
+		float falloff = 1.0 - horizontal / radius;
+		float3 away = horizontal > 1.0 ? float3(delta.xy / horizontal, 0) : float3(1, 0, 0);
+		float3 swirl = float3(-away.y, away.x, 0);
+		float3 motion = InfluencerVel[i].xyz;
+		push += (away * 0.7 + swirl * 0.45) * strength * falloff + motion * falloff * 0.25;
+		lift = max(lift, falloff * strength);
+	}
+	float gust = Wind.w * (0.5 + 0.5 * sin(TimeParams.x * 0.7 + p.Position.x * 0.002 + p.Position.y * 0.0017));
+	bool debris = kind != SSPP_RAIN;
+	if (ExtraP2.z > 0.5 && debris && settled && gust > (kind == SSPP_LEAF || kind == SSPP_DUST || kind == SSPP_SNOW ? 0.45 : 0.7))
+		lift = max(lift, gust * 220.0);
+	if (settled) {
+		if (lift > 70.0 && debris) {
+			p.Kind &= ~SSPP_FLAG_SETTLED;
+			p.Velocity = push + float3(Wind.xy * 0.35, 90.0 + lift * 0.35);
+			p.Life = max(p.Life, p.Age + 8.0);
+			settled = false;
+		}
+	} else if (dot(push, push) > 1.0) {
+		p.Velocity += push * TimeParams.y * 3.0;
+	}
+}
+
 void Respawn(inout Particle p, uint id, uint kind, float amount, float fallSpeed)
 {
 	uint seed = id * 7919u + (uint)TimeParams.z * 104729u;
@@ -116,18 +155,28 @@ void Respawn(inout Particle p, uint id, uint kind, float amount, float fallSpeed
 	if (kind == SSPP_RAIN) {
 		p.Size = RainP.x * lerp(1.0 - ExtraP2.x * 0.6, 1.0 + ExtraP2.x * 0.6, Hash(seed + 5u));
 		p.Color = PackColor(float4(0.75, 0.8, 0.88, 1));
+		p.Kind = kind | (1u << SSPP_SPRITE_SHIFT);  // rain streak
 	} else if (kind == SSPP_SNOW) {
 		p.Size = SnowP.x * lerp(1.0 - ExtraP2.x, 1.0 + ExtraP2.x, Hash(seed + 5u));
-		p.Color = PackColor(float4(1, 1, 1, 1));
+		// Weather slot 8 is ash (Bearforj::WeatherPresets::kAsh). Ash uses its own flake.
+		bool ash = abs(ContextB.z - 8.0) < 0.5;
+		p.Color = PackColor(ash ? float4(0.55, 0.52, 0.48, 1) : float4(1, 1, 1, 1));
+		p.Kind = kind | ((ash ? 9u : 2u) << SSPP_SPRITE_SHIFT);
 	} else {
 		p.Size = LeafP.x * lerp(1.0 - ExtraP2.x * 0.8, 1.0 + ExtraP2.x * 0.8, Hash(seed + 5u));
 		float t = Hash(seed + 6u);
 		float3 leaf = t < 0.4 ? float3(0.55, 0.32, 0.08) : (t < 0.7 ? float3(0.62, 0.48, 0.12) : (t < 0.9 ? float3(0.3, 0.38, 0.1) : float3(0.45, 0.12, 0.05)));
-		// plan step 3: conifer areas drop small needles/twigs instead of broad leaves (share from tree context)
+		// Conifers are their own types (SSPP_NEEDLE / SSPP_TWIG), not a recolored leaf.
 		float coniferShare = ContextA.z / max(ContextA.y + ContextA.z, 1e-3);
+		uint typeId = SSPP_LEAF;
 		if (Hash(seed + 7u) < coniferShare) {
-			p.Size *= 0.35;
-			leaf = lerp(float3(0.28, 0.22, 0.1), float3(0.22, 0.28, 0.12), Hash(seed + 8u));
+			bool needle = Hash(seed + 8u) < 0.72;
+			typeId = needle ? SSPP_NEEDLE : SSPP_TWIG;
+			p.Size *= needle ? 0.28 : 0.48;
+			leaf = needle ? float3(0.22, 0.4, 0.16) : float3(0.4, 0.28, 0.12);
+			p.Kind = typeId;
+		} else {
+			p.Kind = SSPP_LEAF | ((t < 0.55 ? 3u : 4u) << SSPP_SPRITE_SHIFT);
 		}
 		p.Color = PackColor(float4(leaf, 1));
 		p.Position.z = CameraPos.z + lerp(150.0, 900.0, Hash(seed + 3u));
@@ -144,7 +193,9 @@ void Respawn(inout Particle p, uint id, uint kind, float amount, float fallSpeed
 	Particle p = Particles[id];
 	float dt = TimeParams.y;
 
-	uint kind = id < Ranges.x ? SSPP_RAIN : (id < Ranges.y ? SSPP_SNOW : (id < Ranges.z ? SSPP_LEAF : (p.Kind & 0xFFu)));
+	uint stored = p.Kind & 0xFFu;
+	// Leaf-pool slots stay leaves unless respawn stored a needle or a twig.
+	uint kind = id < Ranges.x ? SSPP_RAIN : (id < Ranges.y ? SSPP_SNOW : (id < Ranges.z ? ((stored == SSPP_NEEDLE || stored == SSPP_TWIG) ? stored : SSPP_LEAF) : stored));
 	bool ambient = id < Ranges.z;
 
 	if (p.Life <= 0.0 || p.Age >= p.Life) {
@@ -181,42 +232,66 @@ void Respawn(inout Particle p, uint id, uint kind, float amount, float fallSpeed
 			float3 target = float3(wind.xy * 0.9, -SnowP.z) + flutter;
 			p.Velocity = lerp(p.Velocity, target, saturate(dt * 1.5));
 			p.Spin += dt * 1.7;
-		} else if (kind == SSPP_LEAF) {
-			float t = TimeParams.x * 2.1 + p.Spin * 3.0;
-			// gliding fall: side-to-side swing with lift at the end of each swing (falling-leaf pendulum)
+		} else if (kind == SSPP_LEAF || kind == SSPP_NEEDLE || kind == SSPP_TWIG) {
+			float t = TimeParams.x * (kind == SSPP_NEEDLE ? 1.2 : 2.1) + p.Spin * 3.0;
 			float swing = sin(t);
-			float3 flutter = float3(swing * 90.0, cos(t * 0.7) * 70.0, (abs(swing) * 2.0 - 1.0) * 40.0) * ExtraP2.y;
-			float3 target = float3(wind.xy * 1.2, -LeafP.z / max(ExtraP2.y, 0.25)) + flutter;
+			float glide = ExtraP2.y * (kind == SSPP_NEEDLE ? 0.35 : (kind == SSPP_TWIG ? 0.6 : 1.0));
+			float3 flutter = float3(swing * 90.0, cos(t * 0.7) * 70.0, (abs(swing) * 2.0 - 1.0) * 40.0) * glide;
+			float fall = LeafP.z * (kind == SSPP_NEEDLE ? 1.6 : (kind == SSPP_TWIG ? 1.25 : 1.0));
+			float3 target = float3(wind.xy * (kind == SSPP_NEEDLE ? 0.7 : 1.2), -fall / max(glide, 0.25)) + flutter;
 			p.Velocity = lerp(p.Velocity, target, saturate(dt * 1.2));
-			p.Spin += dt * (2.0 + Hash(seed) * 3.0);
+			p.Spin += dt * (kind == SSPP_NEEDLE ? 0.6 : (2.0 + Hash(seed) * 3.0));
+		} else if (kind == SSPP_POLLEN || kind == SSPP_FIREFLY || kind == SSPP_BUTTERFLY || kind == SSPP_GNAT || kind == SSPP_FLY || kind == SSPP_LAMP || kind == SSPP_RESTORATION || kind == SSPP_ILLUSION || kind == SSPP_CONJURATION) {
+			float t = TimeParams.x * 1.6 + p.Spin;
+			float rise = (kind == SSPP_FIREFLY || kind == SSPP_RESTORATION || kind == SSPP_CONJURATION) ? 28.0 : 0.0;
+			float bob = kind == SSPP_BUTTERFLY ? 36.0 : (kind == SSPP_GNAT || kind == SSPP_FLY || kind == SSPP_LAMP ? 14.0 : 20.0);
+			float3 target = float3(wind.xy * 0.35, rise) + float3(sin(t), cos(t * 0.8), sin(t * 1.3)) * bob;
+			p.Velocity = lerp(p.Velocity, target, saturate(dt * 2.0));
+		} else if (kind == SSPP_WARD_RIPPLE) {
+			p.Velocity = float3(0, 0, 0);
 		} else if (kind == SSPP_DUST) {
 			p.Velocity *= saturate(1.0 - dt * 2.5);
 			p.Velocity += float3(wind.xy * 0.4, 12.0) * dt;
 		} else {
-			// splash, spark, blood: ballistic with gravity and a little drag
-			float g = kind == SSPP_SPARK ? 0.6 : (kind == SSPP_EMBER ? (p.Age < 0.4 ? -0.15 : 0.25) : 1.0);  // embers rise a moment, then drift down
+			// splash, spark, blood, drips, alteration, ward shards, shouts, lifted stains
+			float g = 1.0;
+			if (kind == SSPP_SPARK || kind == SSPP_WARD_SHARD)
+				g = 0.6;
+			else if (kind == SSPP_EMBER)
+				g = p.Age < 0.4 ? -0.15 : 0.25;
+			else if (kind == SSPP_ALTERATION)
+				g = 0.35;
+			else if (kind == SSPP_SHOUT)
+				g = 0.08;
+			else if (kind == SSPP_BLOOD_STAIN || kind == SSPP_WATER_STAIN)
+				g = 2.0;
 			p.Velocity.z -= 980.0 * dt * g;
-			p.Velocity *= saturate(1.0 - dt * (kind == SSPP_SPARK ? 0.6 : (kind == SSPP_EMBER ? 1.2 : 0.3)));
+			float drag = kind == SSPP_SPARK || kind == SSPP_WARD_SHARD ? 0.6 : (kind == SSPP_EMBER ? 1.2 : (kind == SSPP_SHOUT ? 0.7 : 0.3));
+			p.Velocity *= saturate(1.0 - dt * drag);
 			if (kind == SSPP_EMBER)
 				p.Velocity.xy += wind.xy * 0.5 * dt;
-			if (kind == SSPP_ICE)
+			if (kind == SSPP_ICE || kind == SSPP_ALTERATION || kind == SSPP_WARD_SHARD)
 				p.Spin += dt * 8.0;
 		}
 
 		float3 next = p.Position + p.Velocity * dt;
 		float3 surface;
-		if (kind != SSPP_DUST && Collide(next, surface)) {
+		bool airborneMote = kind == SSPP_POLLEN || kind == SSPP_FIREFLY || kind == SSPP_BUTTERFLY || kind == SSPP_GNAT || kind == SSPP_FLY || kind == SSPP_LAMP || kind == SSPP_RESTORATION || kind == SSPP_ILLUSION || kind == SSPP_CONJURATION || kind == SSPP_WARD_RIPPLE;
+		if (kind != SSPP_DUST && !airborneMote && Collide(next, surface)) {
 			if (kind == SSPP_RAIN) {
 				uint seed2 = id * 131u + (uint)TimeParams.z;
 				if (Hash(seed2) < SplashP.z) {
 					[unroll] for (uint i = 0; i < 3; i++) {
 						float a = Hash(seed2 + i * 3u + 1u) * 6.2831853;
 						float s = lerp(60.0, 140.0, Hash(seed2 + i * 3u + 2u));
-						SpawnDynamic(SSPP_SPLASH, surface + float3(0, 0, 1), float3(cos(a) * s, sin(a) * s, lerp(120.0, 220.0, Hash(seed2 + i))), SplashP.w, SplashP.x, float4(0.8, 0.85, 0.9, 1), seed2 + i);
+						SpawnDynamic(SSPP_SPLASH | (13u << SSPP_SPRITE_SHIFT), surface + float3(0, 0, 1), float3(cos(a) * s, sin(a) * s, lerp(120.0, 220.0, Hash(seed2 + i))), SplashP.w, SplashP.x, float4(0.8, 0.85, 0.9, 1), seed2 + i);
 					}
+					// ReactPad.y: floor stains. A few rain hits leave a wet patch, not one per drop.
+					if (ReactPad.y > 0 && Hash(seed2 + 11u) < 0.22)
+						SpawnDynamic(SSPP_WATER_STAIN | SSPP_FLAG_SETTLED, surface, float3(0, 0, 0), 8.0, SplashP.x * 4.5, float4(0.72, 0.82, 0.9, 1), seed2 + 19u);
 				}
 				p.Life = 0;
-			} else if (kind == SSPP_SPARK || kind == SSPP_EMBER || kind == SSPP_ICE) {
+			} else if (kind == SSPP_SPARK || kind == SSPP_EMBER || kind == SSPP_ICE || kind == SSPP_WARD_SHARD) {
 				// bounce + roll; once too slow to bounce, rest on the ground and cool / melt (ExtraP rest times)
 				float bounce = kind == SSPP_ICE ? 0.3 : (kind == SSPP_EMBER ? 0.2 : SparkP.w);
 				float vz = abs(p.Velocity.z) * bounce;
@@ -232,30 +307,33 @@ void Respawn(inout Particle p, uint id, uint kind, float amount, float fallSpeed
 				}
 			} else if (kind == SSPP_SPLASH) {
 				p.Life = 0;
+			} else if (kind == SSPP_WATER_DRIP) {
+				if (ReactPad.y > 0)
+					SpawnDynamic(SSPP_WATER_STAIN | SSPP_FLAG_SETTLED, surface, float3(0, 0, 0), 8.0, max(p.Size * 7.0, 2.5), float4(0.72, 0.82, 0.9, 1), id * 17u);
+				p.Life = 0;
+			} else if (kind == SSPP_BLOOD && ReactPad.y > 0) {
+				// The drop becomes the soaked patch. Bits 16-23 stay free for the atlas map.
+				next = surface + float3(0, 0, 0.4);
+				p.Velocity = 0;
+				p.Kind = (p.Kind & ~0x1FFu) | SSPP_BLOOD_STAIN | SSPP_FLAG_SETTLED;
+				p.Size *= 3.6;
+				p.Life = p.Age + max(BloodP.z, 12.0);
 			} else {
-				// snow, leaves, blood settle on the surface and fade after their settle time
+				// snow, leaves, needles, twigs, blood, stains settle and fade
 				next = surface + float3(0, 0, 0.5);
 				p.Velocity = 0;
 				p.Kind |= SSPP_FLAG_SETTLED;
-				float settle = kind == SSPP_SNOW ? SnowP.w : (kind == SSPP_LEAF ? lerp(ExtraP.z, ExtraP.w, Hash(id * 613u + (uint)TimeParams.z)) : BloodP.z);
+				float settle = kind == SSPP_SNOW ? SnowP.w : ((kind == SSPP_LEAF || kind == SSPP_NEEDLE || kind == SSPP_TWIG) ? lerp(ExtraP.z, ExtraP.w, Hash(id * 613u + (uint)TimeParams.z)) : ((kind == SSPP_BLOOD_STAIN || kind == SSPP_WATER_STAIN) ? max(BloodP.z, 8.0) : BloodP.z));
 				p.Life = p.Age + settle;
 			}
 		}
-		if (ambient && kind != SSPP_LEAF && SkyVisibility(next) < 0.2)
+		if (ambient && kind != SSPP_LEAF && kind != SSPP_NEEDLE && kind != SSPP_TWIG && SkyVisibility(next) < 0.2)
 			p.Life = kind == SSPP_RAIN ? 0 : min(p.Life, p.Age + 0.5);  // under a roof edge: rain streak ends, snow dissolves
 		p.Position = next;
 	} else if (any(abs(OffscreenNdc(p.Position)) > 1.05)) {
 		// resting particles off screen can't be depth-tested: dissolve them (removal order: far, off screen, oldest)
 		p.Life = min(p.Life, p.Age + 1.5);
 	}
-	if (settled && kind == SSPP_LEAF && ExtraP2.z > 0.5) {
-		// a strong gust can pick a resting leaf up again (rare, per-leaf random)
-		float gustNow = Wind.w * (0.5 + 0.5 * sin(TimeParams.x * 0.7 + p.Position.x * 0.002 + p.Position.y * 0.0017));
-		if (gustNow > 0.45 && Hash(id * 389u + (uint)TimeParams.z) < 0.004 && (p.Life - p.Age) > 2.0) {
-			p.Kind &= ~SSPP_FLAG_SETTLED;
-			p.Velocity = float3(Wind.xy * 0.8, 120.0 + 100.0 * gustNow);
-			p.Life = p.Age + 30.0;
-		}
-	}
+	ReactToBodies(p, kind, settled);
 	Particles[id] = p;
 }

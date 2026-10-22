@@ -20,7 +20,7 @@ struct FootstepKickParticles : Feature, RE::BSTEventSink<RE::BGSFootstepEvent>
 
 	struct Settings
 	{
-		bool Enabled = false;  // Bearforj 0.6.4: off by default, SSPP Footstep Particles sub-feature already emits footsteps
+		bool Enabled = true;  // kicks snow, mud, sand and dirt; SSPP scatters the particles already on the ground
 		bool Snow = true;
 		bool Mud = true;
 		bool Sand = true;

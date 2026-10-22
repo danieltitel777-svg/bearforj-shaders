@@ -1,6 +1,7 @@
 #include "Skin.h"
 #include "Bearforj/TipUI.h"
 #include "Skin/Editor/Files.h"
+#include "Utils/UI.h"
 
 #include <cmath>
 #include <imgui_stdlib.h>
@@ -41,6 +42,7 @@ void Skin::LoadSettings(json& a_json)
 		number("WetFadeTime", next.WetFadeTime, 0, 50);
 		number("StartSweat", next.StartSweat, 0, 1);
 		number("FullSweat", next.FullSweat, 0, 1);
+		number("SweatAmount", next.SweatAmount, 0, 2);
 		if (a_json.contains("WetParams")) {
 			next.WetParams = a_json.at("WetParams").get<float4>();
 			const auto& w = next.WetParams;
@@ -65,7 +67,8 @@ void Skin::SaveSettings(json& a_json)
 	a_json = { { "EnableSkin", settings.EnableSkin }, { "DefaultProfile", profile },
 		{ "DetailTexture", settings.DetailTexture }, { "MaterialOutputFolder", settings.MaterialOutputFolder },
 		{ "ExtraSkinWetness", settings.ExtraSkinWetness }, { "WetFadeTime", settings.WetFadeTime },
-		{ "StartSweat", settings.StartSweat }, { "FullSweat", settings.FullSweat }, { "WetParams", settings.WetParams } };
+		{ "StartSweat", settings.StartSweat }, { "FullSweat", settings.FullSweat },
+		{ "SweatAmount", settings.SweatAmount }, { "WetParams", settings.WetParams } };
 }
 
 void Skin::RestoreDefaultSettings()
@@ -112,8 +115,15 @@ void Skin::DrawGlobalSettings()
 {
 	bool changed = BFUI::SliderFloat(T("feature.skin.extra_skin_wetness", "Extra skin wetness"), &settings.ExtraSkinWetness, 0, 2, "%.3f", ImGuiSliderFlags_AlwaysClamp);
 	changed |= BFUI::SliderFloat(T("feature.skin.wetness_fade_time", "Wetness fade time"), &settings.WetFadeTime, 0, 50, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+	changed |= BFUI::SliderFloat(T("feature.skin.sweat_amount", "Sweat amount"), &settings.SweatAmount, 0, 2, "%.2fx", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextUnformatted(T("feature.skin.sweat_amount_tooltip", "How strong the sweaty sheen is. It builds as stamina drops, and also while sprinting, fighting, or wearing heavy armor, then fades as stamina comes back. Face, neck and arms show it first. 0 turns sweat off."));
 	changed |= BFUI::SliderFloat(T("feature.skin.sweat_starts_below_stamina", "Sweat starts below stamina"), &settings.StartSweat, 0, 1, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextUnformatted(T("feature.skin.sweat_starts_tooltip", "Stamina fraction where the sheen starts. 0.75 means sweat begins once stamina falls below 75%."));
 	changed |= BFUI::SliderFloat(T("feature.skin.full_sweat_below_stamina", "Full sweat below stamina"), &settings.FullSweat, 0, 1, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextUnformatted(T("feature.skin.full_sweat_tooltip", "Stamina fraction where the sheen is fully on. 0.15 means full sweat below 15% stamina."));
 	changed |= BFUI::SliderFloat(T("feature.skin.wetness_perlin_noise_scale", "Wetness Perlin Noise Scale"), &settings.WetParams.x, 0, 1024, "%.1f", ImGuiSliderFlags_AlwaysClamp);
 	changed |= BFUI::SliderFloat(T("feature.skin.wetness_perlin_noise_lacunarity", "Wetness Perlin Noise Lacunarity"), &settings.WetParams.y, 0, 2, "%.3f", ImGuiSliderFlags_AlwaysClamp);
 	changed |= BFUI::SliderFloat(T("feature.skin.wetness_perlin_noise_persistence", "Wetness Perlin Noise Persistence"), &settings.WetParams.z, 0, 20, "%.3f", ImGuiSliderFlags_AlwaysClamp);

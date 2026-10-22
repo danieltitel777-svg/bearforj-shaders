@@ -214,13 +214,19 @@ void SubmersionWetness::UpdateActor(RE::Actor* a_actor, float a_dt, float a_rain
 	st.depth = waterZ > kNoWater ? std::clamp(waterZ - st.feetZ, 0.0f, st.height + 16.0f) : 0.0f;
 	st.waterZ = waterZ;
 
+	const float dryScale = globals::features::wetnessEffects.GetDryingScale(a_actor);
+	const float dryTime = std::max(settings.DryTime, 1.0f) / std::max(dryScale, 0.15f);
 	if (st.depth > 1.0f) {
-		// Wading in: the wet line follows the deepest point reached (knee, waist, chest...) and the
-		// part below it soaks up over SoakInTime instead of popping to fully wet.
-		st.soakLine = st.soak > 0.05f ? std::max(st.soakLine, st.depth) : st.depth;
+		// Wading in: the wet line climbs toward the water over SoakInTime (ankles, then knees, then
+		// waist) instead of jumping to the current depth, and the soaked part fills in over the same time.
+		const float desired = std::max(st.soakLine, st.depth);
+		const float climb = st.height / std::max(settings.SoakInTime, 0.1f);
+		st.soakLine = std::min(desired, st.soakLine + climb * a_dt);
 		st.soak = std::min(1.0f, st.soak + a_dt / std::max(settings.SoakInTime, 0.1f));
 	} else {
-		st.soak = std::max(0.0f, st.soak - a_dt / std::max(settings.DryTime, 1.0f));
+		st.soak = std::max(0.0f, st.soak - a_dt / dryTime);
+		// The waterline creeps down as the actor dries, so only the still-soaked part stays wet.
+		st.soakLine = std::max(0.0f, st.soakLine - st.height * a_dt / dryTime);
 		if (st.soak <= 0.0f)
 			st.soakLine = 0.0f;
 	}
@@ -239,7 +245,7 @@ void SubmersionWetness::UpdateActor(RE::Actor* a_actor, float a_dt, float a_rain
 	if (target > st.rain)
 		st.rain = std::min(target, st.rain + a_dt / std::max(settings.RainSoakTime, 0.5f));
 	else
-		st.rain = std::max(target, st.rain - a_dt / std::max(settings.DryTime, 1.0f));
+		st.rain = std::max(target, st.rain - a_dt / dryTime);
 }
 
 void SubmersionWetness::Prepass()
@@ -305,12 +311,24 @@ void SubmersionWetness::OnLightingSetupGeometry(RE::BSRenderPass* a_pass)
 	const float line = st.rain > waterCoat ? st.height + 32.0f : st.soakLine;
 	PerGeometry data{};
 	data.SubA = float4(st.feetZ, line, st.waterZ, coat);
-	data.SubB = float4(std::clamp(waterCoat * 1.5f, 0.0f, 1.0f), st.flow, settings.EdgeSoftness, 1.0f);
+	// Beads follow the coat, rain included. Water-only bead amount left characters glossy in the rain
+	// with no droplets; CharacterRainSpots still max() with these so the two layers are not added twice.
+	data.SubB = float4(std::clamp(coat * 1.5f, 0.0f, 1.0f), st.flow, settings.EdgeSoftness, 1.0f);
 	data.SubC = float4(settings.Strength, settings.BeadDensity, settings.HairStrength, settings.ArmorStrength);
 	perGeometryCB->Update(data);
 	ID3D11Buffer* cb = perGeometryCB->CB();
 	globals::d3d::context->PSSetConstantBuffers(9, 1, &cb);
 	boundThisDraw = true;
+}
+
+bool SubmersionWetness::TryGetSoak(RE::FormID a_formID, float& a_line, float& a_amount) const
+{
+	auto it = actors.find(a_formID);
+	if (it == actors.end())
+		return false;
+	a_line = it->second.soakLine;
+	a_amount = it->second.soak;
+	return true;
 }
 
 void SubmersionWetness::OnLightingRestoreGeometry()
@@ -363,6 +381,8 @@ void SubmersionWetness::RestoreDefaultSettings()
 // Ported from BearForge 0.5 (src/Features/SubmersionWetness.cpp)
 float SubmersionWetness::WaterHeightAt(const RE::TESObjectREFR* a_ref, const RE::NiPoint3& a_pos)
 {
+	if (!a_ref)
+		return -RE::NI_INFINITY;
 	float waterHeight = a_ref->GetWaterHeight();
 	if (waterHeight != -RE::NI_INFINITY)
 		return waterHeight;

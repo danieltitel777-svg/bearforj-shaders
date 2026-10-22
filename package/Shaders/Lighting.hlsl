@@ -509,13 +509,9 @@ typedef VS_OUTPUT PS_INPUT;
 #if (defined(HSHADER) || defined(DSHADER)) && defined(LANDSCAPE) && !defined(VR)
 #	include "TerrainDeformation/TerrainDeformation.hlsli"
 
-cbuffer TD_VS_PerFrame : register(b12)
-{
-	row_major float3x3 TD_ScreenProj : packoffset(c0);
-	row_major float4x4 TD_Proj : packoffset(c4);
-	row_major float4x4 TD_ViewProj : packoffset(c8);
-	float3 TD_CameraPosAdjust : packoffset(c40);
-};
+// HS/DS do not inherit the vertex-shader constant buffers. OnLightingSetupGeometry copies the
+// vertex b12 (FrameBuffer::PerFrame) onto the hull and domain stages. A second cbuffer at b12
+// overlaps that and will not compile.
 
 struct TD_PATCH_CONSTANTS
 {
@@ -530,10 +526,11 @@ float TD_EdgeFactor(float3 a_relA, float3 a_relB, bool a_patchActive)
 	float range = max(TerrainDeformation::TessRange(), 1.0);
 	float t = saturate(1.0 - dist / range);
 	// 0.6.4 activity gate (after Dynamic Terrain Deformation, GPL-3.0): only edges touching a stamped cell tessellate
-	float2 a = a_relA.xy + TD_CameraPosAdjust.xy, b = a_relB.xy + TD_CameraPosAdjust.xy;
+	float2 a = a_relA.xy + FrameBuffer::CameraPosAdjust[0].xy, b = a_relB.xy + FrameBuffer::CameraPosAdjust[0].xy;
 	bool active = a_patchActive;
-	[unroll] for (int k = 0; k <= 4; k++)
-		active = active || TerrainDeformation::Active(lerp(a, b, k * 0.25));
+	// 9 samples: a long landscape edge can skip a 64-unit activity cell if only the endpoints are tested
+	[unroll] for (int k = 0; k <= 8; k++)
+		active = active || TerrainDeformation::Active(lerp(a, b, k * 0.125));
 	if (!active)
 		return 1.0;
 	return clamp(lerp(1.0, TerrainDeformation::MaxTessFactor(), t * t), 1.0, 64.0);
@@ -548,7 +545,7 @@ TD_PATCH_CONSTANTS TD_PatchConstants(InputPatch<VS_OUTPUT, 3> patch)
 	float3 p2 = patch[2].WorldPosition.xyz;
 	// Edge factors depend only on the edge (both patches sharing it agree: no cracks). A print inside a large
 	// patch touches no edge, so the centroid only raises the inside factor.
-	bool centre = TerrainDeformation::Active((p0.xy + p1.xy + p2.xy) / 3.0 + TD_CameraPosAdjust.xy);
+	bool centre = TerrainDeformation::Active((p0.xy + p1.xy + p2.xy) / 3.0 + FrameBuffer::CameraPosAdjust[0].xy);
 	o.Edges[0] = TD_EdgeFactor(p1, p2, false);
 	o.Edges[1] = TD_EdgeFactor(p2, p0, false);
 	o.Edges[2] = TD_EdgeFactor(p0, p1, false);
@@ -598,13 +595,13 @@ VS_OUTPUT main(TD_PATCH_CONSTANTS pc, float3 bary : SV_DomainLocation, const Out
 	TD_INTERP(InputPosition);
 #		endif
 
-	float3 absPos = o.WorldPosition.xyz + TD_CameraPosAdjust;
+	float3 absPos = o.WorldPosition.xyz + FrameBuffer::CameraPosAdjust[0].xyz;
 	float dz = TerrainDeformation::Height(absPos).x * TerrainDeformation::DisplacementScale();
 	// Landscape world matrices are translation only, so a world-space vertical offset is also a model-space one.
 	o.WorldPosition.z += dz;
 	o.PreviousWorldPosition.z += dz;
 	o.ModelPosition.z += dz;
-	o.Position += mul(TD_ViewProj, float4(0.0, 0.0, dz, 0.0));
+	o.Position += mul(FrameBuffer::CameraViewProj[0], float4(0.0, 0.0, dz, 0.0));
 	return o;
 }
 #	endif  // DSHADER
@@ -1188,7 +1185,9 @@ float GetSnowParameterY(float texProjTmp, float alpha)
 #		undef WETNESS_EFFECTS
 #	endif
 
-#	if defined(WETNESS_EFFECTS) && !defined(HAIR) && !defined(EYE) && !defined(LANDSCAPE)
+#	if defined(WETNESS_EFFECTS) && !defined(EYE) && !defined(LANDSCAPE)
+	// Hair is included on purpose. Stock Open Shaders skips HAIR here, so hair cards never
+	// received CharacterRainSpots. Rain must put droplets on the whole character, hair included.
 #		define CHARACTER_RAIN_SURFACE
 #	endif
 
@@ -2157,7 +2156,10 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 	float2 wetUV = uv * skinData.skinDetailParams.y;
 #			endif
 	float2 dynamicWet = Skin::GetWetness(input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z, worldNormal.xyz);
-	float skinWetness = Skin::PerlinNoise(wetUV, skinData.wetParams.x, skinData.wetParams.y, skinData.wetParams.z, clamp(dynamicWet.x + dynamicWet.y + skinData.skinParams2.y, 0.f, 2.f)) * skinWetMask * skinData.physicalParams.w;
+	// Upstream Advanced Skin: the Perlin strength is the sweat + water amount. A missing wetness
+	// texture still shows beads at half strength. Multiplying the result by WetResponse * skinWetMask
+	// wiped body beads whenever that mask was 0.
+	float skinWetness = Skin::PerlinNoise(wetUV, skinData.wetParams.x, skinData.wetParams.y, skinData.wetParams.z, clamp(dynamicWet.x + dynamicWet.y + skinData.skinParams2.y, 0.f, 2.f) * (hasSkinWetness ? 1.0 : 0.5));
 	float3 heightWetNormal = CalculateNormalFromHeight(skinWetness, skinData.wetParams.w * 0.0005, uv);
 	if (skinEnabled)
 #		else
@@ -2680,21 +2682,39 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 #			endif
 	const bool evaluateCharacterDrops = characterRainSurface && furDropLayer && inWorld && !SharedData::HideSky &&
 	                                    max(SharedData::wetnessEffectsSettings.CharacterImpactIntensity,
-											SharedData::wetnessEffectsSettings.CharacterRetainedWetness) > 0.0f &&
+											max(SharedData::wetnessEffectsSettings.CharacterRetainedWetness,
+												SharedData::wetnessEffectsSettings.CharacterStatePadding.x)) > 0.0f &&
 	                                    (!heldWeapon || SharedData::wetnessEffectsSettings.EnableWeaponRainDrops);
 	[branch] if (evaluateCharacterDrops)
 	{
 		characterDrop = CharacterRainSpots::Evaluate(input.ModelPosition.xyz,
 			input.WorldPosition.xyz, vertexNormal.xyz, characterRainSkyVisibility, heldWeapon, eyeIndex);
 	}
-#			if defined(SUBMERSION_WETNESS)
-	[branch] if (characterRainSurface && furDropLayer && inWorld)
+	// During rain, upstream CharacterRainSpots covers the whole character and keeps flowing.
+	// After the rain stops, and while wading, extra beads are only the submerged/wet region and they sit still.
 	{
-		float3 submersionDrop = SubmersionWetness::Drops(input.ModelPosition.xyz, input.WorldPosition.xyz, vertexNormal.xyz,
-			input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z, heldWeapon);
-		characterDrop = max(characterDrop, submersionDrop);
-	}
+		float rainingNow = smoothstep(0.02f, 0.12f, SharedData::wetnessEffectsSettings.CharacterStatePadding.x);
+#			if defined(SUBMERSION_WETNESS)
+		[branch] if (characterRainSurface && furDropLayer && inWorld && rainingNow < 0.5f && SubmersionWetness::Active())
+		{
+			float3 submersionDrop = SubmersionWetness::Drops(input.ModelPosition.xyz, input.WorldPosition.xyz, vertexNormal.xyz,
+				input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z, heldWeapon);
+			characterDrop = max(characterDrop, submersionDrop);
+		}
+		float dropMask = 1.0f;
+		[branch] if (SubmersionWetness::Active())
+		{
+			float absZ = input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z;
+			float submerged = SubmersionWetness::SubmergedMask(absZ, input.ModelPosition.xyz);
+			dropMask = lerp(submerged * saturate(SubmersionWetness::SubA.w), 1.0f, rainingNow);
+		}
+		else
+			dropMask = lerp(saturate(SharedData::wetnessEffectsSettings.CharacterRetainedWetness), 1.0f, rainingNow);
+#			else
+		float dropMask = lerp(saturate(SharedData::wetnessEffectsSettings.CharacterRetainedWetness), 1.0f, rainingNow);
 #			endif
+		characterDrop *= dropMask;
+	}
 	float characterSpotMask = characterDrop.x;
 #		endif
 	// Calculate raindrop effects
@@ -2731,6 +2751,11 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 #		if defined(CHARACTER_RAIN_SURFACE)
 	if (characterRainSurface)
 		rainWetness = 0.0f;
+#		endif
+#		if defined(HAIR)
+	// Hair is a character rain surface so the cards draw droplets. That path clears the
+	// generic rain term above; put the staged hair wetness back so hair shaders still receive it.
+	rainWetness = max(rainWetness, SharedData::wetnessEffectsSettings.HairWetness * SharedData::wetnessEffectsSettings.Wetness);
 #		endif
 
 #		if defined(CS_SKIN) && !defined(SKIN)
@@ -2823,12 +2848,6 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 	wetnessNormal = ReorientNormal(rippleNormal, wetnessNormal);
 
 #		if defined(CS_SKIN_SHADING)
-	if (skinEnabled) {
-		float wetResponse = saturate(skinData.physicalParams.w * skinWetMask);
-		wetnessGlossinessAlbedo *= wetResponse;
-		wetnessGlossinessSpecular *= wetResponse;
-		wetnessNormal = normalize(lerp(worldNormal.xyz, wetnessNormal, wetResponse));
-	}
 	if (skinEnabled && (skinWetness > 0.0f)) {
 		wetnessNormal = skinWetNormal;
 		wetnessGlossinessSpecular = saturate(max(wetnessGlossinessSpecular, skinWetness));
@@ -2868,6 +2887,42 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 		                               0.0f :
 		                               saturate(characterRetainedWetness * SharedData::wetnessEffectsSettings.CharacterWetSheen);
 		characterCoatMask = max(characterSpotMask, characterSheenMask);
+		// Sheen follows the same wet region as the droplets, so dry skin and cloth stay matte.
+		float rainingNow = smoothstep(0.02f, 0.12f, SharedData::wetnessEffectsSettings.CharacterStatePadding.x);
+		float regionMask = lerp(saturate(SharedData::wetnessEffectsSettings.CharacterRetainedWetness), 1.0f, rainingNow);
+#			if defined(SUBMERSION_WETNESS)
+		[branch] if (SubmersionWetness::Active())
+		{
+			float absZ = input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z;
+			regionMask = lerp(SubmersionWetness::SubmergedMask(absZ, input.ModelPosition.xyz) * saturate(SubmersionWetness::SubA.w), 1.0f, rainingNow);
+		}
+#			endif
+		characterCoatMask *= regionMask;
+		// Droplets can cover the whole character as soon as rain is falling. Darkening, gloss
+		// and clumping follow the staged coat (wetness), and reverse as that coat dries.
+		float wetAmount = saturate(wetness);
+		float metal = 0.0f;
+#			if defined(TRUE_PBR)
+		metal = saturate(material.Metallic);
+#			elif defined(ENVMAP) || defined(MULTI_LAYER_PARALLAX)
+		metal = saturate(envMask);
+#			endif
+#			if defined(SKIN)
+		float darken = wetAmount * 0.28f;
+#			elif defined(HAIR)
+		float darken = wetAmount * 0.45f;
+#			else
+		float darken = wetAmount * lerp(0.05f, 0.35f, 1.0f - metal);
+#			endif
+		material.BaseColor *= lerp(1.0f, 0.4f, darken);
+#			if defined(HAIR)
+		if (SharedData::hairSpecularSettings.Enabled) {
+			material.Shininess = lerp(material.Shininess, min(material.Shininess * 1.75f, 220.0f), wetAmount);
+			material.Roughness = lerp(material.Roughness, max(material.Roughness * 0.35f, 0.08f), wetAmount);
+		}
+#			elif !defined(SKIN)
+		material.Roughness = lerp(material.Roughness, lerp(0.16f, 0.42f, 1.0f - metal), wetAmount * (0.25f + 0.75f * metal));
+#			endif
 	}
 	// The thin surface film supplies broad gloss while localized drops retain their own normal and absorption.
 	[branch] if (characterRainSurface && characterCoatMask > 0.0f && inWorld)
@@ -3116,6 +3171,10 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 	HairBacklighting::AddDirectLight(dirLightOutput, dirLightContext, tbnTr[2], baseColor.xyz);
 #	endif
 	dirLightOutput.transmission *= dirTransmissionContactShadow;
+#	if defined(HAIR) && defined(WETNESS_EFFECTS)
+	// Wet hair clumps: less light through the card, using the same wetness the coat already has.
+	dirLightOutput.transmission *= lerp(1.0f, 0.35f, saturate(wetness));
+#	endif
 #	if defined(WETNESS_EFFECTS)
 	if (waterRoughnessSpecular < 1)
 		EvaluateWetnessLighting(wetnessNormal, dirLightContext, waterRoughnessSpecular, dirLightOutput);

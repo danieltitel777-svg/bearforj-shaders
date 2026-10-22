@@ -4,7 +4,7 @@
 struct Print
 {
 	float4 A;  // x, y (world), yaw, radius
-	float4 B;  // depth (already faded and profile-scaled), rim fraction, darkening, unused
+	float4 B;  // depth (faded, material-scaled), rim fraction, darkening, shoulder
 };
 
 StructuredBuffer<Print> Prints : register(t0);  // [0] = header, A.x = count, B.zw = window origin
@@ -14,6 +14,8 @@ RWTexture2D<uint> Activity : register(u1);
 #if defined(CLEAR)
 [numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID)
 {
+	if (any(id.xy >= TD_HM_SIZE))
+		return;
 	Heightmap[id.xy] = 0;
 	if (all(id.xy < TD_ACT_SIZE))
 		Activity[id.xy] = 0;
@@ -38,11 +40,13 @@ RWTexture2D<uint> Activity : register(u1);
 		[loop] for (int x = lo.x + (int)tid.x; x <= hi.x; x += 8)
 		{
 			float2 world = origin + (float2(x, y) + 0.5) * TD_HM_TEXEL;
-			float3 v = TD_PrintShape(world - p.A.xy, p.A.z, p.A.w, p.B.x, p.B.y, p.B.z);
+			float3 v = TD_PrintShape(world - p.A.xy, p.A.z, p.A.w, p.B.x, p.B.y, p.B.z, p.B.w);
 			if (all(v < 1e-3))
 				continue;
 			InterlockedMax(Heightmap[int2(x, y)], TD_Encode(v.x, v.y, v.z));
-			InterlockedMax(Activity[int2(x, y) / TD_ACT_CELL], 1u);
+			uint2 cell = uint2(x, y) / (uint)TD_ACT_CELL;
+			if (all(cell < (uint)TD_ACT_SIZE))
+				InterlockedMax(Activity[cell], 1u);
 		}
 	}
 }

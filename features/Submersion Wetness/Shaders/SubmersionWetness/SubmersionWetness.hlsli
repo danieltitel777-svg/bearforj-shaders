@@ -71,8 +71,9 @@ namespace SubmersionWetness
 		[branch] if (region > 0.001f)
 		{
 			float density = saturate(SubB.x * SubC.y);
-			// rivulets: normal slope-driven flow, boosted while the head has just come out of the water
-			float flowSlope = saturate(smoothstep(0.2f, 0.8f, length(worldNormal.xy)) + SubB.y);
+			// Static beads. Rivulets are the upstream rain flow in CharacterRainSpots, and they run
+			// only while precipitation is falling. Drying and wading leave droplets in place.
+			float flowSlope = 0.0f;
 			[unroll] for (uint projectionIndex = 0u; projectionIndex < 3u; ++projectionIndex)
 			{
 				[branch] if (projectionWeights[projectionIndex] > 0.01f)
@@ -86,7 +87,7 @@ namespace SubmersionWetness
 					float3 surfaceV = (worldDy * surfaceDx.x - worldDx * surfaceDy.x) * inverseDeterminant;
 					float3 surfaceMetric = abs(determinant) > 1e-8f ? float3(dot(surfaceU, surfaceU), dot(surfaceU, surfaceV), dot(surfaceV, surfaceV)) : float3(1, 0, 1);
 					water += CharacterRainSpots::EvaluateProjection(surfacePosition, surfaceMetric, footprint, projectionIndex,
-								 0.0f, density, flowSlope, heldWeapon) *
+								 density, density, flowSlope, heldWeapon) *
 					         projectionWeights[projectionIndex];
 				}
 			}

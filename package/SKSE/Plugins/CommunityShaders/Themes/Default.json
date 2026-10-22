@@ -15,16 +15,16 @@
                 "SizeScale": 1.0
             },
             {
-                "Family": "Jost",
-                "Style": "Light",
-                "File": "Jost/Jost-Light.ttf",
-                "SizeScale": 1.3
+                "Family": "Cinzel",
+                "Style": "Regular",
+                "File": "Cinzel/Cinzel-Regular.ttf",
+                "SizeScale": 1.15
             },
             {
-                "Family": "Jost",
+                "Family": "Cinzel",
                 "Style": "Regular",
-                "File": "Jost/Jost-Regular.ttf",
-                "SizeScale": 1.0
+                "File": "Cinzel/Cinzel-Regular.ttf",
+                "SizeScale": 1.05
             },
             {
                 "Family": "Jost",

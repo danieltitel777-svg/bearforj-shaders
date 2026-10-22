@@ -120,6 +120,19 @@ cbuffer PerGeometry : register(b2)
 #	endif  // VR
 };
 
+// Camera depth and shadow-map passes are BSUtilityShader, not the lighting hull/domain pair.
+// b4 is PerShader (Permutation.hlsli). b5/b6 are SharedData/FeatureData, b9/b10 bones, b11 alpha test,
+// b12 the frame buffer, b13 VR. b7 is unused by this vertex shader (RunGrass, Skin, and Fur Shells own it
+// in their own files). The CPU sets TD_Displace only for near-landscape draws so rocks and walls stay put.
+#if defined(TERRAIN_DEFORMATION) && (defined(RENDER_DEPTH) || defined(RENDER_SHADOWMAP)) && !defined(RENDER_SHADOWMASK_ANY)
+#	include "TerrainDeformation/TerrainDeformation.hlsli"
+cbuffer TD_DepthDraw : register(b7)
+{
+	float4 TD_DepthDrawParams;
+};
+#define TD_Displace TD_DepthDrawParams.x
+#endif
+
 float2 SmoothSaturate(float2 value)
 {
 	return value * value * (3 - 2 * value);
@@ -199,6 +212,15 @@ VS_OUTPUT main(VS_INPUT input)
 #		if defined(LOD_LANDSCAPE)
 	positionMS = LodLandscape::AdjustLodLandscapeVertexPositionMS(positionMS, World[eyeIndex], HighDetailRange[eyeIndex]);
 #		endif
+
+#if defined(TERRAIN_DEFORMATION) && (defined(RENDER_DEPTH) || defined(RENDER_SHADOWMAP)) && !defined(RENDER_SHADOWMASK_ANY) && !defined(SKINNED) && !defined(LOD_LANDSCAPE)
+	// Landscape world matrices are translation only, so a model-space Z offset is a world-space one.
+	// Shadows and the camera depth prepass (AO) then see the same height field the lighting pass displaces.
+	if (TD_Displace > 0.5) {
+		float3 absPos = mul(World[eyeIndex], positionMS).xyz + FrameBuffer::CameraPosAdjust[eyeIndex].xyz;
+		positionMS.z += TerrainDeformation::Height(absPos).x * TerrainDeformation::DisplacementScale();
+	}
+#endif
 
 	float3x3 treeBendNormalTransform = (float3x3)Math::IdentityMatrix;
 #		if defined(SKINNED)

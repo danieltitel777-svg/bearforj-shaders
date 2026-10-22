@@ -97,6 +97,8 @@ struct SubmersionWetness : Feature
 
 	void OnLightingSetupGeometry(RE::BSRenderPass* a_pass);
 	void OnLightingRestoreGeometry();
+	/** @brief Soak line above the feet and soak amount 0..1, if this actor is tracked. */
+	bool TryGetSoak(RE::FormID a_formID, float& a_line, float& a_amount) const;
 
 private:
 	void UpdateActor(RE::Actor* a_actor, float a_dt, float a_rain);

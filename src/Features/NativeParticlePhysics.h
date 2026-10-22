@@ -82,6 +82,19 @@ struct NativeParticlePhysics : Feature
 	float playerHeight = 128.0f;
 	bool playerValid = false;
 
+	/** @brief One body or spell that pushes every particle. pos.w is radius, vel.w is strength. */
+	struct Influencer
+	{
+		float pos[4]{};
+		float vel[4]{};
+	};
+	static constexpr uint32_t kInfluencerCount = 8;
+	std::array<Influencer, kInfluencerCount> influencers{};
+	/** @brief Rebuilds the influencer list at most once per frame (actors, creatures, spells, shouts). */
+	void RefreshInfluencers();
+	/** @brief A cast or shout. Strength fades over about half a second. */
+	void AddImpulse(const RE::NiPoint3& a_pos, float a_radius, float a_strength);
+
 	virtual void PostPostLoad() override;
 	virtual void Prepass() override;
 	virtual void DrawSettings() override;

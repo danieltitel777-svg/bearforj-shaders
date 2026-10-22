@@ -86,11 +86,19 @@ namespace CharacterRainSurfaces
 			const auto* lightingProperty = a_pass->shaderProperty->GetRTTI() == globals::rtti::BSLightingShaderPropertyRTTI.get() ?
 			                                   static_cast<const RE::BSLightingShaderProperty*>(a_pass->shaderProperty) :
 			                                   nullptr;
-			if (!lightingProperty || !lightingProperty->material || lightingProperty->alpha < kFullyOpaqueAlphaThreshold ||
-				lightingProperty->material->GetFeature() == RE::BSShaderMaterial::Feature::kHairTint ||
-				lightingProperty->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kHairTint) ||
+			if (!lightingProperty || !lightingProperty->material ||
 				lightingProperty->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kRefraction,
 					RE::BSShaderProperty::EShaderPropertyFlag::kTempRefraction))
+				return false;
+
+			// Hair cards are alpha-tested (and often slightly transparent). Stock Open Shaders
+			// rejected kHairTint, so the hair shader never ran CharacterRainSpots.
+			const bool hair = lightingProperty->material->GetFeature() == RE::BSShaderMaterial::Feature::kHairTint ||
+			                  lightingProperty->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kHairTint);
+			if (hair)
+				return true;
+
+			if (lightingProperty->alpha < kFullyOpaqueAlphaThreshold)
 				return false;
 
 			const auto& alphaProperty = a_pass->geometry->GetGeometryRuntimeData().alphaProperty;

@@ -1,4 +1,6 @@
 #include "Features/Skin.h"
+#include "Features/SubmersionWetness.h"
+#include "Features/WetnessEffects.h"
 #include "Globals.h"
 #include "State.h"
 #include <cmath>
@@ -75,24 +77,56 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 		const float sweatStart = std::max(settings.StartSweat, settings.FullSweat);
 		const float sweatFull = std::min(settings.StartSweat, settings.FullSweat);
 		const float sweatRange = sweatStart - sweatFull;
-		wetness.x = (std::abs(sweatRange) < 1e-5f)    ? 0.0f :
-		            (staminaPercentage >= sweatStart) ? 0.0f :
-		            (staminaPercentage <= sweatFull)  ? 1.0f :
-		                                                (sweatStart - staminaPercentage) / sweatRange;
-		if (actor->IsInWater()) {
-			wetness.y = 2.0f;
-			const float waterHeight = GetWaterHeight(userData, actor->GetPosition());
-			// Open #940: never lower the recorded depth while submerged.
-			wetness.w = std::max(inserted ? 0.0f : cached.wetness.w, waterHeight - positionZ);
-		} else {
-			wetness.y = 0.0f;
-			wetness.w = 0.0f;
+		float staminaSweat = (std::abs(sweatRange) < 1e-5f)    ? 0.0f :
+		                     (staminaPercentage >= sweatStart) ? 0.0f :
+		                     (staminaPercentage <= sweatFull)  ? 1.0f :
+		                                                         (sweatStart - staminaPercentage) / sweatRange;
+		float exertion = 0.0f;
+		if (!actor->IsDead()) {
+			if (actor->AsActorState()->IsSprinting())
+				exertion += 0.55f;
+			if (actor->IsInCombat())
+				exertion += 0.35f;
+			if (auto* body = actor->GetWornArmor(RE::BGSBipedObjectForm::BipedObjectSlot::kBody)) {
+				if (body->IsHeavyArmor())
+					exertion += 0.25f;
+			}
+		}
+		exertion = std::min(exertion, 1.0f);
+		const float dt = std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, 0.25f);
+		if (exertion > cached.exertion)
+			cached.exertion = std::min(exertion, cached.exertion + dt * 0.2f);
+		else
+			cached.exertion = std::max(exertion, cached.exertion - dt * 0.1f);
+		wetness.x = std::clamp(std::max(staminaSweat, cached.exertion) * settings.SweatAmount, 0.0f, 1.0f);
+		bool submersionOwnsWater = false;
+		if (globals::features::submersionWetness.loaded && globals::features::submersionWetness.settings.Enabled) {
+			float line = 0.0f;
+			float amount = 0.0f;
+			if (globals::features::submersionWetness.TryGetSoak(actorFormID, line, amount)) {
+				wetness.w = line;
+				wetness.y = std::clamp(amount * 2.0f, 0.0f, 2.0f);
+				submersionOwnsWater = true;
+			}
+		}
+		if (!submersionOwnsWater) {
+			if (actor->IsInWater()) {
+				wetness.y = 2.0f;
+				const float waterHeight = GetWaterHeight(userData, actor->GetPosition());
+				// Open #940: never lower the recorded depth while submerged.
+				wetness.w = std::max(inserted ? 0.0f : cached.wetness.w, waterHeight - positionZ);
+			} else {
+				wetness.y = 0.0f;
+				wetness.w = 0.0f;
+			}
 		}
 
 		if (inserted) {
 			cached.wetness = wetness;
 		} else {
-			const float fadeTime = std::max(settings.WetFadeTime, 0.001f);
+			float fadeTime = std::max(settings.WetFadeTime, 0.001f);
+			if (globals::features::wetnessEffects.loaded)
+				fadeTime /= std::max(globals::features::wetnessEffects.GetDryingScale(actor), 0.15f);
 			if (cached.wetness.x < wetness.x) {
 				cached.wetness.x = wetness.x;
 			} else if (cached.wetness.x > wetness.x) {
@@ -101,19 +135,21 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 			}
 			wetness.x = cached.wetness.x;
 
-			// Open #940: skin retains wetness when leaving water and fades over WetFadeTime.
-			constexpr float kWaterWetnessMagnitude = 2.0f;
-			if (cached.wetness.y < wetness.y) {
-				cached.wetness.y = wetness.y;
-			} else if (cached.wetness.y > wetness.y) {
-				cached.wetness.y -= kWaterWetnessMagnitude * *globals::game::deltaTime / fadeTime;
-				cached.wetness.y = std::max(cached.wetness.y, 0.0f);
-				wetness.y = cached.wetness.y;
-				if (wetness.y == 0.0f) {
-					wetness.w = 0.0f;
-				} else {
-					// Hold the last known water depth while drying instead of snapping to 0 the instant water is left.
-					wetness.w = cached.wetness.w;
+			if (!submersionOwnsWater) {
+				// Open #940: skin retains wetness when leaving water and fades over WetFadeTime.
+				constexpr float kWaterWetnessMagnitude = 2.0f;
+				if (cached.wetness.y < wetness.y) {
+					cached.wetness.y = wetness.y;
+				} else if (cached.wetness.y > wetness.y) {
+					cached.wetness.y -= kWaterWetnessMagnitude * *globals::game::deltaTime / fadeTime;
+					cached.wetness.y = std::max(cached.wetness.y, 0.0f);
+					wetness.y = cached.wetness.y;
+					if (wetness.y == 0.0f) {
+						wetness.w = 0.0f;
+					} else {
+						// Hold the last known water depth while drying instead of snapping to 0 the instant water is left.
+						wetness.w = cached.wetness.w;
+					}
 				}
 			}
 			cached.wetness = wetness;

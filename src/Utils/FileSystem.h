@@ -128,12 +128,6 @@ namespace Util
 		std::filesystem::path GetSceneSettingsPath();
 
 		/**
-		 * Gets the UnifiedWaterCache directory path
-		 * @return CommunityShaderPath / "UnifiedWaterCache"
-		 */
-		std::filesystem::path GetUnifiedWaterCachePath();
-
-		/**
 		 * Gets the WindSettings directory path
 		 * @return CommunityShaderPath / "WindSettings"
 		 */
