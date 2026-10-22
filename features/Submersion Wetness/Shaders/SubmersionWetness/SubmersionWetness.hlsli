@@ -15,11 +15,12 @@ namespace SubmersionWetness
 		float4 SubA;  // x feet world z, y soak line height above feet, z current water world z (-1e9 none), w soak 0..1
 		float4 SubB;  // x bead amount 0..1, y emerge flow 0..1, z edge softness (units), w enabled
 		float4 SubC;  // x wetness strength, y bead density, z hair strength, w armor strength
+		float4 SubD;  // x rain progress head-to-feet 0..1, y rain darkening 0..1, z actor height, w 1 when the whole body is under water
 	};
 
 	bool Active()
 	{
-		return SubB.w > 0.5f && (SubA.w > 0.0f || SubB.x > 0.0f);
+		return SubB.w > 0.5f && (SubA.w > 0.0f || SubB.x > 0.0f || SubD.x > 0.0f);
 	}
 
 	float EdgeNoise(float3 p)
@@ -41,12 +42,25 @@ namespace SubmersionWetness
 		return SubA.z < -1.0e8f ? 1.0f : smoothstep(SubA.z + 0.5f, SubA.z + 2.0f, absZ);
 	}
 
-	/** @brief Broad coat wetness for this pixel, 0..1. */
+	/** @brief 1 on the part rain has reached, starting at the head and moving down. */
+	float RainMask(float absZ)
+	{
+		float height = max(SubD.z, 1.0f);
+		float along = saturate((absZ - SubA.x) / height);
+		float front = 1.0f - SubD.x;
+		return smoothstep(front - 0.05f, front + 0.02f, along) * smoothstep(0.02f, 0.1f, SubD.x);
+	}
+
+	/** @brief Broad coat wetness for this pixel, 0..1. Water darkens up to the soak line. Rain darkening follows the droplets. */
 	float Coat(float absZ, float3 modelPosition, float materialScale)
 	{
 		float coat = 0.0f;
 		[branch] if (Active())
-			coat = saturate(SubA.w * SubmergedMask(absZ, modelPosition) * SubC.x * materialScale);
+		{
+			float water = SubD.w > 0.5f ? SubA.w : SubA.w * SubmergedMask(absZ, modelPosition);
+			float rain = SubD.y * RainMask(absZ);
+			coat = saturate(max(water, rain) * SubC.x * materialScale);
+		}
 		return coat;
 	}
 
@@ -57,7 +71,7 @@ namespace SubmersionWetness
 		float3 water = 0.0f;
 		[branch] if (!Active() || SubB.x <= 0.0f)
 			return water;
-		float region = SubmergedMask(absZ, modelPosition) * AboveWaterMask(absZ);
+		float region = max(RainMask(absZ), SubmergedMask(absZ, modelPosition)) * AboveWaterMask(absZ);
 		float3 modelDx = ddx(modelPosition);
 		float3 modelDy = ddy(modelPosition);
 		float3 worldDx = ddx(relativeWorldPosition);
@@ -70,10 +84,9 @@ namespace SubmersionWetness
 		projectionWeights /= max(dot(projectionWeights, 1.0f.xxx), 1e-5f);
 		[branch] if (region > 0.001f)
 		{
-			float density = saturate(SubB.x * SubC.y);
-			// Static beads. Rivulets are the upstream rain flow in CharacterRainSpots, and they run
-			// only while precipitation is falling. Drying and wading leave droplets in place.
-			float flowSlope = 0.0f;
+			float density = saturate(max(SubD.x, SubB.x) * SubC.y);
+			// After the body leaves the water, the same droplets run down and thin out with the coat.
+			float flowSlope = SubB.y * smoothstep(0.05f, 0.45f, length(worldNormal.xy));
 			[unroll] for (uint projectionIndex = 0u; projectionIndex < 3u; ++projectionIndex)
 			{
 				[branch] if (projectionWeights[projectionIndex] > 0.01f)

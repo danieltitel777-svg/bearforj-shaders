@@ -2705,8 +2705,8 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 		[branch] if (SubmersionWetness::Active())
 		{
 			float absZ = input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z;
-			float submerged = SubmersionWetness::SubmergedMask(absZ, input.ModelPosition.xyz);
-			dropMask = lerp(submerged * saturate(SubmersionWetness::SubA.w), 1.0f, rainingNow);
+			float wetRegion = max(SubmersionWetness::RainMask(absZ), SubmersionWetness::SubmergedMask(absZ, input.ModelPosition.xyz));
+			dropMask = wetRegion * SubmersionWetness::AboveWaterMask(absZ);
 		}
 		else
 			dropMask = lerp(saturate(SharedData::wetnessEffectsSettings.CharacterRetainedWetness), 1.0f, rainingNow);
@@ -2895,12 +2895,11 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 		[branch] if (SubmersionWetness::Active())
 		{
 			float absZ = input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z;
-			regionMask = lerp(SubmersionWetness::SubmergedMask(absZ, input.ModelPosition.xyz) * saturate(SubmersionWetness::SubA.w), 1.0f, rainingNow);
+			regionMask = max(SubmersionWetness::RainMask(absZ), SubmersionWetness::SubmergedMask(absZ, input.ModelPosition.xyz)) * SubmersionWetness::AboveWaterMask(absZ);
 		}
 #			endif
 		characterCoatMask *= regionMask;
-		// Droplets can cover the whole character as soon as rain is falling. Darkening, gloss
-		// and clumping follow the staged coat (wetness), and reverse as that coat dries.
+		// Droplets and sheen stay on the wet region. Darkening follows the coat and dries back off.
 		float wetAmount = saturate(wetness);
 		float metal = 0.0f;
 #			if defined(TRUE_PBR)
@@ -3685,8 +3684,26 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 #			elif defined(ENVMAP) || defined(MULTI_LAYER_PARALLAX)
 	porosity = lerp(porosity, 0.0, saturate(sqrt(envMask)));
 #			endif
-	float wetnessDarkeningAmount = porosity * wetnessGlossinessAlbedo;
-	material.BaseColor = lerp(material.BaseColor, pow(abs(material.BaseColor), 1.0 + wetnessDarkeningAmount), 0.5);
+	float actorWet = 0.0;
+#		if defined(SUBMERSION_WETNESS) && defined(CHARACTER_RAIN_SURFACE)
+	if (characterRainSurface && SubmersionWetness::Active())
+		actorWet = SubmersionWetness::Coat(input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z, input.ModelPosition.xyz, 1.0);
+#		endif
+	[branch] if (actorWet > 0.02)
+	{
+		float actorMetal = 0.0;
+#		if defined(TRUE_PBR)
+		actorMetal = saturate(material.Metallic);
+#		endif
+		float actorPorosity = lerp(1.0, 0.15, actorMetal);
+		float actorDark = actorPorosity * actorWet * actorWet * 2.4;
+		material.BaseColor = lerp(material.BaseColor, pow(abs(material.BaseColor), 1.0 + actorDark), 0.75) * lerp(1.0, 0.78, actorWet * actorPorosity);
+	}
+	else
+	{
+		float wetnessDarkeningAmount = porosity * wetnessGlossinessAlbedo;
+		material.BaseColor = lerp(material.BaseColor, pow(abs(material.BaseColor), 1.0 + wetnessDarkeningAmount), 0.5);
+	}
 #		endif
 #	endif
 
