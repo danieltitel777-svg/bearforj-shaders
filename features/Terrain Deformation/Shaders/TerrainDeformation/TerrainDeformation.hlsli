@@ -22,9 +22,11 @@ namespace TerrainDeformation
 	// 0.6.4: only Prints[0] (header) is read here; prints are stamped into Heightmap by StampCS.
 	//   A = (count, maxTessFactor, tessRange, displacementScale)
 	//   B = (normalStrength, tessellationEnabled, window origin x, window origin y)
+	// tess mode in B.y: 0 off, 1 footprints, 2 raised snow/mud/sand (tessellate the whole near field)
 	StructuredBuffer<Print> Prints : register(t54);  // Bearforj: t123 clashed with TreeWindSpring
 	Texture2D<uint> Heightmap : register(t56);
 	Texture2D<uint> Activity : register(t57);
+	Texture2D<float2> RaiseMap : register(t58);  // R raise units, G sink fraction, 32^2 over the window
 
 	uint Count() { return min((uint)Prints[0].A.x, 511u); }
 	float MaxTessFactor() { return Prints[0].A.y; }
@@ -32,7 +34,38 @@ namespace TerrainDeformation
 	float DisplacementScale() { return Prints[0].A.w; }
 	float NormalStrength() { return Prints[0].B.x; }
 	bool TessellationEnabled() { return Prints[0].B.y > 0.5; }
+	// Raised ground is on: every near landscape edge tessellates, and height comes from RaiseMap.
+	bool RaiseField() { return Prints[0].B.y > 1.5; }
 	float2 Origin() { return Prints[0].B.zw; }
+
+	static const float TD_RAISE_CELL = 128.0;
+	static const int TD_RAISE_SIZE = 32;
+
+	float2 LoadRaise(int2 a_texel)
+	{
+		if (any(a_texel < 0) || any(a_texel >= TD_RAISE_SIZE))
+			return 0.0;
+		return RaiseMap.Load(int3(a_texel, 0));
+	}
+
+	// World-aligned 128-unit cells. Texel 0 is the cell that contains the heightmap origin.
+	float2 RaiseAt(float2 a_positionWS)
+	{
+		float2 origin = floor(Origin() / TD_RAISE_CELL) * TD_RAISE_CELL;
+		float2 p = (a_positionWS - origin) / TD_RAISE_CELL - 0.5;
+		int2 i = int2(floor(p));
+		float2 f = p - i;
+		return lerp(lerp(LoadRaise(i), LoadRaise(i + int2(1, 0)), f.x),
+			lerp(LoadRaise(i + int2(0, 1)), LoadRaise(i + int2(1, 1)), f.x), f.y);
+	}
+
+	// 1 at the camera, 0 at TessRange, so the raised layer meets the flat untessellated ground.
+	float RaiseFade(float2 a_positionWS)
+	{
+		float dist = length(a_positionWS - FrameBuffer::CameraPosAdjust[0].xy);
+		float range = max(TessRange(), 1.0);
+		return 1.0 - smoothstep(range * 0.65, range, dist);
+	}
 
 	float3 Fetch(int2 a_texel)
 	{
@@ -50,17 +83,35 @@ namespace TerrainDeformation
 		return Activity.Load(int3(cell, 0)) != 0;
 	}
 
-	// a_positionWS: absolute world position. Returns (height offset, <0 inside a print; darkening weight).
+	// a_positionWS: absolute world position. Returns (height offset; darkening weight).
+	// With no raised layer this is the old footprint: -dip + rim. With a layer, the foot sinks
+	// SinkFraction of it and the whole raise fades to that footprint before TessRange.
 	float2 Height(float3 a_positionWS)
 	{
-		if (Count() == 0)
-			return 0.0;
-		float2 t = (a_positionWS.xy - Origin()) / TD_HM_TEXEL - 0.5;
-		int2 i = int2(floor(t));
-		float2 f = t - i;
-		float3 v = lerp(lerp(Fetch(i), Fetch(i + int2(1, 0)), f.x), lerp(Fetch(i + int2(0, 1)), Fetch(i + int2(1, 1)), f.x), f.y);
-		float height = -v.x + v.z * (v.x > 1e-3 ? 0.25 : 1.0);
-		return float2(height, v.y);
+		float dip = 0.0;
+		float dark = 0.0;
+		float rim = 0.0;
+		if (Count() > 0) {
+			float2 t = (a_positionWS.xy - Origin()) / TD_HM_TEXEL - 0.5;
+			int2 i = int2(floor(t));
+			float2 f = t - i;
+			float3 v = lerp(lerp(Fetch(i), Fetch(i + int2(1, 0)), f.x), lerp(Fetch(i + int2(0, 1)), Fetch(i + int2(1, 1)), f.x), f.y);
+			dip = v.x;
+			dark = v.y;
+			rim = v.z;
+		}
+		float legacy = -dip + rim * (dip > 1e-3 ? 0.25 : 1.0);
+		float height = legacy;
+		if (RaiseField()) {
+			float2 layer = RaiseAt(a_positionWS.xy);
+			if (layer.x > 0.5) {
+				float foot = saturate(dip * 0.5);
+				float sunk = lerp(layer.x, layer.x * (1.0 - saturate(layer.y)), foot);
+				float raised = sunk + rim * 0.35;
+				height = lerp(legacy, raised, RaiseFade(a_positionWS.xy));
+			}
+		}
+		return float2(height, dark);
 	}
 
 #	if defined(PSHADER)
@@ -70,7 +121,7 @@ namespace TerrainDeformation
 	float3 Apply(float3 a_positionRel, float3 a_positionWS, float3 a_normal, out float a_shade)
 	{
 		a_shade = 1.0;
-		if (Count() == 0)
+		if (Count() == 0 && !RaiseField())
 			return a_normal;
 		float2 hd = Height(a_positionWS);
 		a_shade = 1.0 - hd.y;

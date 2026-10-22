@@ -16,6 +16,7 @@
 - During snowfall a light coat settles on upward surfaces of the player, NPCs and creatures, and melts off when the snow stops. It stays a dusting, not a heavy blanket. Roofs block it.
 - Cold weather shows breath from Wet and Cold's meshes (isparks, CC BY-NC-SA) on NPC Head [Head], and on a few creature nodes when those bones exist.
 - Water keeps the shallow-color normalization that stops orange shallows, the existing shore wetness on sand, and a soft foam tint where the water thins out at the beach. Extra sheets of waves and foam under the surface were not added.
+- Snow, mud and sand stand up (60, 18 and 10 units by default). A foot sinks about 65% of that layer, and the old footprints stay when the raise is zero. The raise fades out before the tessellation range so it meets the flat far ground. Shallow sand hollows near water are lowered. Legs standing in snow pick up a coat up to the drift surface.
 
 ### Русский
 
@@ -31,3 +32,4 @@
 - В снегопад на верхние поверхности игрока, NPC и существ ложится лёгкий слой и тает, когда снег кончается. Это пыль, не тяжёлый сугроб. Под крышей снег не садится.
 - На холоде видно дыхание. Меши Wet and Cold (isparks, CC BY-NC-SA) крепятся к NPC Head [Head], а у части существ — к их костям, если такие есть.
 - У воды остаётся нормализация мелкого цвета, из‑за которой мель не оранжевая, прежняя мокрота песка у берега и мягкая пена там, где вода сходит на нет. Отдельные слои волн и пены под поверхностью не добавлялись.
+- Снег, грязь и песок приподнимаются (по умолчанию 60, 18 и 10 единиц). Нога проваливается примерно на 65% слоя, а старые следы без подъёма остаются как были. Подъём сходит на нет до границы тесселяции и стыкуется с плоской дальней землёй. Мелкие впадины песка у воды понижаются. Ноги в снегу покрываются до поверхности сугроба.

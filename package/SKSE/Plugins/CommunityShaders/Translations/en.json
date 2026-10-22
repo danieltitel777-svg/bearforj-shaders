@@ -6996,5 +6996,13 @@
     "feature.cold_breath.interval": "Breath Interval",
     "feature.cold_breath.lifetime": "Breath Length",
     "feature.cold_breath.range": "Range",
-    "feature.cold_breath.credit": "Breath meshes and textures are from Wet and Cold by isparks, CC BY-NC-SA."
+    "feature.cold_breath.credit": "Breath meshes and textures are from Wet and Cold by isparks, CC BY-NC-SA.",
+    "feature.terrain_deformation.raise_section": "Raised Ground",
+    "feature.terrain_deformation.snow_raise": "Snow Height",
+    "feature.terrain_deformation.snow_raise_tt": "How far snow stands above the ground, in game units. It fades out at the tessellation range so the far ground stays flat.",
+    "feature.terrain_deformation.mud_raise": "Mud Height",
+    "feature.terrain_deformation.sand_raise": "Sand Height",
+    "feature.terrain_deformation.sand_raise_tt": "Shallow hollows in sand near the water are lowered, so small shore waves can wash them out.",
+    "feature.terrain_deformation.sink_fraction": "Leg Sink",
+    "feature.terrain_deformation.sink_tt": "How much of the raised layer a foot presses down. 0.65 sinks about two thirds of the drift."
 }

@@ -8,6 +8,7 @@
 #include "State.h"
 #include "Skylighting.h"
 #include "WetnessEffects.h"
+#include "TerrainDeformation.h"
 #include "Utils/D3D.h"
 
 #define I18N_KEY_PREFIX "feature.submersion_wetness."
@@ -263,6 +264,24 @@ void SubmersionWetness::UpdateActor(RE::Actor* a_actor, float a_dt, float a_rain
 		st.snow = std::min(1.0f, st.snow + a_dt / 45.0f);
 	else
 		st.snow = std::max(0.0f, st.snow - a_dt / 30.0f);
+
+	st.driftZ = 0.0f;
+	st.legDrift = 0.0f;
+	auto& ground = globals::features::terrainDeformation;
+	if (exterior && ground.loaded && ground.settings.Enabled && ground.settings.SnowRaise > 0.5f) {
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		const float keep = ground.settings.TessRange * 0.65f;
+		if (!player || pos.GetDistance(player->GetPosition()) <= keep) {
+			if (auto* tes = RE::TES::GetSingleton()) {
+				const auto material = tes->GetLandMaterialType(pos);
+				if (material == RE::MATERIAL_ID::kSnow || material == RE::MATERIAL_ID::kSnowStairs) {
+					// Coat up to the undisturbed drift. The sole sinks, the snow beside the leg does not.
+					st.driftZ = st.feetZ + ground.settings.SnowRaise;
+					st.legDrift = std::clamp(ground.settings.SnowRaise / 60.0f, 0.2f, 1.0f);
+				}
+			}
+		}
+	}
 }
 
 void SubmersionWetness::Prepass()
@@ -321,7 +340,7 @@ void SubmersionWetness::OnLightingSetupGeometry(RE::BSRenderPass* a_pass)
 	const auto& st = it->second;
 	const float waterCoat = st.soak;
 	const float coat = std::max(waterCoat, st.rain);
-	if (coat <= 0.001f && st.flow <= 0.0f && st.rainProgress <= 0.001f && st.snow <= 0.001f)
+	if (coat <= 0.001f && st.flow <= 0.0f && st.rainProgress <= 0.001f && st.snow <= 0.001f && st.legDrift <= 0.001f)
 		return;
 
 	const bool fullyUnder = st.depth >= st.height * 0.98f;
@@ -330,7 +349,7 @@ void SubmersionWetness::OnLightingSetupGeometry(RE::BSRenderPass* a_pass)
 	data.SubB = float4(std::clamp(std::max(waterCoat, st.rainDarken) * 1.5f, 0.0f, 1.0f), st.flow, settings.EdgeSoftness, 1.0f);
 	data.SubC = float4(settings.Strength, settings.BeadDensity, settings.HairStrength, settings.ArmorStrength);
 	data.SubD = float4(st.rainProgress, st.rainDarken, st.height, fullyUnder ? 1.0f : 0.0f);
-	data.SubE = float4(st.snow, 0.0f, 0.0f, 0.0f);
+	data.SubE = float4(st.snow, st.driftZ, st.legDrift, 0.0f);
 	perGeometryCB->Update(data);
 	ID3D11Buffer* cb = perGeometryCB->CB();
 	globals::d3d::context->PSSetConstantBuffers(9, 1, &cb);

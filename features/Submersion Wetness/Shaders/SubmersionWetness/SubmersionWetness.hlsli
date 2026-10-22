@@ -29,16 +29,25 @@ namespace SubmersionWetness
 		return frac(sin(dot(floor(p), float3(12.9898f, 78.233f, 37.719f))) * 43758.5453f);
 	}
 
-	/** @brief Light directional snow while it is snowing. Stays well below a full coat. */
-	float Snow(float3 modelPosition, float3 worldNormal)
+	/** @brief Light directional snow while it is snowing, plus the part of the leg buried in a raised drift. */
+	float Snow(float3 modelPosition, float3 worldNormal, float absZ)
 	{
+		float coat = 0.0f;
 		float s = saturate(SubE.x);
-		if (s <= 0.001f)
-			return 0.0f;
-		float n = SnowHash(modelPosition * 0.17f);
-		float up = saturate(normalize(worldNormal).z);
-		float cut = lerp(0.94f, 0.58f, s);
-		return saturate(smoothstep(cut - 0.1f, cut + 0.1f, up + (n - 0.5f) * 0.28f) * lerp(0.12f, 0.45f, s));
+		if (s > 0.001f) {
+			float n = SnowHash(modelPosition * 0.17f);
+			float up = saturate(normalize(worldNormal).z);
+			float cut = lerp(0.94f, 0.58f, s);
+			coat = saturate(smoothstep(cut - 0.1f, cut + 0.1f, up + (n - 0.5f) * 0.28f) * lerp(0.12f, 0.45f, s));
+		}
+		float drift = 0.0f;
+		if (SubE.z > 0.001f) {
+			float below = 1.0f - smoothstep(SubE.y - 8.0f, SubE.y + 1.0f, absZ);
+			float aboveFeet = smoothstep(SubA.x - 4.0f, SubA.x + 6.0f, absZ);
+			float facing = saturate(normalize(worldNormal).z * 0.65f + 0.35f);
+			drift = below * aboveFeet * saturate(SubE.z) * facing;
+		}
+		return saturate(max(coat, drift));
 	}
 
 	float EdgeNoise(float3 p)

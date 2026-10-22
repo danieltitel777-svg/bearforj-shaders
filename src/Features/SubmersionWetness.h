@@ -87,6 +87,8 @@ struct SubmersionWetness : Feature
 		float rainProgress = 0.0f;  // head-to-feet droplet front, ahead of rain darkening
 		float rainDarken = 0.0f;    // 0..1 darkening, lags rainProgress
 		float snow = 0.0f;          // light snowfall coat 0..1
+		float driftZ = 0.0f;        // world z of the raised snow surface at the feet (0 = none)
+		float legDrift = 0.0f;      // coat strength on the legs buried in that drift
 		float skyVisibility = 1.0f;  // precipitation visibility above the head (GPU readback)
 		uint32_t lastSeenFrame = 0;
 	};

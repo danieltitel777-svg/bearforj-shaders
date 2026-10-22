@@ -66,6 +66,11 @@ struct TerrainDeformation : Feature
 		float TessRange = 1536.0f;
 		float DisplacementScale = 1.0f;
 		float NormalStrength = 1.0f;
+		// Raised layer in game units. Footprints press into it. 0 leaves the old dip-only height.
+		float SnowRaise = 60.0f;
+		float MudRaise = 18.0f;
+		float SandRaise = 10.0f;
+		float SinkFraction = 0.65f;  // how much of the layer a foot presses down
 	} settings;
 
 	struct GPUPrint
@@ -87,6 +92,10 @@ struct TerrainDeformation : Feature
 	static constexpr uint32_t kHeightmapSize = 2048;
 	static constexpr float kHeightmapTexel = 2.0f;
 	static constexpr uint32_t kActivitySize = 64;
+	// Coarse material grid over the same 4096-unit window. R = raise (units), G = sink fraction.
+	static constexpr uint32_t kRaiseCells = 32;
+	static constexpr float kRaiseCell = 128.0f;
+	static constexpr uint32_t kRaiseRowsPerFrame = 8;
 
 	virtual void SetupResources() override;
 	/** @brief Uploads prints and stamps the heightmap. Called before shadow maps, not from Feature::Prepass (that runs after the z-prepass). */
@@ -155,6 +164,20 @@ private:
 	winrt::com_ptr<ID3D11UnorderedAccessView> activityUAV;
 	winrt::com_ptr<ID3D11ComputeShader> clearCS;
 	winrt::com_ptr<ID3D11ComputeShader> stampCS;
+	struct RaiseTexel
+	{
+		float raise;
+		float sink;
+	};
+	static_assert(sizeof(RaiseTexel) == 8);
+	winrt::com_ptr<ID3D11Texture2D> raiseTexture;
+	winrt::com_ptr<ID3D11ShaderResourceView> raiseSRV;
+	std::vector<RaiseTexel> raiseCPU;
+	float raiseOriginX = 0.0f;
+	float raiseOriginY = 0.0f;
+	uint32_t raiseCursor = 0;
+	bool raisePrimed = false;
+	bool raiseActive = false;
 	winrt::com_ptr<ID3D11Buffer> depthDrawCB;
 	bool depthDisplace = false;
 	float windowOriginX = 0.0f;
@@ -180,6 +203,9 @@ private:
 	};
 	void BindHeightViews(ShaderStage a_stage) const;
 	void StampHeightmap(ID3D11DeviceContext* a_context);
+	float LayerRaise(RE::MATERIAL_ID a_material) const;
+	void UpdateRaiseMap(const RE::NiPoint3& a_center);
+	void UploadRaiseMap();
 	void SetDepthDisplace(bool a_on);
 	std::deque<PrintRecord> prints;
 	std::mutex printsLock;

@@ -524,15 +524,21 @@ float TD_EdgeFactor(float3 a_relA, float3 a_relB, bool a_patchActive)
 	float3 mid = 0.5 * (a_relA + a_relB);
 	float dist = length(mid);
 	float range = max(TerrainDeformation::TessRange(), 1.0);
-	float t = saturate(1.0 - dist / range);
-	// 0.6.4 activity gate (after Dynamic Terrain Deformation, GPL-3.0): only edges touching a stamped cell tessellate
-	float2 a = a_relA.xy + FrameBuffer::CameraPosAdjust[0].xy, b = a_relB.xy + FrameBuffer::CameraPosAdjust[0].xy;
-	bool active = a_patchActive;
-	// 9 samples: a long landscape edge can skip a 64-unit activity cell if only the endpoints are tested
-	[unroll] for (int k = 0; k <= 8; k++)
-		active = active || TerrainDeformation::Active(lerp(a, b, k * 0.125));
-	if (!active)
+	// Past the range the mesh is not tessellated. Factor 1 and a faded height of 0 keep that shared edge shut.
+	if (dist >= range)
 		return 1.0;
+	float t = saturate(1.0 - dist / range);
+	// A raised layer covers the whole near field, so every edge inside the range tessellates together.
+	if (!TerrainDeformation::RaiseField()) {
+		// 0.6.4 activity gate (after Dynamic Terrain Deformation, GPL-3.0): only edges touching a stamped cell tessellate
+		float2 a = a_relA.xy + FrameBuffer::CameraPosAdjust[0].xy, b = a_relB.xy + FrameBuffer::CameraPosAdjust[0].xy;
+		bool active = a_patchActive;
+		// 9 samples: a long landscape edge can skip a 64-unit activity cell if only the endpoints are tested
+		[unroll] for (int k = 0; k <= 8; k++)
+			active = active || TerrainDeformation::Active(lerp(a, b, k * 0.125));
+		if (!active)
+			return 1.0;
+	}
 	return clamp(lerp(1.0, TerrainDeformation::MaxTessFactor(), t * t), 1.0, 64.0);
 }
 
@@ -552,7 +558,7 @@ TD_PATCH_CONSTANTS TD_PatchConstants(InputPatch<VS_OUTPUT, 3> patch)
 	o.Inside = max(o.Edges[0], max(o.Edges[1], o.Edges[2]));
 	if (centre)
 		o.Inside = max(o.Inside, TD_EdgeFactor((p0 + p1 + p2) / 3.0, (p0 + p1 + p2) / 3.0, true));
-	if (!TerrainDeformation::TessellationEnabled() || TerrainDeformation::Count() == 0) {
+	if (!TerrainDeformation::TessellationEnabled() || (TerrainDeformation::Count() == 0 && !TerrainDeformation::RaiseField())) {
 		o.Edges[0] = o.Edges[1] = o.Edges[2] = o.Inside = 1.0;
 	}
 	return o;
@@ -2901,7 +2907,8 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 		characterCoatMask *= regionMask;
 #			if defined(SUBMERSION_WETNESS)
 		{
-			float settledSnow = SubmersionWetness::Snow(input.ModelPosition.xyz, worldNormal.xyz);
+			float snowAbsZ = input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z;
+			float settledSnow = SubmersionWetness::Snow(input.ModelPosition.xyz, worldNormal.xyz, snowAbsZ);
 			if (settledSnow > 0.001)
 				material.BaseColor = lerp(material.BaseColor, float3(0.72, 0.76, 0.80), settledSnow);
 		}
