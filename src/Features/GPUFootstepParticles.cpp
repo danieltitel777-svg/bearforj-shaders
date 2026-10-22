@@ -331,6 +331,13 @@ void GPUFootstepParticles::PostComposite()
 		frame.frameFlags |= kFlagWetness;
 		frame.wetness = 0.8f;
 	}
+	if (sky && sky->currentWeather && !interior) {
+		const auto& weather = sky->currentWeather->data;
+		const float speed = (weather.windSpeed / 255.0f) * 180.0f;
+		const float dir = (static_cast<float>(weather.windDirection) / 256.0f) * 2.0f * RE::NI_PI;
+		frame.wind[0] = std::sin(dir) * speed;
+		frame.wind[1] = std::cos(dir) * speed;
+	}
 	{
 		D3D11_MAPPED_SUBRESOURCE mapped{};
 		if (SUCCEEDED(context->Map(frameCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {

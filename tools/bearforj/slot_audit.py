@@ -22,6 +22,13 @@ for stage in ("PSHADER", "VSHADER"):
     for sh in ("Water.hlsl", "Effect.hlsl", "DistantTree.hlsl", "RunGrass.hlsl", "Particle.hlsl", "Utility.hlsl", "ImageSpaceEffect.hlsl"):
         for f in ("", " ".join(ALL_PS)):
             JOBS.append((sh, stage, f))
+for tech in ("RENDER_DEPTH TERRAIN_DEFORMATION", "RENDER_SHADOWMAP TERRAIN_DEFORMATION", "LOD_LANDSCAPE RENDER_DEPTH TERRAIN_DEFORMATION", "SKINNED RENDER_DEPTH TERRAIN_DEFORMATION"):
+    for f in ("", " ".join(ALL_PS)):
+        JOBS.append(("Utility.hlsl", "VSHADER", tech + " " + f))
+# Hull/domain read FrameBuffer::PerFrame at b12. A second cbuffer there is a collision.
+for stage in ("HSHADER", "DSHADER"):
+    for f in ("", " ".join(ALL_PS)):
+        JOBS.append(("Lighting.hlsl", stage, "LANDSCAPE TERRAIN_DEFORMATION " + f))
 for sh in ("DeferredCompositeCS.hlsl",):
     for f in ("", " ".join(ALL_PS)):
         JOBS.append((sh, "CSHADER", f))

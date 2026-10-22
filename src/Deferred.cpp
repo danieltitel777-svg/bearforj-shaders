@@ -17,6 +17,7 @@
 #include "Features/Skylighting.h"
 #include "Features/SubsurfaceScattering.h"
 #include "Features/TerrainBlending.h"
+#include "Features/TerrainDeformation.h"
 #include "Features/Upscaling.h"
 #include "Features/VR.h"
 #include "Features/Wind/Wind.h"
@@ -838,6 +839,9 @@ ID3D11ComputeShader* Deferred::GetComputeMainCompositeInterior()
 
 void Deferred::Hooks::Main_RenderShadowMaps::thunk()
 {
+	// Before the shadow draws, and before the z-prepass later in this same function, so shadows, AO, and
+	// the lighting pass share one height field. Feature::Prepass runs from StartDeferred, which is too late.
+	globals::features::terrainDeformation.UpdateHeightmap();
 	func();
 	globals::deferred->EarlyPrepasses();
 };

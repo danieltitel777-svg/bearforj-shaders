@@ -51,13 +51,15 @@ void NativeParticlePhysics::RestoreDefaultSettings() { settings = {}; }
 
 void NativeParticlePhysics::PostPostLoad()
 {
-	// NiAVObject::UpdateDownwardPass is vfunc 0x2C on SE/AE; VR inserts ApplyLocalTransformToWorld after 0x25,
-	// so it is 0x2D there (CommonLibSSE-NG v12.1 RE/N/NiAVObject.h). VTABLE_NiParticleSystem resolves per runtime by ID.
+	// NiParticleSystem::UpdateDownwardPass is the NiAVObject slot. CommonLibSSE-NG (8ffc2b74) marks it // 2C
+	// on SE/AE. VR inserts ApplyLocalTransformToWorld after UpdateControllers (// 25), so the slot is 0x2D there.
+	// VTABLE_NiParticleSystem[0] is Address Library SE 287258 / AE 237888 (Offsets_VTABLE.h). NiParticleSystem::AddModifier
+	// is the sibling check RELOCATION_ID(72799, 74499).
 	if (REL::Module::IsVR())
 		stl::write_vfunc<0x2D, Hooks::NiParticleSystem_UpdateDownwardPass>(RE::VTABLE_NiParticleSystem[0]);
 	else
 		stl::write_vfunc<0x2C, Hooks::NiParticleSystem_UpdateDownwardPass>(RE::VTABLE_NiParticleSystem[0]);
-	logger::info("[Native Particle Physics] Installed NiParticleSystem hook");
+	logger::info("[Native Particle Physics] Installed NiParticleSystem::UpdateDownwardPass (SE/AE slot 0x2C, vtable SE 287258 / AE 237888)");
 }
 
 void NativeParticlePhysics::DrawSettings()

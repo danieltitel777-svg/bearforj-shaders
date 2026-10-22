@@ -38,9 +38,16 @@ for shd in cfg["shaders"]:
     for st, c in shd["configs"].items():
         common = [d for d in c.get("common_defines", []) if not d.startswith("D3DCOMPILE_")]
         extra = [d for d in FEAT[t] if d not in common] if st != "CSHADER" else []
+        # Utility depth/shadow passes displace landscape when the feature is loaded (HasShaderDefine).
+        if shd["file"] == "Utility.hlsl" and st != "CSHADER" and "TERRAIN_DEFORMATION" not in common and "TERRAIN_DEFORMATION" not in extra:
+            extra.append("TERRAIN_DEFORMATION")
         for e in c["entries"]:
             jobs.append((shd["file"], PROF[st], "main", common + extra + list(e.get("defines") or [])))
 jobs.append(("DeferredCompositeCS.hlsl", "cs_5_0", "main", ["CSHADER"])); jobs.append(("DeferredCompositeCS.hlsl", "cs_5_0", "main", ["CSHADER"] + FEAT["Lighting"]))
+# TerrainDeformation::CompileWorker builds these from the landscape vertex defines plus HSHADER/DSHADER.
+for stage, prof in (("HSHADER", "hs_5_0"), ("DSHADER", "ds_5_0")):
+    jobs.append(("Lighting.hlsl", prof, "main", [stage, "LANDSCAPE", "TERRAIN_DEFORMATION", "VC", "MODELSPACENORMALS"]))
+    jobs.append(("Lighting.hlsl", prof, "main", [stage, "LANDSCAPE", "TERRAIN_DEFORMATION", "VC"]))
 CALL = re.compile(r'L"Data\\\\Shaders\\\\([^"]+\.hlsl)"\s*,\s*(\{(?:[^{}]|\{[^{}]*\})*\}|[\w:.\->]+)\s*,\s*"(\w\w_5_0)"(?:\s*,\s*"(\w+)")?')
 DEF = re.compile(r'\{\s*"(\w+)"\s*,\s*([^{}]*?)\s*\}')
 STAGE = {"ps": "PSHADER", "vs": "VSHADER", "hs": "HULLSHADER", "ds": "DOMAINSHADER", "cs": "COMPUTESHADER"}  # BuildStandaloneCompileKey

@@ -261,7 +261,8 @@ namespace
 		const std::string s = f->GetShortName();
 		static const std::unordered_map<std::string, Tab> overrides = {
 			{ "ScreenSpacePhysicalParticles", kParticles }, { "PhysicalLeaves", kParticles }, { "PhysicalBlood", kParticles },
-			{ "PhysicalEffectParticles", kParticles }, { "PrecipitationPhysics", kParticles }, { "FootstepParticles", kParticles },
+			{ "NativeParticlePhysics", kParticles }, { "FootstepKickParticles", kParticles }, { "GPUFootstepParticles", kParticles },
+			{ "PrecipitationPhysics", kParticles }, { "FootstepParticles", kParticles },
 			{ "GrassCollision", kParticles },
 			{ "WetnessEffects", kSkyWeather }, { "RainRefraction", kSkyWeather }, { "WeatherPicker", kSkyWeather },
 			{ "SkySync", kSkyWeather }, { "PhysicalSky", kSkyWeather }, { "CloudShadows", kSkyWeather }, { "CloudRelight", kSkyWeather },

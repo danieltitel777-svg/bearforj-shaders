@@ -33,8 +33,10 @@ float3 TD_Decode(uint a_v)
 	return float3((a_v >> 18) / 16383.0 * kMaxDip, ((a_v >> 12) & 63u) / 63.0, (a_v & 4095u) / 4095.0 * kMaxRim);
 }
 
-// Same oriented footprint shape as the 0.6 analytic loop. Returns (dip, darkening, rim) for one print.
-float3 TD_PrintShape(float2 a_d, float a_yaw, float a_radius, float a_depth, float a_rim, float a_dark)
+// Same oriented footprint as the 0.6 analytic loop. a_shoulder is 0 (steep) .. 1 (soft bowl), from the surface profile.
+// Returns (dip, darkening, rim) for one print. Dip and rim barely overlap, so packing them for InterlockedMax is safe
+// for a single print; where two prints overlap, the deeper dip wins and keeps its own rim/darkening.
+float3 TD_PrintShape(float2 a_d, float a_yaw, float a_radius, float a_depth, float a_rim, float a_dark, float a_shoulder)
 {
 	float s, c;
 	sincos(a_yaw, s, c);
@@ -42,7 +44,8 @@ float3 TD_PrintShape(float2 a_d, float a_yaw, float a_radius, float a_depth, flo
 	float2 q = l / float2(a_radius * 0.42, a_radius);
 	q.x *= l.y < 0.0 ? 1.15 : 1.0;  // heel narrower than the toe
 	float e = length(q);
-	float dip = 1.0 - smoothstep(0.55, 1.0, e);
+	float dipStart = lerp(0.72, 0.35, saturate(a_shoulder));
+	float dip = 1.0 - smoothstep(dipStart, 1.0, e);
 	float rimShape = exp(-pow((e - 1.08) / 0.16, 2.0));
 	return float3(a_depth * dip, dip * a_dark * saturate(a_depth / 4.0), a_depth * a_rim * rimShape);
 }

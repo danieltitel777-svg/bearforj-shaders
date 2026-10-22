@@ -509,13 +509,9 @@ typedef VS_OUTPUT PS_INPUT;
 #if (defined(HSHADER) || defined(DSHADER)) && defined(LANDSCAPE) && !defined(VR)
 #	include "TerrainDeformation/TerrainDeformation.hlsli"
 
-cbuffer TD_VS_PerFrame : register(b12)
-{
-	row_major float3x3 TD_ScreenProj : packoffset(c0);
-	row_major float4x4 TD_Proj : packoffset(c4);
-	row_major float4x4 TD_ViewProj : packoffset(c8);
-	float3 TD_CameraPosAdjust : packoffset(c40);
-};
+// HS/DS do not inherit the vertex-shader constant buffers. OnLightingSetupGeometry copies the
+// vertex b12 (FrameBuffer::PerFrame) onto the hull and domain stages. A second cbuffer at b12
+// overlaps that and will not compile.
 
 struct TD_PATCH_CONSTANTS
 {
@@ -530,10 +526,11 @@ float TD_EdgeFactor(float3 a_relA, float3 a_relB, bool a_patchActive)
 	float range = max(TerrainDeformation::TessRange(), 1.0);
 	float t = saturate(1.0 - dist / range);
 	// 0.6.4 activity gate (after Dynamic Terrain Deformation, GPL-3.0): only edges touching a stamped cell tessellate
-	float2 a = a_relA.xy + TD_CameraPosAdjust.xy, b = a_relB.xy + TD_CameraPosAdjust.xy;
+	float2 a = a_relA.xy + FrameBuffer::CameraPosAdjust[0].xy, b = a_relB.xy + FrameBuffer::CameraPosAdjust[0].xy;
 	bool active = a_patchActive;
-	[unroll] for (int k = 0; k <= 4; k++)
-		active = active || TerrainDeformation::Active(lerp(a, b, k * 0.25));
+	// 9 samples: a long landscape edge can skip a 64-unit activity cell if only the endpoints are tested
+	[unroll] for (int k = 0; k <= 8; k++)
+		active = active || TerrainDeformation::Active(lerp(a, b, k * 0.125));
 	if (!active)
 		return 1.0;
 	return clamp(lerp(1.0, TerrainDeformation::MaxTessFactor(), t * t), 1.0, 64.0);
@@ -548,7 +545,7 @@ TD_PATCH_CONSTANTS TD_PatchConstants(InputPatch<VS_OUTPUT, 3> patch)
 	float3 p2 = patch[2].WorldPosition.xyz;
 	// Edge factors depend only on the edge (both patches sharing it agree: no cracks). A print inside a large
 	// patch touches no edge, so the centroid only raises the inside factor.
-	bool centre = TerrainDeformation::Active((p0.xy + p1.xy + p2.xy) / 3.0 + TD_CameraPosAdjust.xy);
+	bool centre = TerrainDeformation::Active((p0.xy + p1.xy + p2.xy) / 3.0 + FrameBuffer::CameraPosAdjust[0].xy);
 	o.Edges[0] = TD_EdgeFactor(p1, p2, false);
 	o.Edges[1] = TD_EdgeFactor(p2, p0, false);
 	o.Edges[2] = TD_EdgeFactor(p0, p1, false);
@@ -598,13 +595,13 @@ VS_OUTPUT main(TD_PATCH_CONSTANTS pc, float3 bary : SV_DomainLocation, const Out
 	TD_INTERP(InputPosition);
 #		endif
 
-	float3 absPos = o.WorldPosition.xyz + TD_CameraPosAdjust;
+	float3 absPos = o.WorldPosition.xyz + FrameBuffer::CameraPosAdjust[0].xyz;
 	float dz = TerrainDeformation::Height(absPos).x * TerrainDeformation::DisplacementScale();
 	// Landscape world matrices are translation only, so a world-space vertical offset is also a model-space one.
 	o.WorldPosition.z += dz;
 	o.PreviousWorldPosition.z += dz;
 	o.ModelPosition.z += dz;
-	o.Position += mul(TD_ViewProj, float4(0.0, 0.0, dz, 0.0));
+	o.Position += mul(FrameBuffer::CameraViewProj[0], float4(0.0, 0.0, dz, 0.0));
 	return o;
 }
 #	endif  // DSHADER

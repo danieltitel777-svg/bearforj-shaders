@@ -7,7 +7,7 @@
 //
 // Prints[0] is a header:
 //   A = (count, maxTessFactor, tessRange, displacementScale)
-//   B = (normalStrength, tessellationEnabled, unused, unused)
+//   B = (normalStrength, tessellationEnabled, window origin x, window origin y)
 
 #include "TerrainDeformation/HeightmapCommon.hlsli"
 
@@ -26,7 +26,7 @@ namespace TerrainDeformation
 	Texture2D<uint> Heightmap : register(t56);
 	Texture2D<uint> Activity : register(t57);
 
-	uint Count() { return (uint)Prints[0].A.x; }
+	uint Count() { return min((uint)Prints[0].A.x, 511u); }
 	float MaxTessFactor() { return Prints[0].A.y; }
 	float TessRange() { return Prints[0].A.z; }
 	float DisplacementScale() { return Prints[0].A.w; }

@@ -9,6 +9,7 @@
 #include "State.h"
 #include "Utils/D3D.h"
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <numbers>
@@ -48,6 +49,8 @@ namespace
 	constexpr float kStrideFallbackLength = 38.0f;   // game units between prints when no footstep events arrive
 	constexpr float kEventSilenceSeconds = 1.5f;     // actor counts as "event-less" after this long without events
 	constexpr float kFootSideOffset = 7.0f;
+	// Utility.hlsl TD_DepthDraw. b4 is PerShader, b5/b6 shared data, b12 the frame buffer.
+	constexpr UINT kDepthDrawSlot = 7;
 
 	struct BSLightingShader_SetupGeometry
 	{
@@ -68,6 +71,69 @@ namespace
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
+
+	// VTABLE_BSUtilityShader[0] is Address Library SE 305632 / AE 255302 (CommonLibSSE-NG Offsets_VTABLE.h).
+	// SetupGeometry / RestoreGeometry are vfuncs 0x6 / 0x7, the same slots Skylighting and Terrain Blending hook.
+	struct BSUtilityShader_SetupGeometry
+	{
+		static void thunk(RE::BSShader* a_shader, RE::BSRenderPass* a_pass, uint32_t a_renderFlags)
+		{
+			func(a_shader, a_pass, a_renderFlags);
+			globals::features::terrainDeformation.OnUtilitySetupGeometry(a_shader, a_pass);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct BSUtilityShader_RestoreGeometry
+	{
+		static void thunk(RE::BSShader* a_shader, RE::BSRenderPass* a_pass, uint32_t a_renderFlags)
+		{
+			globals::features::terrainDeformation.OnUtilityRestoreGeometry();
+			func(a_shader, a_pass, a_renderFlags);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	bool IsNearLandscape(RE::BSRenderPass* a_pass)
+	{
+		auto* property = a_pass ? a_pass->shaderProperty : nullptr;
+		if (!property)
+			return false;
+		if (property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kMultiTextureLandscape))
+			return true;
+		// BSLightingShaderMaterialLandscape::GetFeature returns kMultiTexLandLODBlend (CommonLib, value 19).
+		return property->material && property->material->GetFeature() == RE::BSShaderMaterial::Feature::kMultiTexLandLODBlend;
+	}
+}
+
+void TerrainDeformation::CreateUintTexture(UINT a_size, winrt::com_ptr<ID3D11Texture2D>& a_tex, winrt::com_ptr<ID3D11ShaderResourceView>& a_srv, winrt::com_ptr<ID3D11UnorderedAccessView>& a_uav, const char* a_name)
+{
+	D3D11_TEXTURE2D_DESC desc{};
+	desc.Width = a_size;
+	desc.Height = a_size;
+	desc.MipLevels = 1;
+	desc.ArraySize = 1;
+	desc.Format = DXGI_FORMAT_R32_UINT;
+	desc.SampleDesc.Count = 1;
+	desc.Usage = D3D11_USAGE_DEFAULT;
+	desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+	DX::ThrowIfFailed(globals::d3d::device->CreateTexture2D(&desc, nullptr, a_tex.put()));
+
+	D3D11_SHADER_RESOURCE_VIEW_DESC srv{};
+	srv.Format = DXGI_FORMAT_R32_UINT;
+	srv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+	srv.Texture2D.MipLevels = 1;
+	DX::ThrowIfFailed(globals::d3d::device->CreateShaderResourceView(a_tex.get(), &srv, a_srv.put()));
+
+	D3D11_UNORDERED_ACCESS_VIEW_DESC uav{};
+	uav.Format = DXGI_FORMAT_R32_UINT;
+	uav.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+	DX::ThrowIfFailed(globals::d3d::device->CreateUnorderedAccessView(a_tex.get(), &uav, a_uav.put()));
+	if (a_name) {
+		Util::SetResourceName(a_tex.get(), "%s", a_name);
+		Util::SetResourceName(a_srv.get(), "%s SRV", a_name);
+		Util::SetResourceName(a_uav.get(), "%s UAV", a_name);
+	}
 }
 
 void TerrainDeformation::SetupResources()
@@ -90,13 +156,32 @@ void TerrainDeformation::SetupResources()
 	srvDesc.Buffer.FirstElement = 0;
 	srvDesc.Buffer.NumElements = kMaxGPUPrints + 1;
 	DX::ThrowIfFailed(globals::d3d::device->CreateShaderResourceView(printBuffer.get(), &srvDesc, printSRV.put()));
+
+	CreateUintTexture(kHeightmapSize, heightTexture, heightSRV, heightUAV, "TerrainDeformation Heightmap");
+	CreateUintTexture(kActivitySize, activityTexture, activitySRV, activityUAV, "TerrainDeformation Activity");
+
+	D3D11_BUFFER_DESC cb{};
+	cb.ByteWidth = 16;
+	cb.Usage = D3D11_USAGE_DYNAMIC;
+	cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	cb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	const float zeros[4]{};
+	D3D11_SUBRESOURCE_DATA init{ zeros, 0, 0 };
+	DX::ThrowIfFailed(globals::d3d::device->CreateBuffer(&cb, &init, depthDrawCB.put()));
+
+	clearCS.attach(static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\TerrainDeformation\\StampCS.hlsl", { { "CLEAR", "" } }, "cs_5_0")));
+	stampCS.attach(static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\TerrainDeformation\\StampCS.hlsl", {}, "cs_5_0")));
+	if (!clearCS || !stampCS)
+		logger::error("[Terrain Deformation] Failed to compile StampCS; footprints will not displace until shaders compile");
 }
 
 void TerrainDeformation::PostPostLoad()
 {
 	stl::write_vfunc<0x6, BSLightingShader_SetupGeometry>(RE::VTABLE_BSLightingShader[0]);
 	stl::write_vfunc<0x7, BSLightingShader_RestoreGeometry>(RE::VTABLE_BSLightingShader[0]);
-	logger::info("[Terrain Deformation] Installed hooks - BSLightingShader SetupGeometry/RestoreGeometry");
+	stl::write_vfunc<0x6, BSUtilityShader_SetupGeometry>(RE::VTABLE_BSUtilityShader[0]);
+	stl::write_vfunc<0x7, BSUtilityShader_RestoreGeometry>(RE::VTABLE_BSUtilityShader[0]);
+	logger::info("[Terrain Deformation] Installed hooks - BSLightingShader and BSUtilityShader SetupGeometry/RestoreGeometry (utility vtable SE 305632 / AE 255302)");
 }
 
 void TerrainDeformation::DataLoaded()
@@ -121,6 +206,31 @@ RE::BSEventNotifyControl TerrainDeformation::FootstepSink::ProcessEvent(const RE
 		return RE::BSEventNotifyControl::kContinue;
 	feature.OnFootstep(actorPtr.get(), a_event->tag.c_str() ? std::string_view(a_event->tag.c_str()) : std::string_view{});
 	return RE::BSEventNotifyControl::kContinue;
+}
+
+TerrainDeformation::SurfaceProfile TerrainDeformation::ProfileFor(RE::MATERIAL_ID a_material)
+{
+	// Shape only. The material slider (MaterialStrength) still scales depth and darkening.
+	// Snow keeps a raised rim, mud a steep wall, sand a wide soft bowl. Studied from Dynamic Terrain
+	// Deformation's per-surface Depth/Radius/Shoulder/Rim (GPL-3.0, NearMidnightNow); these numbers are ours.
+	using M = RE::MATERIAL_ID;
+	switch (a_material) {
+	case M::kSnow:
+	case M::kSnowStairs:
+		return { 1.15f, 1.05f, 1.25f, 0.40f, 1.00f };
+	case M::kMud:
+		return { 1.05f, 0.95f, 0.55f, 0.30f, 1.20f };
+	case M::kSand:
+		return { 0.65f, 1.25f, 0.30f, 0.62f, 0.65f };
+	case M::kDirt:
+		return { 0.50f, 1.00f, 0.45f, 0.50f, 0.85f };
+	case M::kGravel:
+		return { 0.30f, 0.90f, 0.20f, 0.70f, 0.45f };
+	case M::kGrass:
+		return { 1.00f, 1.00f, 0.20f, 0.55f, 0.30f };
+	default:
+		return { 0.35f, 1.00f, 0.25f, 0.55f, 0.50f };
+	}
 }
 
 float TerrainDeformation::MaterialStrength(RE::MATERIAL_ID a_material) const
@@ -189,6 +299,7 @@ void TerrainDeformation::AddPrint(RE::Actor* a_actor, const RE::NiPoint3& a_posi
 	const float strength = MaterialStrength(material);
 	if (strength <= 0.0f)
 		return;
+	const SurfaceProfile profile = ProfileFor(material);
 
 	float scale = 1.0f;
 	if (a_actor)
@@ -199,11 +310,12 @@ void TerrainDeformation::AddPrint(RE::Actor* a_actor, const RE::NiPoint3& a_posi
 	record.y = a_position.y;
 	record.z = a_position.z;
 	record.yaw = a_yaw;
-	record.radius = settings.PrintRadius * scale;
-	record.depth = settings.Depth * scale;
-	record.rim = settings.Rim;
-	record.dark = settings.Darkening;
+	record.radius = settings.PrintRadius * scale * profile.radius;
+	record.depth = settings.Depth * scale * profile.depth;
+	record.rim = settings.Rim * profile.rim;
+	record.dark = settings.Darkening * profile.dark;
 	record.material = strength;
+	record.shoulder = profile.shoulder;
 	std::lock_guard lock(printsLock);
 	record.spawnTime = time;
 	prints.push_back(record);
@@ -271,7 +383,7 @@ void TerrainDeformation::UpdateStrideFallback()
 	}
 }
 
-void TerrainDeformation::Prepass()
+void TerrainDeformation::UpdateHeightmap()
 {
 	auto context = globals::d3d::context;
 	if (!printBuffer)
@@ -289,8 +401,13 @@ void TerrainDeformation::Prepass()
 		RE::NiPoint3 center{};
 		if (auto* player = RE::PlayerCharacter::GetSingleton())
 			center = player->GetPosition();
-		const float radius2 = settings.Radius * settings.Radius;
 		const float lifetime = std::max(settings.Lifetime, 1.0f);
+
+		const float halfWindow = static_cast<float>(kHeightmapSize) * kHeightmapTexel * 0.5f;
+		windowOriginX = std::floor((center.x - halfWindow) / kHeightmapTexel) * kHeightmapTexel;
+		windowOriginY = std::floor((center.y - halfWindow) / kHeightmapTexel) * kHeightmapTexel;
+		const float limit = std::min(settings.Radius, halfWindow);
+		const float limit2 = limit * limit;
 
 		std::lock_guard lock(printsLock);
 		while (!prints.empty() && time - prints.front().spawnTime > lifetime)
@@ -299,22 +416,28 @@ void TerrainDeformation::Prepass()
 		for (auto it = prints.rbegin(); it != prints.rend() && count < kMaxGPUPrints; ++it) {
 			const float dx = it->x - center.x;
 			const float dy = it->y - center.y;
-			if (dx * dx + dy * dy > radius2)
+			const float dist2 = dx * dx + dy * dy;
+			if (dist2 > limit2)
 				continue;
 			const float age = std::clamp((time - it->spawnTime) / lifetime, 0.0f, 1.0f);
 			const float fill = 1.0f - age;
-			// no popping: prints fill in smoothly over time and fade out over the last 20% of the upload radius
-			const float edge = std::clamp((radius2 - (dx * dx + dy * dy)) / std::max(radius2 * 0.36f, 1.0f), 0.0f, 1.0f);
+			// Fade across the outer 12% of the heightmap window so a scrolling origin does not pop prints.
+			const float edgeDist = halfWindow - std::sqrt(dist2);
+			const float edge = std::clamp(edgeDist / std::max(halfWindow * 0.12f, 1.0f), 0.0f, 1.0f);
 			const float fade = fill * fill * (3.0f - 2.0f * fill) * edge;
+			const float strength = it->material;
 			auto& gpu = upload[++count];
 			gpu.A = float4(it->x, it->y, it->yaw, it->radius);
-			gpu.B = float4(it->depth * fade, it->rim, it->dark * fade, it->material);
+			gpu.B = float4(it->depth * fade * strength, it->rim, it->dark * fade * strength, it->shoulder);
 		}
+	} else {
+		windowOriginX = 0.0f;
+		windowOriginY = 0.0f;
 	}
 
 	const bool tess = settings.Enabled && settings.EnableTessellation && !vr;
 	upload[0].A = float4(static_cast<float>(count), std::clamp(settings.MaxTessFactor, 1.0f, 64.0f), settings.TessRange, settings.DisplacementScale);
-	upload[0].B = float4(settings.NormalStrength, tess ? 1.0f : 0.0f, 0.0f, 0.0f);
+	upload[0].B = float4(settings.NormalStrength, tess ? 1.0f : 0.0f, windowOriginX, windowOriginY);
 
 	D3D11_MAPPED_SUBRESOURCE mapped{};
 	if (SUCCEEDED(context->Map(printBuffer.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -322,9 +445,96 @@ void TerrainDeformation::Prepass()
 		context->Unmap(printBuffer.get(), 0);
 	}
 	uploadedCount = count;
+	StampHeightmap(context);
+	BindHeightViews(ShaderStage::PS);
+}
 
-	ID3D11ShaderResourceView* srv = printSRV.get();
-	context->PSSetShaderResources(54, 1, &srv);  // t54 (t123 = TreeWindSpring PreviousTransientFields)
+void TerrainDeformation::BindHeightViews(ShaderStage a_stage) const
+{
+	auto context = globals::d3d::context;
+	if (!context)
+		return;
+	ID3D11ShaderResourceView* print = printSRV.get();
+	ID3D11ShaderResourceView* height = heightSRV.get();
+	ID3D11ShaderResourceView* activity = activitySRV.get();
+	// t54 prints, t56 heightmap, t57 activity. t55 is Terrain Blending and is not touched.
+	switch (a_stage) {
+	case ShaderStage::VS:
+		context->VSSetShaderResources(54, 1, &print);
+		context->VSSetShaderResources(56, 1, &height);
+		context->VSSetShaderResources(57, 1, &activity);
+		break;
+	case ShaderStage::HS:
+		context->HSSetShaderResources(54, 1, &print);
+		context->HSSetShaderResources(56, 1, &height);
+		context->HSSetShaderResources(57, 1, &activity);
+		break;
+	case ShaderStage::DS:
+		context->DSSetShaderResources(54, 1, &print);
+		context->DSSetShaderResources(56, 1, &height);
+		context->DSSetShaderResources(57, 1, &activity);
+		break;
+	case ShaderStage::PS:
+		context->PSSetShaderResources(54, 1, &print);
+		context->PSSetShaderResources(56, 1, &height);
+		context->PSSetShaderResources(57, 1, &activity);
+		break;
+	}
+}
+
+void TerrainDeformation::StampHeightmap(ID3D11DeviceContext* a_context)
+{
+	if (!a_context || !clearCS || !stampCS || !heightUAV || !activityUAV || !printSRV)
+		return;
+
+	ID3D11ShaderResourceView* unbound = nullptr;
+	a_context->VSSetShaderResources(56, 1, &unbound);
+	a_context->VSSetShaderResources(57, 1, &unbound);
+	a_context->HSSetShaderResources(56, 1, &unbound);
+	a_context->HSSetShaderResources(57, 1, &unbound);
+	a_context->DSSetShaderResources(56, 1, &unbound);
+	a_context->DSSetShaderResources(57, 1, &unbound);
+	a_context->PSSetShaderResources(56, 1, &unbound);
+	a_context->PSSetShaderResources(57, 1, &unbound);
+
+	ID3D11ShaderResourceView* prints = printSRV.get();
+	a_context->CSSetShaderResources(0, 1, &prints);
+	ID3D11UnorderedAccessView* uavs[2]{ heightUAV.get(), activityUAV.get() };
+	UINT counts[2]{ 0u, 0u };
+	a_context->CSSetUnorderedAccessViews(0, 2, uavs, counts);
+	a_context->CSSetShader(clearCS.get(), nullptr, 0);
+	const UINT groups = kHeightmapSize / 8u;
+	a_context->Dispatch(groups, groups, 1);
+	if (uploadedCount > 0) {
+		a_context->CSSetShader(stampCS.get(), nullptr, 0);
+		a_context->Dispatch(uploadedCount, 1, 1);
+	}
+	ID3D11UnorderedAccessView* none[2]{};
+	a_context->CSSetUnorderedAccessViews(0, 2, none, nullptr);
+	ID3D11ShaderResourceView* noPrint = nullptr;
+	a_context->CSSetShaderResources(0, 1, &noPrint);
+	a_context->CSSetShader(nullptr, nullptr, 0);
+}
+
+void TerrainDeformation::SetDepthDisplace(bool a_on)
+{
+	if (!depthDrawCB)
+		return;
+	auto context = globals::d3d::context;
+	if (!context)
+		return;
+	// Always rebind. RunGrass keeps its own buffer on b7, and that binding survives into the utility pass.
+	if (depthDisplace != a_on) {
+		depthDisplace = a_on;
+		const float data[4]{ a_on ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f };
+		D3D11_MAPPED_SUBRESOURCE mapped{};
+		if (SUCCEEDED(context->Map(depthDrawCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+			std::memcpy(mapped.pData, data, sizeof(data));
+			context->Unmap(depthDrawCB.get(), 0);
+		}
+	}
+	ID3D11Buffer* cb = depthDrawCB.get();
+	context->VSSetConstantBuffers(kDepthDrawSlot, 1, &cb);
 }
 
 void TerrainDeformation::QueueTessCompile(RE::BSShader* a_shader, uint32_t a_vertexDescriptor)
@@ -453,6 +663,8 @@ void TerrainDeformation::OnLightingSetupGeometry(RE::BSShader* a_shader, RE::BSR
 {
 	if (tessellationBound)
 		OnLightingRestoreGeometry();
+	if (loaded && settings.Enabled && heightSRV)
+		BindHeightViews(ShaderStage::PS);
 	if (!loaded || !settings.Enabled || !settings.EnableTessellation || vr || uploadedCount == 0 || !a_shader || !a_pass)
 		return;
 
@@ -484,9 +696,9 @@ void TerrainDeformation::OnLightingSetupGeometry(RE::BSShader* a_shader, RE::BSR
 	context->HSSetConstantBuffers(12, 1, &perFrame);
 	if (perFrame)
 		perFrame->Release();
-	ID3D11ShaderResourceView* srv = printSRV.get();
-	context->HSSetShaderResources(54, 1, &srv);
-	context->DSSetShaderResources(54, 1, &srv);
+	BindHeightViews(ShaderStage::PS);
+	BindHeightViews(ShaderStage::HS);
+	BindHeightViews(ShaderStage::DS);
 	context->HSSetShader(shaders->hs.get(), nullptr, 0);
 	context->DSSetShader(shaders->ds.get(), nullptr, 0);
 
@@ -510,6 +722,43 @@ void TerrainDeformation::OnLightingRestoreGeometry()
 	tessellationBound = false;
 }
 
+void TerrainDeformation::OnUtilitySetupGeometry(RE::BSShader*, RE::BSRenderPass* a_pass)
+{
+	SetDepthDisplace(false);
+	if (!loaded || !settings.Enabled || uploadedCount == 0 || !heightSRV || !a_pass)
+		return;
+	if (!IsNearLandscape(a_pass))
+		return;
+
+	using F = SIE::ShaderCache::UtilityShaderFlags;
+	const uint32_t desc = globals::state->modifiedVertexDescriptor;
+	const uint32_t mask = static_cast<uint32_t>(F::RenderShadowmask) | static_cast<uint32_t>(F::RenderShadowmaskSpot) |
+	                      static_cast<uint32_t>(F::RenderShadowmaskPb) | static_cast<uint32_t>(F::RenderShadowmaskDpb);
+	const bool depthOrShadow = (desc & (static_cast<uint32_t>(F::RenderDepth) | static_cast<uint32_t>(F::RenderShadowmap))) != 0;
+	if (!depthOrShadow || (desc & mask) != 0 || (desc & static_cast<uint32_t>(F::LodLandscape)) != 0 || (desc & static_cast<uint32_t>(F::Skinned)) != 0)
+		return;
+	if (auto* geometry = a_pass->geometry) {
+		const auto& bound = geometry->worldBound;
+		const float half = static_cast<float>(kHeightmapSize) * kHeightmapTexel * 0.5f;
+		const float cx = windowOriginX + half;
+		const float cy = windowOriginY + half;
+		const float dx = std::max(0.0f, std::fabs(bound.center.x - cx) - half);
+		const float dy = std::max(0.0f, std::fabs(bound.center.y - cy) - half);
+		if (dx * dx + dy * dy > bound.radius * bound.radius)
+			return;
+	}
+
+	BindHeightViews(ShaderStage::VS);
+	SetDepthDisplace(true);
+}
+
+void TerrainDeformation::OnUtilityRestoreGeometry()
+{
+	if (!depthDisplace)
+		return;
+	SetDepthDisplace(false);
+}
+
 void TerrainDeformation::ClearShaderCache()
 {
 	{
@@ -517,6 +766,8 @@ void TerrainDeformation::ClearShaderCache()
 		tessQueue.clear();
 		tessShaders.clear();
 	}
+	clearCS.attach(static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\TerrainDeformation\\StampCS.hlsl", { { "CLEAR", "" } }, "cs_5_0")));
+	stampCS.attach(static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\TerrainDeformation\\StampCS.hlsl", {}, "cs_5_0")));
 	WarmTessCache();
 }
 

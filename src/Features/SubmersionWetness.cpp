@@ -363,6 +363,8 @@ void SubmersionWetness::RestoreDefaultSettings()
 // Ported from BearForge 0.5 (src/Features/SubmersionWetness.cpp)
 float SubmersionWetness::WaterHeightAt(const RE::TESObjectREFR* a_ref, const RE::NiPoint3& a_pos)
 {
+	if (!a_ref)
+		return -RE::NI_INFINITY;
 	float waterHeight = a_ref->GetWaterHeight();
 	if (waterHeight != -RE::NI_INFINITY)
 		return waterHeight;
