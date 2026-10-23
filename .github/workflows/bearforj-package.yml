@@ -1,8 +1,10 @@
 name: Bearforj 0.6.7 package
 
 # Windows DLL plus the FOMOD zip. No shader cache is built or packed.
-# Shipping ALL stays on Visual Studio 18 2026. This job uses PR-VS2022
+# Shipping ALL stays on Visual Studio 18 2026. The package job uses PR-VS2022
 # because GitHub-hosted windows-2022 has Visual Studio 17 2022.
+# fxc is a separate job. One 180-minute package job uploaded the zip and then
+# cancelled fxc before the log was written. Each fxc shard has its own limit.
 
 on:
   workflow_dispatch:
@@ -133,7 +135,32 @@ jobs:
           path: dist/**/Bearforj_Shaders_0.6.7.zip
           if-no-files-found: error
 
-      - name: Compile shaders with fxc
+  # Four runners, each with the full job limit. The matrix spreads one
+  # stable job list. A shader error fails that shard and still uploads its log.
+  fxc:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      PYTHONUNBUFFERED: "1"
+      FXC_WORKERS: "4"
+    steps:
+      - name: Enable Git long paths
+        run: git config --system core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install fxc script dependency
+        run: pip install pyyaml
+
+      - name: Compile shader shard
         shell: pwsh
         run: |
           $fxc = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter fxc.exe |
@@ -150,12 +177,12 @@ jobs:
             }
           }
           $env:FXC = $fxc.FullName
-          python tools/bearforj/fxc_all.py $merged fxc_all.log
+          python tools/bearforj/fxc_all.py $merged fxc_all.log --shard ${{ matrix.shard }} --shards 4
 
       - name: Upload fxc log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fxc-log
+          name: fxc-log-${{ matrix.shard }}
           path: fxc_all.log
           if-no-files-found: warn
