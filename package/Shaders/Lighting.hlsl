@@ -2957,20 +2957,23 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 #	endif
 
 #	if defined(SIMPLE_TREE_WETNESS)
-	static const float treeWetRoughnessScale = 0.85;
+	static const float treeWetRoughnessScale = 0.55;
 	static const float treeWetMinRoughness = 0.04;
-	static const float treeWetAlbedoScale = 0.90;
+	static const float treeWetAlbedoScale = 0.72;
 	const float treeWetness = (inWorld || inReflection) ?
 	                              saturate(SharedData::wetnessEffectsSettings.Wetness * SharedData::wetnessEffectsSettings.MaxRainWetness) :
 	                              0.0;
-	material.Roughness = lerp(material.Roughness, max(material.Roughness * treeWetRoughnessScale, treeWetMinRoughness), treeWetness);
+	// Extra gloss only on nearby trunks. Distant forest still darkens, and the wind path is unchanged.
+	const float nearDrop = saturate(1.0 - length(input.WorldPosition.xyz) / 1400.0);
+	const float glossWet = saturate(treeWetness * lerp(0.65, 1.0, nearDrop));
+	material.Roughness = lerp(material.Roughness, max(material.Roughness * treeWetRoughnessScale, treeWetMinRoughness), glossWet);
 	material.BaseColor *= lerp(1.0, treeWetAlbedoScale, treeWetness);
 #		if !defined(TRUE_PBR)
 	if (HasSpecular()) {
-		static const float treeWetGlossinessIncrease = 0.05;
-		static const float treeWetShininessScale = 1.10;
-		material.Glossiness = saturate(material.Glossiness + treeWetGlossinessIncrease * treeWetness);
-		material.Shininess *= lerp(1.0, treeWetShininessScale, treeWetness);
+		static const float treeWetGlossinessIncrease = 0.18;
+		static const float treeWetShininessScale = 1.45;
+		material.Glossiness = saturate(material.Glossiness + treeWetGlossinessIncrease * glossWet);
+		material.Shininess *= lerp(1.0, treeWetShininessScale, glossWet);
 	}
 #		endif
 #	endif

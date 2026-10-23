@@ -19,10 +19,10 @@ struct Camera : public PostProcessFeature
 		float FECrop = 0.0f;
 
 		// Chromatic aberration
-		float CAStrength = 0.04f;
+		float CAStrength = 0.01f;
 
 		// Noise
-		float NoiseStrength = 0.08f;
+		float NoiseStrength = 0.03f;
 		int NoiseType = 0;
 	} settings;
 

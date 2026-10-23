@@ -88,6 +88,8 @@ BearforjLook::PerFrame BearforjLook::GetCommonBufferData()
 		data.AuroraSnow = look.AuroraSnow * data.NightFactor * aurora;
 		return data;
 	}
+	// Street warmth stays on the slider. Interiors use the warmer picture-preset value.
+	data.Warmth = 0.62f;
 	data.AuroraSnow = settings.AuroraSnow * data.NightFactor * aurora;
 	return data;
 }

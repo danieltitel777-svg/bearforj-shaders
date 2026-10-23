@@ -1,4 +1,4 @@
-Bearforj Shaders — сборка 0.6.6
+Bearforj Shaders — сборка 0.6.7
 Основа: Open Shaders 2.19.0 для Skyrim SE 1.6.1170.
 DLL называется CommunityShaders.dll, папки, ключи настроек, Overrides и SceneSettings не изменены —
 пресеты NAT.CS III и Dlizzio подхватываются как в Open.

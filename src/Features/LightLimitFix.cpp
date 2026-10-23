@@ -127,6 +127,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ShowShadowOverlay,
 	ShadowSettings,
 	EnableParticleContactShadows,
+	ForceInverseSquare,
 	EnableParticleLights,
 	EnableParticleLightsCulling,
 	EnableParticleLightsDetection,
@@ -1106,7 +1107,7 @@ void LightLimitFix::SetExtLightData(RE::NiLight* niLight, const RE::TESObjectLIG
 {
 	const auto runtimeData = LLFCommon::RuntimeLightDataExt::Get(niLight);
 	runtimeData->flags.set(LightFlags::Initialised);
-	if (ligh->data.flags.any(static_cast<RE::TES_LIGHT_FLAGS>(LLFCommon::TES_LIGHT_FLAGS_EXT::kInverseSquare)))
+	if (settings.ForceInverseSquare || ligh->data.flags.any(static_cast<RE::TES_LIGHT_FLAGS>(LLFCommon::TES_LIGHT_FLAGS_EXT::kInverseSquare)))
 		runtimeData->flags.set(LightFlags::InverseSquare);
 	if (ligh->data.flags.any(static_cast<RE::TES_LIGHT_FLAGS>(LLFCommon::TES_LIGHT_FLAGS_EXT::kLinear)))
 		runtimeData->flags.set(LightFlags::Linear);
@@ -1143,6 +1144,10 @@ LightLimitFix::LightData LightLimitFix::ProcessLight(RE::BSLight* bsLight, RE::N
 	light.radius = runtimeData->radius;
 	light.fade = runtimeData->fade;
 
+	if (settings.ForceInverseSquare) {
+		runtimeData->flags.set(LightFlags::InverseSquare);
+		light.lightFlags.set(LightFlags::InverseSquare);
+	}
 	const bool isInvSq = light.lightFlags.any(LightFlags::InverseSquare);
 	if (bsLight->pointLight && ((isInvSq && editorRef.disableInvSqLights) || (!isInvSq && editorRef.disableRegularLights)))
 		light.lightFlags.set(LightFlags::Disabled);

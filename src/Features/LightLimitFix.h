@@ -509,6 +509,8 @@ public:
 		ShadowCasterManager::Settings ShadowSettings;
 
 		bool EnableParticleContactShadows = false;
+		// Placed lights use inverse-square falloff even when the LIGH record does not set the flag.
+		bool ForceInverseSquare = true;
 
 		// Particle Lights.
 		bool EnableParticleLights = true;

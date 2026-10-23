@@ -42,6 +42,8 @@ HistogramAutoExposure::ExposureParameters HistogramAutoExposure::GetExposurePara
 			parameters.CompensationEV = cam->ExposureDeltaEV;
 			parameters.LuminanceRange = float2(Feature::SceneExposure::kMiddleGrey, Feature::SceneExposure::kMiddleGrey);
 		}
+	} else if (const auto sky = globals::game::sky; sky && sky->mode.get() != RE::Sky::Mode::kFull) {
+		parameters.CompensationEV += 0.3f;
 	}
 	return parameters;
 }

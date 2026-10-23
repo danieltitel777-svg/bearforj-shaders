@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Stage a FOMOD-wrapped AIO package: the plain AIO tree as required files,
-plus each available shader cache as a mutually-exclusive optional install
-step, so a mod manager installs only the cache matching the player's runtime
+A prebuilt shader cache is never installed. Cache arguments are ignored.
 instead of the player having to pick and drop in the right archive by hand.
 
 Mod metadata and cache-variant definitions live in
@@ -244,18 +243,14 @@ def main():
                     shutil.move(str(moved), default_dir / name)
             clang_available = True
 
-    verifier = load_cache_verifier()
     available_variants = []
     for variant in config["cache_variants"]:
         cache_dir = getattr(args, variant["cli_arg"])
         if cache_dir is None:
             continue
-        problem = cache_problem(verifier, cache_dir)
-        if problem:
-            print(f"::warning::Dropping the {variant['name']} shader cache option: {problem}", file=sys.stderr)
-            continue
-        shutil.copytree(cache_dir, args.output / variant["staging_subdir"] / "ShaderCache")
-        available_variants.append(variant)
+        # Bearforj 0.6.7 does not ship a prebuilt shader cache. Every machine
+        # compiles the narrow starter set on its own, on one or two background threads.
+        print(f"::warning::Ignoring the {variant['name']} shader cache. Bearforj does not ship a prebuilt cache.", file=sys.stderr)
 
     root = build_root(args, config, project, available_variants, clang_available)
     errors = root.validate()

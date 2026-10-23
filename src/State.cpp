@@ -5,6 +5,7 @@
 
 #include <pystring/pystring.h>
 
+#include "Bearforj/PicturePreset.h"
 #include "Deferred.h"
 #include "EngineFixes/LODBlendRingFix.h"
 #include "EngineFixes/LandscapeSeamsFix.h"
@@ -549,12 +550,28 @@ void State::Load(ConfigMode a_configMode, bool a_allowReload)
 	// LOADING ORDER: Default → User → Overrides → User Overrides (.user files)
 
 	// Step 1: Generate the baseline before any user settings can reach live state
-	if (defaultSettingsBaseline.is_null()) {
+		if (defaultSettingsBaseline.is_null()) {
 		std::fill(enabledClasses, enabledClasses + magic_enum::enum_integer(RE::BSShader::Type::Total) - 1, true);
 		json generatedDefaults;
 		std::string serializedDefaults;
+		json shippedDisplay;
+		{
+			std::ifstream shipped(defaultConfigFilePath);
+			if (shipped.is_open()) {
+				try {
+					json disk;
+					shipped >> disk;
+					if (disk.contains("Volumetric Lighting Display") && disk["Volumetric Lighting Display"].is_object())
+						shippedDisplay = disk["Volumetric Lighting Display"];
+				} catch (const std::exception& e) {
+					logger::warn("Picture preset display block in {} was not readable: {}", defaultConfigFilePath, e.what());
+				}
+			}
+		}
 		try {
 			SaveToJson(generatedDefaults);
+			if (shippedDisplay.is_object())
+				generatedDefaults["Volumetric Lighting Display"] = shippedDisplay;
 			auto& disabledByDefault = generatedDefaults["Disable at Boot"];
 			for (auto* feature : Feature::GetFeatureList())
 				disabledByDefault[feature->GetShortName()] = feature->IsDisabledByDefault();
@@ -701,6 +718,8 @@ void State::Load(ConfigMode a_configMode, bool a_allowReload)
 		}
 #endif
 
+		Bearforj::PicturePreset::ApplyDisplaySettings();
+		Bearforj::PicturePreset::TryApplyResolutionPreset();
 		logger::info("Loading Settings Complete");
 	} catch (const json::exception& e) {
 		logger::warn("General JSON error accessing settings: {}", e.what());
@@ -762,6 +781,7 @@ void State::SaveToJson(nlohmann::json& settings)
 	settings["Favorites"] = favoriteFeatures;
 
 	settings["Version"] = Plugin::VERSION.string();
+	Bearforj::PicturePreset::WriteDisplaySettings(settings);
 
 	// Save feature settings
 	for (auto* feature : Feature::GetFeatureList()) {
@@ -795,6 +815,8 @@ void State::LoadFromJson(nlohmann::json& settings)
 		else if (!disabledFeatures.contains(featureName) && feature->IsDisabledByDefault())
 			disabledFeatures[featureName] = true;
 	}
+
+	Bearforj::PicturePreset::ReadDisplaySettings(settings);
 
 	favoriteFeatures.clear();
 	if (const auto favorites = settings.find("Favorites"); favorites != settings.end() && favorites->is_object()) {

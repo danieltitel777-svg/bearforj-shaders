@@ -484,7 +484,7 @@ VS_OUTPUT main(WavePatch pc, float3 bary: SV_DomainLocation, const OutputPatch<V
 	float3 plane = patch[0].WaveBase.xyz * bary.x + patch[1].WaveBase.xyz * bary.y + patch[2].WaveBase.xyz * bary.z;
 	float3 waveOff = WaterWaves::Offset(plane, 0, false);
 	float3 displaced = plane + waveOff;
-#		if !defined(STENCIL)
+#		if (defined(SPECULAR) || defined(UNDERWATER) || defined(SIMPLE)) && !defined(STENCIL)
 	// Control points already carry their own crest. Replace that with the crest at this sample.
 	o.MPosition.xyz += WaterWaveModelDelta(waveOff - (o.WPosition.xyz - plane), 0);
 #		endif

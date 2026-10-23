@@ -1,0 +1,11 @@
+Bearforj Shaders
+
+RU: Красивый путь не установлен. Нужны True Light 3.6.5, Light Placer 5.0.0, одна CS-погода,
+Window Shadows Ultimate 1.4.6, Embers XD 3.3.0 и, только на Skyrim 1.6.1170, Helios 1.01.
+Lux не требуется. Профиль Prism не добавлен: имя плагина неизвестно.
+Поставьте моды и запустите установщик снова. Этот файл — единственное, что ставится без проверки.
+
+EN: The beauty path was not installed. It needs True Light 3.6.5, Light Placer 5.0.0, one CS weather,
+Window Shadows Ultimate 1.4.6, Embers XD 3.3.0, and Helios 1.01 only on Skyrim 1.6.1170.
+Lux is not required. No Prism profile was added because the plugin filename is unknown.
+Install the mods and run the installer again. This file is the only thing installed when a check fails.

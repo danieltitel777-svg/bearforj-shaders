@@ -1,0 +1,17 @@
+{
+  "Volumetric Lighting Display": {
+    "fVolumetricLightingIntensity": 1.0,
+    "fVolumetricLightingCustomColorContribution": 0.3,
+    "fVolumetricLightingDensityContribution": 0.75,
+    "fVolumetricLightingDensityScale": 1.0,
+    "fVolumetricLightingWindSpeedScale": 1.0,
+    "fVolumetricLightingWindFallingSpeed": 0.0,
+    "fVolumetricLightingPhaseContribution": 0.8,
+    "fVolumetricLightingPhaseScattering": 0.65,
+    "fVolumetricLightingRangeFactor": 1.2
+  },
+  "Bearforj Picture Preset": {
+    "column": "1440p",
+    "note": "C++ defaults are the 1440p column and are what the plugin writes back into this file on startup. The nine fVolumetricLighting keys are applied in memory and Skyrim.ini is not rewritten. At 4K, values the player has not saved move to the 4K column: bloom 0.35 / halo 3.0 / spread 0.65 / threshold 0.18, volumetric quality Medium, volumetric clouds off, cloud steps 32, cloud-shadow opacity 0.85, grain 0.02. Interior warmth is 0.62 and interior exposure is +0.3 EV at runtime. Prism has no profile because its plugin filename is unknown."
+  }
+}

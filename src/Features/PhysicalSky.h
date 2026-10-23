@@ -138,10 +138,10 @@ struct PhysicalSky final : public Feature
 		float silverLiningSpread = 0.f;
 
 		// VOLUMETRIC CLOUDS
-		bool enableVolumetricClouds = false;
+		bool enableVolumetricClouds = true;
 		float rayMarchRange = 32.f;     // km
 		float shadowVolumeRange = 8.f;  // km
-		uint32_t cloudMaxStep = 97;
+		uint32_t cloudMaxStep = 40;
 		float temporalAccumulationFactor = 0.95f;
 		bool ghostingReduction = true;
 		NdfSettings cloudMap = {};

@@ -52,23 +52,23 @@ public:
 
 	struct alignas(16) Settings
 	{
-		uint enabled = 0;
+		uint enabled = 1;
 		uint useDynamicCubemaps = 1;
 		float startDistance = 0.0f;
 		float fogHeight = 0.0f;
 		float fogHeightFalloff = 0.2f;
-		float fogDensity = 0.005f;
+		float fogDensity = 0.003f;
 		float fogHeight2 = 0.0f;
 		float fogHeightFalloff2 = 0.2f;
 		float fogDensity2 = 0.0f;
-		float directionalInscatteringMultiplier = 1.0f;
-		float directionalInscatteringAnisotropy = 0.2f;
+		float directionalInscatteringMultiplier = 0.6f;
+		float directionalInscatteringAnisotropy = 0.45f;
 		uint useSkyIBL = 1;
 		float4 inscatteringTint = { 1.0f, 1.0f, 1.0f, 1.0f };
 		float cubemapMipLevel = 8.0f;
 		float sunlightAttenuationAmount = 1.0f;
 		uint respectVanillaFogFade = 1;
-		uint disableVanillaFog = 1;
+		uint disableVanillaFog = 0;
 		float4 fogInscatteringColor = { 0.0f, 0.0f, 0.0f, 1.0f };
 		float originalFogColorAmount = 0.0f;
 		uint volumetricFogEnabled = 0;
@@ -99,7 +99,7 @@ public:
 		float vanillaFogNear = 0.0f;
 		float vanillaFogFar = 40960.0f;
 		float vanillaFogPower = 1.0f;
-		float vanillaFogStrength = 1.25f;
+		float vanillaFogStrength = 1.0f;
 		float3 pad0 = {};
 		float pad1 = 0.0f;
 		float4 vanillaFogNearColor = {};
@@ -114,7 +114,7 @@ public:
 		float3 volumetricFogNoiseVelocity = { 0.0f, 0.0f, 0.0f };
 		uint volumetricFogNoiseType = 0;  // 0 = hash value noise, 1 = PCG value noise with a quintic fade
 		uint mistsEnabled = 1;  // Bearforj default look: fog wisps
-		float mistStrength = 0.1f;
+		float mistStrength = 0.08f;
 		float mistRange = 8192.0f;
 		float mistSize = 4096.0f;
 		float mistDriftSpeed = 1000.0f;

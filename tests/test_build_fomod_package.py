@@ -58,11 +58,12 @@ class BuildFomodPackageTests(unittest.TestCase):
         write_cache(self.root / "vr")
         result = self.run_builder(self.root / "se", self.root / "vr")
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("does not ship a prebuilt cache", result.stderr)
         config = self.module_config()
-        self.assertIn("SE/AE", config)
-        self.assertIn("VR", config)
-        self.assertTrue((self.out / "ShaderCache-SE-AE/ShaderCache/Info.ini").is_file())
-        self.assertTrue((self.out / "ShaderCache-VR/ShaderCache/Info.ini").is_file())
+        self.assertNotIn("SE/AE", config)
+        self.assertNotIn("ShaderCache-", config)
+        self.assertFalse((self.out / "ShaderCache-SE-AE").exists())
+        self.assertFalse((self.out / "ShaderCache-VR").exists())
 
     def test_module_config_has_the_exact_filename(self):
         self.assertEqual(self.run_builder().returncode, 0)
@@ -108,9 +109,11 @@ class BuildFomodPackageTests(unittest.TestCase):
 
     def test_clang_option_comes_with_the_cache_options(self):
         write_cache(self.root / "se")
-        self.assertEqual(self.run_builder(self.root / "se", clang=self.write_clang()).returncode, 0)
+        result = self.run_builder(self.root / "se", clang=self.write_clang())
+        self.assertEqual(result.returncode, 0, result.stderr)
         config = self.module_config()
-        self.assertIn("SE/AE", config)
+        self.assertNotIn("SE/AE", config)
+        self.assertIn("does not ship a prebuilt cache", result.stderr)
         self.assertIn("clang-cl build (experimental, may be faster)", config)
 
     def assert_clang_dropped(self, clang):
@@ -140,9 +143,9 @@ class BuildFomodPackageTests(unittest.TestCase):
         result = self.run_builder(self.root / "no-such-se", self.root / "vr")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("::warning::", result.stderr)
-        self.assertNotIn("ShaderCache-SE-AE", self.module_config())
+        self.assertNotIn("ShaderCache-", self.module_config())
         self.assertFalse((self.out / "ShaderCache-SE-AE").exists())
-        self.assertTrue((self.out / "ShaderCache-VR/ShaderCache").is_dir())
+        self.assertFalse((self.out / "ShaderCache-VR").exists())
 
     def assert_dropped(self, broken):
         write_cache(self.root / "vr")
@@ -150,7 +153,7 @@ class BuildFomodPackageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("::warning::", result.stderr)
         self.assertFalse((self.out / "ShaderCache-SE-AE").exists())
-        self.assertTrue((self.out / "ShaderCache-VR/ShaderCache").is_dir())
+        self.assertFalse((self.out / "ShaderCache-VR").exists())
 
     def test_empty_cache_is_dropped(self):
         (self.root / "se").mkdir()
@@ -196,8 +199,10 @@ class BuildFomodPackageTests(unittest.TestCase):
     def test_staged_check_flags_a_referenced_folder_that_vanished(self):
         write_cache(self.root / "se")
         self.assertEqual(self.run_builder(self.root / "se").returncode, 0)
+        self.assertFalse((self.out / "ShaderCache-SE-AE").exists())
         self.assertEqual(fomod.missing_staged_files(self.out), [])
-        shutil.rmtree(self.out / "ShaderCache-SE-AE")
+        core = self.out / "Core"
+        shutil.rmtree(core)
         self.assertTrue(fomod.missing_staged_files(self.out))
 
 

@@ -18,10 +18,10 @@ struct BearforjLook : Feature
 	struct Settings
 	{
 		bool Enable = true;
-		float TonemapStrength = 0.35f;
+		float TonemapStrength = 0.32f;
 		float TonemapMix = 100.0f;  // % of the Bearforj tonemap kept; lower it when the weather mod has its own tonemap
-		float Warmth = 0.5f;
-		float NightLift = 0.45f;
+		float Warmth = 0.45f;
+		float NightLift = 0.42f;
 		float3 NightTint{ 0.70f, 0.82f, 1.0f };
 		float AuroraSnow = 0.6f;
 		float3 AuroraTint{ 0.30f, 1.0f, 0.60f };

@@ -37,7 +37,7 @@ public:
 		float MaxRainWetness = 1.0f;
 		float MaxPuddleWetness = 1.5f;
 		float MaxShoreWetness = 1.0f;
-		float GrassWetnessRoughness = 0.12f;
+		float GrassWetnessRoughness = 0.04f;
 		uint ShoreRange = 32;
 		float PuddleRadius = 1.0f;
 		float PuddleMaxAngle = 0.95f;

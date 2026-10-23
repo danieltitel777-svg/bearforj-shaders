@@ -22,6 +22,45 @@ RWTexture3D<float> DensityRW : register(u0);
 #	include "Common/SharedData.hlsli"
 
 #	include "Common/ShadowSampling.hlsli"
+#	include "Common/Game.hlsli"
+
+	Texture2D<float4> VolCloudShadowCookie : register(t4);
+
+	float VolumetricCloudCookie(float3 worldPosAbs, uint eyeIndex)
+	{
+		SharedData::PhysSkyData data = SharedData::physSkyData;
+		if (!data.enableVolumetricClouds || data.highestCloudAltitude <= data.lowestCloudAltitude)
+			return 1.0;
+
+		float3 posRelative = worldPosAbs;
+		posRelative.z -= data.zBottom;
+		const float3 direction = SharedData::DirLightDirection.xyz;
+		const float lengthSq = dot(direction, direction);
+		const float3 shadowLightDir = lengthSq > 1e-6 ? direction * rsqrt(lengthSq) : data.sunDir;
+		const float3 reference = abs(shadowLightDir.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
+		const float3 right = normalize(cross(reference, shadowLightDir));
+		const float3 up = normalize(cross(shadowLightDir, right));
+		const float3 camera = FrameBuffer::CameraPosAdjust[eyeIndex].xyz - float3(0, 0, data.zBottom);
+		const float shadowWidth = max(data.shadowVolumeRange, 1.0);
+		const float2 uv = float2(dot(posRelative - camera, right), dot(posRelative - camera, up)) / shadowWidth + 0.5;
+		if (any(uv <= 0.0) || any(uv >= 1.0))
+			return 1.0;
+
+		const float4 cloudShadow = VolCloudShadowCookie.SampleLevel(ShadowmapSampler, uv, 0);
+		if (cloudShadow.y == 1.0)
+			return 1.0;
+
+		const float3 posPlanet = posRelative + float3(-FrameBuffer::CameraPosAdjust[eyeIndex].xy, data.rPlanet);
+		const float3 lightForward = -shadowLightDir;
+		const float sphereRadius = data.rPlanet + data.lowestCloudAltitude;
+		const float b = dot(posPlanet, lightForward);
+		const float c = dot(posPlanet, posPlanet) - sphereRadius * sphereRadius;
+		const float discriminant = b * b - c;
+		const float zCoord = discriminant >= 0.0 ? -b - sqrt(discriminant) : 0.0;
+		const float zCoordKm = zCoord * GAME_UNIT_TO_M * 0.001;
+		const float shadowRange = saturate((zCoordKm - cloudShadow.x) / max(cloudShadow.z - cloudShadow.x, 1e-5));
+		return lerp(cloudShadow.y, 1.0, shadowRange);
+	}
 
 cbuffer PerTechnique : register(b0)
 {
@@ -123,6 +162,7 @@ cbuffer PerTechnique : register(b0)
 #	if defined(TERRAIN_SHADOWS) || defined(CLOUD_SHADOWS)
 	shadowContribution *= sqrt(ShadowSampling::GetWorldShadow(positionWS.xyz, PosAdjust[eyeIndex], eyeIndex));
 #	endif
+	shadowContribution *= VolumetricCloudCookie(positionWS.xyz + FrameBuffer::CameraPosAdjust[eyeIndex].xyz, eyeIndex);
 
 	float vl = shadowContribution * densityContribution * phaseContribution;
 

@@ -11,9 +11,9 @@ struct Vignette : public PostProcessFeature
 
 	struct Settings
 	{
-		float FocalLength = 1.f;
+		float FocalLength = 1.4f;
 		float Anamorphism = 1.f;
-		float Power = 3.f;
+		float Power = 2.2f;
 	} settings;
 
 	struct alignas(16) VignetteCB

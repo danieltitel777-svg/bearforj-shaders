@@ -383,8 +383,15 @@ void PhysicalSky::RenderVolumetricClouds(VolumetricCloudPass a_pass)
 	const float timeSeconds = state->timer * 1e-3f;
 	const float cloudLayerDepth = std::max(settings.cloudLayer.highestAltitude - settings.cloudLayer.lowestAltitude, 0.05f);
 	const float windLen = std::sqrt(low.windDirection.x * low.windDirection.x + low.windDirection.y * low.windDirection.y);
-	const float2 windDir = windLen > 1e-4f ? low.windDirection / windLen : float2{ 1.f, 0.f };
-	const float2 noiseWindOffset = windDir * MetersToGameUnits(low.windSpeed * timeSeconds);
+	float2 windDir = windLen > 1e-4f ? low.windDirection / windLen : float2{ 1.f, 0.f };
+	float windSpeed = low.windSpeed;
+	if (const auto sky = globals::game::sky) {
+		if (std::isfinite(sky->windAngle))
+			windDir = float2{ std::cos(sky->windAngle), std::sin(sky->windAngle) };
+		if (std::isfinite(sky->windSpeed))
+			windSpeed = low.windSpeed * std::clamp(sky->windSpeed, 0.15f, 1.0f);
+	}
+	const float2 noiseWindOffset = windDir * MetersToGameUnits(windSpeed * timeSeconds);
 	const float highCloudBottom = std::clamp(high.bottom, 0.0f, 1.0f);
 	const float highCloudTop = std::clamp(std::max(high.top, highCloudBottom), highCloudBottom, 1.0f);
 
