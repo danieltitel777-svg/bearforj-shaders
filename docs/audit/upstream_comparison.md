@@ -448,11 +448,11 @@ Scene Manager умеет запереть погоду и подменить н�
 
 ### Как FOMOD разводит моды
 
-Установщик смотрит, какие esp уже лежат, и сам выбирает один профиль. Игрок не крутит смесь тонмапа руками. Страница погоды — одна галочка из списка. Страница света — одна. Lux на этих страницах нет.
+Установщик смотрит, какие esp уже лежат, и сам выбирает один профиль. Игрок не крутит смесь тонмапа руками. Страница погоды — одна галочка из списка. Страница света — одна: по умолчанию True Light. Lux на странице света есть отдельной галочкой, она выключена и никогда не обязательна. Проверка зависимостей и каркас XML — ниже, в том же разделе.
 
 Порядок такой. Сначала игра и SKSE, потом мод погоды, потом свет (True Light, Light Placer), потом текстуры и трава, самым последним Bearforj: он должен выиграть шейдеры. Патчи погоды под Community Shaders ставить так, как просит автор мода, обычно сразу после самой погоды. Два мода погоды вместе не ставить. ENB рядом не ставить: шейдеры одни и те же.
 
-Что установщик переключает. Нашёл известный плагин погоды — берёт смесь тонмапа, ночной подъём и туман из его профиля. Нашёл чужой готовый постпроцесс (цепочка вроде Dlizzio) — смесь нашего тонмапа в 0, чтобы цвет не лёг дважды. Нашёл True Light или CS Light — включает обратный квадрат и потолок теней 4 на улице и 6 в доме. Нашёл Lux — не предлагает его, пишет предупреждение и не мешает его с True Light. Нашёл ELFX Enhancer или Hardcore — просит выключить эти модули. Не нашёл ничего — полный вид Bearforj, эффекты всё равно слушают флаги погоды.
+Что установщик переключает. Нашёл известный плагин погоды — берёт смесь тонмапа, ночной подъём и туман из его профиля. Нашёл чужой готовый постпроцесс (цепочка вроде Dlizzio) — смесь нашего тонмапа в 0, чтобы цвет не лёг дважды. Нашёл True Light или CS Light — включает обратный квадрат и потолок теней 4 на улице и 6 в доме. Нашёл Lux — не включает его, пишет предупреждение и не даёт отметить его вместе с True Light. Нашёл ELFX Enhancer или Hardcore — просит выключить эти модули. Не нашёл обязательный мод красивого пути — прячет следующие страницы и показывает сообщение на русском и английском со ссылкой. Эффекты дождя и снега при этом всё равно слушают флаги погоды, но пресет картинки без проверки не ставится.
 
 Эффекты дождя, снега, воды, мокроты и меха установщик не выключает из-за мода. Они читают игру, а не esp. Исключение одно: тяжёлую симуляцию частиц не возвращать даже если мод бури ждёт свои картинки дождя. Круги и капли остаются.
 
@@ -478,13 +478,264 @@ Scene Manager умеет запереть погоду и подменить н�
 | Обратный квадрат | свет, наша галочка | да | нет | включить, если стоит True Light или Light Placer |
 | Luminosity | свет домов | да | не вместо улицы | только интерьеры, улицу не трогает |
 | ELFX без Enhancer | свет домов | терпимо | Enhancer и Hardcore с CS-погодой | просит выключить эти два модуля |
-| Lux, Lux Orbis, Lux Via | свет | не советуем | True Light, наш тонмап | в меню установки нет. Если esp уже есть — предупреждение, с True Light не мешать |
+| Lux, Lux Orbis, Lux Via | свет | не советуем | True Light, WSU, наш тонмап | галочка есть, по умолчанию выкл, никогда не обязательна. Уже стоящий esp — предупреждение, с True Light не мешать |
 | ENB и ENB-свет | свет | нет | все наши шейдеры | установка отказывается, пока ENB в папке игры |
 | Мокрота, круги, капли, снег на актёрах, волны | эффекты | да | большая симуляция частиц | не выключать. Симуляцию частиц не возвращать |
 | True Storms | эффекты бури | да | старый плагин молний рядом | молнии оставить одному моду, дождь наш |
 | TruePBR и PBR-паки | текстуры | да | обычная текстура без PBR-карты на том же предмете | ничего не крутит, только не выключает TruePBR |
 | Комплексная трава | трава | да | без оптимизации травы на 4K тяжело | трава включена, оптимизация травы включена |
 | Мех с `_shell.dds` | эффекты | да | нет | мех включён, слои режутся с дистанцией |
+
+### Проверка зависимостей
+
+Красивый путь установщика не идёт дальше, пока нужные моды не включены в порядок загрузки. Страница «Стоп» обязательна, на ней текст по-русски и по-английски и ссылка. Следующие страницы, включая пресет картинки, спрятаны, пока флаги проверки не станут `yes`. Если человек всё равно нажмёт «Установить», в игру попадёт только файл `Bearforj_FOMOD_STOP.txt` с тем же текстом, без пресета.
+
+Схема FOMOD не умеет выключить кнопку «Установить» и не умеет прочитать версию плагина. `fileDependency` видит имя файла и состояние Active / Inactive / Missing. Номер на странице Nexus в установщик не попадает. Версия пишется в тексте страницы. Проверка версии файла — уже в игре, в 0.6.7, не в XML.
+
+ESL. Флаг ESL внутри `esp` имени файла не меняет. Установщик его не видит. Отдельный файл `.esl` — другое имя, его надо перечислить через `Or`. Индекс FE или FF в порядке загрузки не проверяется.
+
+`moduleDependencies` на весь мод не ставим. Тогда Vortex и MO2 отказывают своей общей фразой и нашу страницу со ссылкой не показывают. Отказ делаем страницами и флагами.
+
+| Мод | Роль | Как узнаём | Если нет |
+| --- | --- | --- | --- |
+| True Light | обязателен на красивом пути. Это и есть выбранная замена света. Другой заменитель ламп сюда не подставляется | `True Light.esp` (так файл назван в журнале 3.6.0) или старое `TrueLight.esp` | стоп, ссылка на страницу мода. Lux этот пункт не закрывает |
+| Light Placer | обязателен. Без него True Light и CS Light не к чему крепить лампы | `SKSE/Plugins/po3_LightPlacer.dll`. Страница называет лог `po3_LightPlacer.log` | стоп и ссылка |
+| Одна CS-погода | обязательна. Две сразу нельзя | любое одно имя из профилей: NAT, Cathedral, Azurite, Obsidian, Vanilla CS, Vespro, Astralite, Faithful, Mythical Ages, Nirn Whispers, Real Weathers | стоп. Список ссылок в тексте |
+| Window Shadows Ultimate | обязателен на красивом пути | журнал 1.2 прямо называет `Window Shadows Ultimate Supplement.esp`. Имя основного esp страница не напечатала, в каркасе оно не выдумано | стоп и ссылка |
+| Embers XD | обязателен на красивом пути. Старый Embers HD этот пункт не закрывает | `Embers XD.esp`. Страница пишет, что имя то же и в варианте Lux Orbis | стоп. В тексте: ставить XD, стиль пламени CS, чужие лампы Light Placer в его установщике не включать |
+| Helios | обязателен только на 1.6.1170 и только вместе с Luma 1.7 и MMSF 1.1. На 1.7 страница Luma говорит выключить Helios до версии 2.0 | `Helios.esp` или `Helios.esl` или `Helios.esm` — так уже ищет наш профиль. Шапка Nexus имя файла не напечатала | на 1.6 стоп и ссылка. На 1.7 шаг сам пропускается, текст: Helios 1.01 не ставить |
+| PBR, Faultier | рекомендуем, не блокирует | не проверяем файлом. Текстуры без единого esp | страница советует, установщик идёт дальше |
+| Комплексная трава | рекомендуем, не блокирует | наши галочки Grass Lighting и Grass Optimizations уже в плагине. Чужой мод травы не требуем | текст со ссылкой на вики CS |
+| Lux | необязателен, по умолчанию выкл, никогда не в проверке | `Lux.esp`, `Lux - Master plugin.esm`, `Lux CS.esp`, `Lux Orbis.esp`, `Lux Via.esp` | ничего. Если файл уже активен и активен True Light — предупреждение, галочку Lux выбрать нельзя |
+| ENB | запрещён | корень игры с `d3d11.dll` менеджер часто не отдаёт как файл мода | текстом: если ENB лежит в папке игры, отмените установку. Автоматический отказ не обещаем |
+
+powerofthree's Tweaks, Luma Utility, ATLM, XEMI и MMSF страницы True Light, Light Placer, WSU и Helios называют обязательными для себя. Имена их файлов на открытых страницах не напечатаны, поэтому в XML нет выдуманного пути. Текст стопа перечисляет их словами и ссылками, которые на страницах были.
+
+Каркас. Это образец для 0.6.7, не готовый архив. Погода и тени окон сделаны так же, как свет: один плагин «стоп» с `Required`, пока файла нет, и `NotUsable`, когда файл уже Active.
+
+```xml
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+  <moduleName>Bearforj Shaders</moduleName>
+  <installSteps order="Explicit">
+    <installStep name="Проверка / Check">
+      <optionalFileGroups>
+        <group name="Свет / Light replacer" type="SelectExactlyOne">
+          <plugins>
+            <plugin name="Стоп: нет True Light / Stop: True Light missing">
+              <description><![CDATA[RU: Красивый путь ждёт True Light 3.6.5 (Bottle, ведёт SkrubbySkrubInAShrub).
+Lux не подходит и по умолчанию выключен.
+https://www.nexusmods.com/skyrimspecialedition/mods/135488
+Нужны ещё Light Placer 5.0.0, CS Light, Luma Utility, ATLM, powerofthree's Tweaks.
+Отмените установщик, поставьте моды, запустите снова.
+EN: The beauty path needs True Light 3.6.5. Lux does not count and stays off.
+Cancel, install the mods, run this installer again.]]></description>
+              <conditionFlags><flag name="gate_light">no</flag></conditionFlags>
+              <files><folder source="fomod/stop" destination="" priority="0"/></files>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Required"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies operator="Or">
+                        <fileDependency file="True Light.esp" state="Active"/>
+                        <fileDependency file="TrueLight.esp" state="Active"/>
+                      </dependencies>
+                      <type name="NotUsable"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+        <group name="Light Placer" type="SelectExactlyOne">
+          <plugins>
+            <plugin name="Стоп: нет Light Placer / Stop: Light Placer missing">
+              <description><![CDATA[RU: Нужен Light Placer 5.0.0, powerofthree.
+https://www.nexusmods.com/skyrimspecialedition/mods/127557
+Файл: SKSE/Plugins/po3_LightPlacer.dll и его требование powerofthree's Tweaks.
+EN: Install Light Placer 5.0.0 and powerofthree's Tweaks, then run this again.]]></description>
+              <conditionFlags><flag name="gate_placer">no</flag></conditionFlags>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Required"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies>
+                        <fileDependency file="SKSE/Plugins/po3_LightPlacer.dll" state="Active"/>
+                      </dependencies>
+                      <type name="NotUsable"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+        <group name="Окна / Windows" type="SelectExactlyOne">
+          <plugins>
+            <plugin name="Стоп: нет Window Shadows Ultimate">
+              <description><![CDATA[RU: Нужен Window Shadows Ultimate 1.4.6, CarbonDice и Dlizzio.
+https://www.nexusmods.com/skyrimspecialedition/mods/150494
+Проверяем файл из журнала 1.2: Window Shadows Ultimate Supplement.esp.
+С True Light не берите чужие тени окон Lux и ELFX Shadows.
+EN: Install Window Shadows Ultimate 1.4.6. The check looks for the supplement plugin named in the 1.2 changelog.]]></description>
+              <conditionFlags><flag name="gate_wsu">no</flag></conditionFlags>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Required"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies>
+                        <fileDependency file="Window Shadows Ultimate Supplement.esp" state="Active"/>
+                      </dependencies>
+                      <type name="NotUsable"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+        <group name="Огонь / Fire" type="SelectExactlyOne">
+          <plugins>
+            <plugin name="Стоп: нет Embers XD">
+              <description><![CDATA[RU: Нужен Embers XD 3.3.0, mindflux, не старый Embers HD.
+https://www.nexusmods.com/skyrimspecialedition/mods/37085
+В его установщике: стиль пламени Community Shaders и None (CS/OS) для чужих ламп.
+Свои лампы Light Placer из Embers XD не включать: с 3.2.7 автор отдал их True Light и CS Light.
+EN: Install Embers XD 3.3.0. Embers HD 1.4.2 does not pass this check.]]></description>
+              <conditionFlags><flag name="gate_embers">no</flag></conditionFlags>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Required"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies>
+                        <fileDependency file="Embers XD.esp" state="Active"/>
+                      </dependencies>
+                      <type name="NotUsable"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+        <group name="Helios" type="SelectExactlyOne">
+          <plugins>
+            <plugin name="Helios">
+              <description><![CDATA[RU: На 1.6.1170 нужен Helios 1.01, isoprovophlex, плюс Luma 1.7, MMSF 1.1, XEMI.
+https://www.nexusmods.com/skyrimspecialedition/mods/181533
+Luma 2.0 с Helios 1.01 ломает дом. На Skyrim 1.7 этот шаг пропускается: Helios 2.0 ещё нет.
+EN: On 1.6 install Helios 1.01 with Luma 1.7 and MMSF 1.1. On 1.7 skip Helios.]]></description>
+              <conditionFlags><flag name="gate_helios">no</flag></conditionFlags>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Required"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies>
+                        <gameDependency version="1.7.0"/>
+                      </dependencies>
+                      <type name="NotUsable"/>
+                    </pattern>
+                    <pattern>
+                      <dependencies operator="Or">
+                        <fileDependency file="Helios.esp" state="Active"/>
+                        <fileDependency file="Helios.esl" state="Active"/>
+                        <fileDependency file="Helios.esm" state="Active"/>
+                      </dependencies>
+                      <type name="NotUsable"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+        <group name="Lux" type="SelectExactlyOne">
+          <plugins>
+            <plugin name="Не ставить Lux / Do not install Lux">
+              <description>По умолчанию. Lux не требуется.</description>
+              <conditionFlags><flag name="lux">off</flag></conditionFlags>
+              <typeDescriptor><type name="Recommended"/></typeDescriptor>
+            </plugin>
+            <plugin name="Lux уже стоит, оставить / Lux is already installed">
+              <description><![CDATA[RU: Не рекомендуем. С True Light, WSU и ATLM не совмещать.
+EN: Optional, off by default, never required. Do not combine with True Light.]]></description>
+              <conditionFlags><flag name="lux">on</flag></conditionFlags>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Optional"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies operator="Or">
+                        <fileDependency file="True Light.esp" state="Active"/>
+                        <fileDependency file="TrueLight.esp" state="Active"/>
+                      </dependencies>
+                      <type name="NotUsable"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+    <installStep name="Пресет картинки / Picture preset">
+      <visible>
+        <dependencies operator="And">
+          <flagDependency flag="gate_light" value="yes"/>
+          <flagDependency flag="gate_placer" value="yes"/>
+          <flagDependency flag="gate_wsu" value="yes"/>
+          <flagDependency flag="gate_embers" value="yes"/>
+          <flagDependency flag="gate_helios" value="yes"/>
+          <flagDependency flag="gate_weather" value="yes"/>
+        </dependencies>
+      </visible>
+      <optionalFileGroups>
+        <group name="Пресет" type="SelectExactlyOne">
+          <plugins>
+            <plugin name="Пресет Bearforj по умолчанию">
+              <description>Кладёт SettingsDefault.json из раздела «Пресет картинки».</description>
+              <files><folder source="preset/default" destination="SKSE/Plugins/CommunityShaders" priority="0"/></files>
+              <typeDescriptor><type name="Recommended"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>
+```
+
+Одного плагина «стоп» мало. Когда файл уже есть, он становится `NotUsable`, и группа `SelectExactlyOne` пустеет. Рядом всегда второй плагин «найдено»: по умолчанию `NotUsable`, при нужном файле `Required`, флаг `yes`. Погода, окна, огонь и Light Placer копируют эту пару. У погоды в `Or` все имена из `Bearforj/Profiles/Library/weather_*.json`, но только один мод. На игре 1.7 третий плагин Helios с `gameDependency version="1.7.0"` и флагом `gate_helios=yes` пропускает шаг: Helios 1.01 туда не ставим.
+
+```xml
+<plugin name="True Light найден / True Light found">
+  <description>True Light.esp активен. Можно идти к пресету.</description>
+  <conditionFlags><flag name="gate_light">yes</flag></conditionFlags>
+  <typeDescriptor>
+    <dependencyType>
+      <defaultType name="NotUsable"/>
+      <patterns>
+        <pattern>
+          <dependencies operator="Or">
+            <fileDependency file="True Light.esp" state="Active"/>
+            <fileDependency file="TrueLight.esp" state="Active"/>
+          </dependencies>
+          <type name="Required"/>
+        </pattern>
+      </patterns>
+    </dependencyType>
+  </typeDescriptor>
+</plugin>
+```
+
+Рекомендуемые моды (PBR и трава) на этой странице только текст и ссылка. Галочка не обязательна, флаг не блокирует.
 
 ### Что поставить, без Lux
 
@@ -496,16 +747,219 @@ Scene Manager умеет запереть погоду и подменить н�
 
 По желанию. Obsidian CS, Azurite, Vespro, Astralite, Faithful, Mythical Ages, Nirn Whispers. Prism, когда появится профиль. True Storms. Luminosity только в домах. Апскейл FSR на 4K, если запас кончился. ELFX только без Enhancer.
 
-Не ставить. Lux и всё, что к нему прикручено. ENB. Вторую погоду. Вторую цепочку постпроцесса вместе с нашим тонмапом.
+Не ставить по умолчанию. Lux и всё, что к нему прикручено: в установщике это выключенная галочка, не требование. ENB. Вторую погоду. Вторую цепочку постпроцесса вместе с нашим тонмапом.
 
 ### Что делаем в 0.6.7
 
 1. Преломление воды вести за волной, заплатку с четырьмя огнями не откатывать.
 2. Мех оставить включённым. Вблизи 8–12 слоёв, после 8 метров 4, после 15 метров 2, дальше ничего.
 3. Стартовый набор: мех, волны, мокрота, линейный свет, лимит огней, пробы неба не на максимуме. Экранный GI и тени в лучах выключены. Подъём земли только под ногами. Сетка волн до 8.
-4. FOMOD: одна погода, один свет. Свет — True Light и Light Placer. Lux в списке нет. Уже стоящий Lux только предупреждение. Смесь тонмапа из профиля.
+4. FOMOD: одна погода, один свет. Свет по умолчанию — True Light и Light Placer. Lux отдельной выключенной галочкой, никогда не обязателен. Уже стоящий Lux только предупреждение и запрет вместе с True Light. Смесь тонмапа из профиля. Красивый путь не продолжается, пока нет модов из проверки ниже.
 5. Профиль Prism, как только известно имя плагина. До этого дождь и снег и так работают по флагам.
 6. Готовый кэш шейдеров под этот стартовый набор. В игре компилятору 1–2 потока.
 7. Мокрый лес усилить, ветер оставить на порыве. Облака дешёвым режимом, плоские слои рядом не рисовать.
 8. Теням поставленных огней потолок 4 и 6. Обратный квадрат включён вместе с True Light.
 9. Трассировку лучей не добавлять.
+10. Вложить пресет ниже в `SettingsDefault.json` и в FOMOD как единственный вид по умолчанию. Плотность лучей применять из этого же файла при старте, не переписывая `Skyrim.ini` в документах.
+
+### Пресет картинки
+
+Один вид. Цифры совпадают с тем, что уже рекомендовано: ACEScg, ambient 0.32, насыщенность 0.92, ночной подъём 0.42, пол автоэкспозиции −1.5 EV, в доме +0.3 EV и теплее. Где колонки совпадают, разрешение ни при чём. Лучи объёмные за счёт сетки Volumetric Lighting и рассеяния вперёд. Вторую объёмную сетку тумана не включаем: она съест лучи и кадр. Трассировки нет.
+
+Лучи красивые, когда плотность умеренная, рассеяние смотрит на солнце, а блум ловит только пик. На 1440p сетка High. На 4K Medium, иначе на 6950 XT лучи стоят лишние 2–4 мс. С FSR на 4K можно High.
+
+| Настройка | 1440p | 4K | Зачем |
+| --- | --- | --- | --- |
+| LinearLighting.enableLinearLighting | 1 | 1 | Весь свет в линейном пространстве |
+| LinearLighting.enableACEScg | 1 | 1 | Рабочий цвет ACEScg |
+| LinearLighting.conversionSaturation | 0.92 | 0.92 | Насыщенность. В грейдере её больше не крутить |
+| LinearLighting.ambientMult | 0.32 | 0.32 | Тень не серая и не чёрная |
+| BearforjLook.Enable | 1 | 1 | Наша кривая после тонмапа игры |
+| BearforjLook.TonemapStrength | 0.32 | 0.32 | Мягкая плёночная кривая, не вторая полная |
+| BearforjLook.TonemapMix | 100, профиль погоды снижает | то же | 100 только без чужого тонмапа |
+| BearforjLook.Warmth | 0.45 улица, 0.62 дом | то же | Дом теплее. Улицу не красить в дом |
+| BearforjLook.NightLift | 0.42 | 0.42 | Ночь читается, не яма |
+| BearforjLook.NightTint | 0.70, 0.82, 1.00 | то же | Холодный лунный, не серый |
+| Histogram.ExposureCompensation | 0 улица, +0.3 дом | то же | Дом светлее на треть ступени |
+| Histogram.AdaptationRange | −1.5 … 5 EV | то же | Луна не уходит в чёрное |
+| Histogram.AdaptSpeed | 0.8 | 0.8 | Глаз медленный |
+| Histogram.PurkinjeStrength | 0 | 0 | Синева темноты спорит с тёплым домом |
+| ColorGrading.enableTonemap | 0 | 0 | Кривая уже в Bearforj Look. Третья не нужна |
+| ColorGrading.inOutGamma | 1, 1, 1, 1 | то же | Гамму не ломать, ACEScg уже перевёл |
+| ColorGrading.contrast | 1.06 | 1.06 | Чуть жёстче, без выбитых теней |
+| ColorGrading.pivot | 0.18 | 0.18 | Серая точка, вокруг неё контраст |
+| ColorGrading.oklchSaturation | 1 | 1 | Насыщенность только 0.92 выше |
+| ColorGrading.exposureTemperatureTint | 1, 65, 0 | то же | Экспозиция в автоглазе. 65 это 6500 K |
+| ColorGrading.lift / gamma / gain | 0, 0, 1 | то же | Не красить вторым слоем |
+| ColorGrading.slope / power / offset | 1, 1, 0 | то же | CDL выключен по нулям и единицам |
+| Тени, середина, света (gain и offset) | gain 1, offset 0 | то же | Пока не нужен отдельный цвет тени |
+| Bloom.Enabled | 1 | 1 | Блик окон, луны и огня |
+| Bloom.EnhancementIntensity | 0.40 | 0.35 | На 4K тот же блик выглядит шире |
+| Bloom.HaloRadius | 3.5 | 3.0 | Ореол короче на 4K |
+| Bloom.HaloSpread | 0.70 | 0.65 | Чтобы ночь не стала серой кашей |
+| Bloom.BloomSaturation | 0.85 | 0.85 | Блик чуть тише цвета кадра |
+| Bloom.CompressionThreshold | 0.15 | 0.18 | Светится только яркое |
+| Bloom.CompressionCeiling | 1.2 | 1.2 | Потолок блика |
+| COD Bloom, Physical Glare | выкл | выкл | Один блум, не три |
+| LUT.LutPath | пусто | пусто | Отдельный LUT не класть поверх Look |
+| Vignette.Power | 2.2 | 2.2 | Мягкий край, не чёрный круг |
+| Vignette.FocalLength | 1.4 | 1.4 | Виньетка шире, чем по умолчанию |
+| Vignette.Anamorphism | 1 | 1 | Круг, не щель |
+| Camera.NoiseStrength | 0.03 | 0.02 | Едва видимое зерно. На 4K зерно заметнее |
+| Camera.NoiseType | 0 | 0 | Мелкое зерно |
+| Camera.CAStrength | 0.01 | 0.01 | Почти нет цветной каймы |
+| Camera.UseFE | 0 | 0 | Рыбий глаз выключен |
+| DoF, Motion Blur | выкл | выкл | Только для снимка, не для бега |
+| VolumetricLighting снаружи | High (2) | Medium (1) | Лучи объёмные. High на 4K только с FSR |
+| VolumetricLighting в доме | High (2) | Medium (1) | Луч из окна. Та же сетка |
+| Volumetric Shadows | выкл | выкл | Тень внутри луча дорогая, луч и так виден |
+| fVolumetricLightingIntensity | 1.0 | 1.0 | Сила луча |
+| fVolumetricLightingDensityContribution | 0.75 | 0.75 | Толщина воздуха, не молоко |
+| fVolumetricLightingDensityScale | 1.0 | 1.0 | Масштаб этой толщины |
+| fVolumetricLightingPhaseContribution | 0.80 | 0.80 | Сколько света уходит в луч |
+| fVolumetricLightingPhaseScattering | 0.65 | 0.65 | Вперёд к солнцу, поэтому луч, а не шар |
+| fVolumetricLightingRangeFactor | 1.2 | 1.2 | Луч длиннее |
+| fVolumetricLightingCustomColorContribution | 0.30 | 0.30 | Цвет погоды чуть красит луч |
+| Ветер лучей (speed / falling) | 1 / 0 | 1 / 0 | Пыль не падает столбом |
+| ExponentialHeightFog.enabled | 1 | 1 | Тонкий слой воздуха |
+| fogDensity | 0.003 | 0.003 | Слабее погоды, чтобы не спорить |
+| fogHeightFalloff | 0.2 | 0.2 | Туман у земли |
+| fogDensity2 | 0 | 0 | Второй слой не нужен |
+| directionalInscatteringMultiplier | 0.6 | 0.6 | Солнце в тумане, луч остаётся у Volumetric Lighting |
+| directionalInscatteringAnisotropy | 0.45 | 0.45 | Мягкое свечение у солнца |
+| disableVanillaFog | 0 | 0 | Туман мода погоды не стирать |
+| useVanillaFogSettings | 1 | 1 | Дальность тумана берёт погода |
+| vanillaFogStrength | 1.0 | 1.0 | Без усиления поверх мода |
+| volumetricFogEnabled | 0 | 0 | Вторая объёмная сетка выключена |
+| mistsEnabled / mistStrength | 1 / 0.08 | то же | Клочья дёшево, не вместо лучей |
+| fogLightingInfluence | 0.35 | 0.35 | Туман красится небом |
+
+На 6950 XT этот набор поста около 2–4 мс на 1440p и 3–5 мс на 4K, из них лучи на Medium около 1.5–2.5 мс, на High около 2.5–4 мс. Это прикидка, не замер.
+
+Куда класть. Наши поля едут в `Data/SKSE/Plugins/CommunityShaders/SettingsDefault.json`. Игрок перекрывает их в `SettingsUser.json` рядом. Профиль погоды в `Bearforj/Profiles/Library` имеет право снизить только `TonemapMix`, `Warmth` и `NightLift`. Девять ключей `fVolumetricLighting*` сейчас плагин только читает из ini игры. В 0.6.7 их надо записать в тот же JSON и применить при старте. FOMOD отдаёт этот пресет включённым, но только после проверки зависимостей. Отдельный «киношный» пресет с DOF не класть в умолчание.
+
+### Моды, которые реально меняют картинку
+
+Список только с тех страниц, которые открыты в этом проходе, плюс имена файлов из наших профилей, где это прямо сказано. Чего на странице не было, в таблицу не попало. Трассировки нет.
+
+| Мод | Ссылка | Автор | Версия на странице | Что делает | С нами | Цена на RX 6950 XT | FOMOD |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| True Light | https://www.nexusmods.com/skyrimspecialedition/mods/135488 | Bottle, ведёт SkrubbySkrubInAShrub | 3.6.5, 20 июля 2026 | Лампы на свечи, огонь, окна и улицу через Light Placer и обратный квадрат. С 3.6 мастер называется `True Light.esp`, Luma стал обязательным | Да. Это наш свет. Журнал 3.6.5 просит не ставить его на сборку Jiaye; Bearforj не она. С 4.0 автор обещает совместимость с постпроцессом Jiaye | Лампы дешёвые. Дорого только, если у каждой тень. Держим потолок 4 на улице и 6 в доме, около 2–4 мс. Прикидка | Обязателен |
+| Light Placer | https://www.nexusmods.com/skyrimspecialedition/mods/127557 | powerofthree | 5.0.0, 25 сентября 2026 | Настоящие лампы на предметах из JSON. С 4.2 есть линейный свет | Да, это каркас True Light и CS Light | Сам плагин почти ничего. Считает число ламп | Обязателен |
+| CS Light | https://www.nexusmods.com/skyrimspecialedition/mods/138443 | Bottle | В шапке написано Version 1, последний пункт журнала 2.0.1, файл от 12 июня 2026 | Остальные лампы: зелья, магия, насекомые. С 2.0.0 свечи и угли отсюда убраны, их берёт мод света | Да, вместе с True Light, без вторых свечей | Мало, если не дублировать True Light | Обязателен вместе с True Light |
+| Window Shadows Ultimate | https://www.nexusmods.com/skyrimspecialedition/mods/150494 | CarbonDice, Dlizzio | 1.4.6, 11 августа 2026 | Тени и лучи из окон. Делался под Community Shaders | Да, с True Light и CS Light. Нельзя с Lux, ELFX, ELFX Shadows, Relighting Skyrim, Window Shadows RT | Влезает в те же 6 теней дома. Отдельный замер не делался | Обязателен на красивом пути |
+| Embers XD | https://www.nexusmods.com/skyrimspecialedition/mods/37085 | mindflux | 3.3.0, 17 октября 2026 | Огонь, угли, факелы. Есть стиль пламени CS и вариант None (CS/OS) | Да. С 3.2.7 свои JSON ламп автор убрал и отправил к True Light | Текстуры и частицы, не второй свет. На 4K есть вариант 2K и 1K на странице | Обязателен на красивом пути |
+| Embers HD | https://www.nexusmods.com/skyrimspecialedition/mods/14368 | mindflux | 1.4.2, 1 мая 2022 | Старый огонь того же автора. Страница говорит про ENB, не про CS | Слабо. Поверх XD не ставить | Мало | Не требовать. Красивый путь ждёт XD |
+| Helios | https://www.nexusmods.com/skyrimspecialedition/mods/181533 | isoprovophlex | В шапке Version 1, журнал 1.01, файл от 8 июля 2026 | Дом красится погодой за окном. Наследник DIAL | Да на 1.6.1170 с Luma 1.7 и MMSF 1.1. На 1.7 автор Luma пишет Helios пока выключить. С DIAL не совмещать | Дёшево, это погода и цвет, не шейдер | Обязателен только на 1.6 |
+| Luma Utility | https://www.nexusmods.com/skyrimspecialedition/mods/177961 | minizbot2012 | Линия 2.0 есть. Для Helios 1.01 нужна 1.7 | Шаблоны и лампы для True Light и Helios | Да. 2.0 не мешать с Helios 1.01 и со старым MMSF 1.1 | Мало | Обязателен как требование True Light. Версию файлом не проверяем |
+| ATLM | https://www.nexusmods.com/skyrimspecialedition/mods/153425 | На открытой странице WSU ссылка есть, шапку ATLM не открывал | Не снята | Шаблоны света. WSU с 1.1 и True Light его требуют | Да | Мало | В тексте стопа, без выдуманного имени файла |
+| Faultier's PBR Skyrim | https://www.nexusmods.com/skyrimspecialedition/mods/125308 | Faultierfan | 3.0, 19 июня 2026 | PBR на большую часть игры. Нужны Community Shaders, PG Patcher и SMIM. С ENB не работает | Да, наша фича TruePBR. Один пак, не пять | На 6950 XT брать 2K. 4K ест память, не обязательно кадр | Рекомендуем, не блокирует |
+| NAT.CS III | https://www.nexusmods.com/skyrimspecialedition/mods/139567 | Имя в выгрузке не было | Номер в выгрузке не было | Порт NAT III под CS. Просит только плагин погоды NAT 3.1.1C, Skylighting и Cloud Shadows. Пишет, что не совместим с Effect 11 | Да, если Effect 11 выключен. Смесь тонмапа 35% | Мало сверх наших фич неба | Одна погода на выбор, эта подходит |
+| Cathedral CS | https://www.nexusmods.com/skyrimspecialedition/mods/162681 | Имя в выгрузке не было. Cathedral Weathers там указан как мод DrJacopo | Номер в выгрузке не было | Погода Cathedral плюс тонмап CS. Просит Cloud Shadows, Skylighting, Sky Sync | Да. Ночи уже светлые, наш подъём луны низкий | Мало | Хороший выбор по умолчанию, если Effect 11 включён |
+| Azurite Weathers | https://www.nexusmods.com/skyrimspecialedition/mods/42731 | Имя в шапке выгрузки не было | Номер в выгрузке не было | Погода, облака, ночное небо. Страница сама советует CS | Да вместе с Azurite III CS, https://www.nexusmods.com/skyrimspecialedition/mods/162153 | Мало | Одна погода на выбор |
+| Cloud Shadows, отдельный мод Nexus | https://www.nexusmods.com/skyrimspecialedition/mods/139185 | Приём ProfJack и doodlum | Номер в выгрузке не было | Тени от плоских облаков на землю. Страница пишет, что те же тени режут и лучи | Фича уже внутри Bearforj. Второй плагин не ставить | Дёшево, снимок в кубической карте | Включаем нашу галочку, мод с Nexus не ставим |
+| Grass Optimizations, отдельный мод | https://www.nexusmods.com/skyrimspecialedition/mods/188628 | DwemerEngineer | 1.0.0, 23 сентября 2026 | Дальняя трава быстрее | Фича уже в нашем плагине. Второй мод не ставить | Экономит кадр на густой траве | Включаем нашу галочку |
+
+Комплексную траву вики CS называет по именам Vanilla Complex Grasses for ENB и Complex Grass — The Official Patch Compendium: https://modding.wiki/en/skyrim/developers/community-shaders/Features-Home/grass-lighting . Их страницы Nexus в этом проходе не открывались, поэтому версии нет и в обязательные они не входят. Наша галочка Grass Lighting их понимает.
+
+Не перепутать с True Light мод Reshade True Light, https://www.nexusmods.com/skyrimspecialedition/mods/79917 . Это пресет ReShade, не лампы.
+
+### Объёмные облака
+
+Красивое облако, сквозь которое проходит свет, у нас уже есть. Это не плоская картинка и не трассировка.
+
+Где код. Марш облака сидит только в нашем Physical Sky: `src/Features/PhysicalSky/VolumetricClouds.cpp` и `features/Physical Sky/Shaders/PhysicalSky/Volumetrics.cs.hlsl`. Свет внутрь облака считает отдельный короткий марш, по умолчанию 6 шагов, дальше трёх километров шаги сами падают до одного. Фаза света: две доли Хеньи–Гринштейна, либо физическая капля Ми (Хеньи–Гринштейн плюс Дрейн). Серебряная кромка — это вперёд направленная фаза. Тень облака на землю — печенье `PhysicalSky::VolumetricCloudShadowCookie`, 256 на 256. Сетка кадра уже четверть (`kVolCloudDownsample = 4`). По умолчанию марш выключен, потолок шагов вида 97.
+
+Чего нет у остальных. В снятых деревьях CS, Open Shaders, Bottled и Jiaye этого марша нет. У Open Shaders есть Cloud Relight: он перекрашивает плоские облака игры и умеет серебряную кромку на карточке, `silverLiningMix`. У всех пятерых, включая нас, есть Cloud Shadows: тень от тех же плоских слоёв на землю. Страница Cloud Shadows говорит, что эта тень режет и лучи. В нашем `ISVolumetricLightingRaymarchCS.hlsl` и в таком же файле CS dev выборки этой тени нет. Тень плоских облаков точно темнит землю в `Lighting.hlsl`. Лучи сквозь дыры в объёмном облаке должен резать печенье марша, и это ещё надо соединить с лучами Volumetric Lighting.
+
+Отдельного мода облаков, который рисует этот марш, нет. Погода по-прежнему нужна: она задаёт дождь, туман и свои плоские слои. Сам марш запись `TESWeather` сейчас не читает. Поиск по Physical Sky это подтвердил. Пока связи нет, гроза и ясный день выглядят одним облаком. В 0.6.7 покрытие надо взять из того слота погоды, который Bearforj уже считает, и из альфы облачного слоя. Ветер неба, тот же, что у Dynamic Wind Framework, крутит шум.
+
+Как включить, чтобы было красиво и не съесть кадр. На 1440p марш включить. На 4K включить, только если запас после пресета ещё есть. Иначе на 4K оставить плоские облака: Cloud Relight и Cloud Shadows. Оба слоя сразу не рисовать.
+
+| Настройка | 1440p | 4K | Зачем |
+| --- | --- | --- | --- |
+| enableVolumetricClouds | 1 | 0, либо 1 если запас есть | Сам марш |
+| cloudMaxStep | 40 | 32 | Шаги вида. 97 слишком жирно |
+| Разрешение марша | четверть, как сейчас | четверть | Полный кадр не нужен |
+| phaseModel | 0 | 0 | Кромка слушается ползунков. Модель 1 красивая, но ползунки игнорирует |
+| forwardEccentricity / backwardEccentricity света | 0.85 / 0.30 | то же | Серебряная кромка и тёмная спина облака |
+| scatterIntegration | 1 | 1 | Свет, вошедший в облако, выходит цветом, а не серым множителем |
+| lightSteps | 6 | 6 | Свет внутрь. Дальше и так режется |
+| powderIntensity | 0.35 | 0.35 | Край против солнца темнее, кромка светлее |
+| enableVanillaClouds | 0 | 1, если марш выключен | Не рисовать картон поверх объёма |
+| Cloud Relight | выкл, пока марш включён | включён, если марш выключен. silverLiningMix 1, spread 0.35 | Кромка на плоских облаках |
+| Cloud Shadows, непрозрачность | 0.2 | 0.85, если марш выключен | Печенье марша уже кладёт тень. Две тени не складывать |
+| Печенье тени и куб | тень через кадр, куб не каждый кадр | то же | Дешёвый ход из прошлого раздела |
+| Лучи Volumetric Lighting | как в пресете, High | Medium | Лучи воздуха. В 0.6.7 умножить солнце луча на печенье облака, один семпл, без трассировки |
+
+На 6950 XT марш на четверти и 40 шагах это те же прикинутые 1.5–3 мс на 1440p и 2.5–5 мс на 4K. Шесть шагов света уже внутри этой цены. Это не замер.
+
+План на 0.6.7. Оставить марш у нас, не портировать его из Open Shaders: там его нет. Связать покрытие с погодой. Когда марш включён, плоские слои и Cloud Relight выключить, непрозрачность Cloud Shadows опустить до 0.2. Соединить печенье с лучами. Шаги 40 и 32 записать в тот же `SettingsDefault.json`, что и пресет. На 4K без запаса марш не включать.
+
+### Что ставить / что не ставить / что убрать
+
+Порядок сверху вниз. Одна строка — одна причина.
+
+**Ставить**
+
+1. SKSE, Address Library, Engine Fixes. Без них плагин не встанет. Страница Community Shaders называет их требованиями.
+2. Light Placer 5.0.0 и powerofthree's Tweaks. Иначе лампам True Light не к чему крепиться.
+3. True Light 3.6.5, CS Light, Luma, ATLM. Это свет улицы и дома.
+4. Одну погоду под CS. Cathedral CS, если Effect 11 включён. NAT.CS, если Effect 11 выключен. Vanilla CS тоже годится.
+5. Window Shadows Ultimate 1.4.6. Тени из окон, без Lux.
+6. Embers XD 3.3.0, стиль пламени CS, без его ламп Light Placer. Огонь становится объёмным, лампы остаются у True Light.
+7. Helios 1.01, Luma 1.7, MMSF 1.1, XEMI. Только на 1.6.1170. Дом следует погоде.
+8. Bearforj последним. Его шейдеры должны выиграть.
+9. Наши галочки: линейный свет и ACEScg, Bearforj Look, пресет картинки, обратный квадрат, лимит огней, Cloud Shadows, Skylighting не на максимальной сетке, мокрота, волны, мех, Grass Lighting, Grass Optimizations. Это и есть картинка.
+10. Faultier's PBR 2K и один мод комплексной травы с вики. Материалы и лес. Не блокируют установку.
+11. На 1440p объёмные облака Physical Sky по таблице выше. На 4K только если запас кадра ещё есть.
+
+**Не ставить**
+
+1. Lux, Lux Orbis, Lux Via. Галочка в установщике выключена и не обязательна. С True Light и тенями окон они спорят.
+2. ENB и Reshade True Light. Другой шейдер и чужой пресет с похожим именем.
+3. Вторую погоду и вторую цепочку тонмапа поверх Bearforj Look.
+4. ELFX Enhancer, ELFX Hardcore, ELFX Shadows, Relighting Skyrim, Window Shadows RT, DIAL рядом с Helios.
+5. Embers HD поверх Embers XD и лампы Light Placer из старого установщика Embers.
+6. Отдельные плагины Cloud Shadows, Skylighting и Grass Optimizations с Nexus. Они уже внутри Bearforj.
+7. Luma 2.0 вместе с Helios 1.01. Дом ломается.
+8. Helios 1.01 на Skyrim 1.7. Ждать Helios 2.0.
+9. Пять PBR-паков сразу и 4K-текстуры Faultier без нужды. Память уходит раньше красоты.
+10. Трассировку любого вида.
+
+**Убрать**
+
+Из сборки игрока:
+
+1. ENB из папки игры. Иначе наши шейдеры не главные.
+2. Lux, если стоит True Light. Один свет.
+3. Вторую погоду и чужой полный постпроцесс. Цвет ложится дважды.
+4. ELFX Shadows и старые тени окон. Их место занимает Window Shadows Ultimate.
+5. Плоские облака на полную силу, когда включён марш Physical Sky. Два неба.
+6. Вторую объёмную сетку тумана. Она съедает лучи.
+7. Helios, если игра уже 1.7, а Helios всё ещё 1.01.
+
+Из форка в 0.6.7, не из этого отчёта:
+
+1. Define Physical Sky со всех типов шейдеров. Он раздувает кэш. Оставить на небе.
+2. Тесселяцию земли на всё ближнее поле. Оставить только следы.
+3. Отдельный корпус волн на каждое число огней. Один корпус.
+4. Мех не убирать. Резать слои с дистанцией.
+5. Мокроту, волны, линейный свет и лимит огней не убирать.
+
+### Рекомендации для максимальной красоты и идеальный результат
+
+Это порядок, в котором картинка собирается на RX 6950 XT. Цифры поста лежат в таблице «Пресет картинки». Цифры облаков — в таблице выше. Миллисекунды — прикидка по проходам, не замер в игре.
+
+1. Поставить моды из списка «Ставить», пункты 1–8. Потом один раз запустить FOMOD. Красивый путь сам остановится, если чего-то нет.
+2. В FOMOD: одна погода, свет True Light, Lux не отмечать, пресет по умолчанию. На 1.7 шаг Helios пропускается.
+3. Порядок загрузки. Игра и SKSE, погода, её патч CS, True Light и CS Light, Window Shadows Ultimate, Embers XD, Helios если он нужен, текстуры и трава, Bearforj последним.
+4. В меню Bearforj включить пресет: ACEScg, ambient 0.32, насыщенность 0.92, ночной подъём 0.42, пол автоэкспозиции −1.5 EV, в доме +0.3 EV и теплее. Блум слабый. DOF и смаз выключены. Лучи High на 1440p и Medium на 4K. Вторая сетка тумана выключена.
+5. Облака. На 1440p марш, 40 шагов, четверть кадра, фаза 0, рассеяние 1, шесть шагов света, плоские слои выключить. На 4K марш не включать, пока кадр не спокойный: там Cloud Relight и Cloud Shadows.
+6. Тени ламп. 4 на улице, 6 в доме. Свечи без теней. Обратный квадрат включён.
+7. Мех включён. Вблизи 8–12 слоёв, дальше меньше.
+8. Профиль погоды сам снизит смесь тонмапа. Руками 100% не возвращать, если погода уже плёночная.
+
+Ловушки. Два тонмапа. Lux вместе с True Light. Embers HD и Embers XD вместе. Helios 1.01 на Luma 2.0. Effect 11 вместе с NAT.CS. Плоские облака вместе с маршем. Отдельный плагин фичи, которая уже в Bearforj. Чужая сборка Jiaye вместо нашего плагина: True Light 3.6.5 на ней, по словам автора, не рассчитан.
+
+Запас кадра. Добавки красивого пути: мокрый лес, ветер, блум, лучи, до шести теней, марш облаков на 1440p. Это примерно 2–4.5 мс леса и ветра и облаков плюс 2–4 мс света и лучей на 1440p. Платят за это выключенный экранный GI, выключенные тени внутри луча, следы вместо всей земли, сетка волн 8 вместо 16 и один слой облаков. На 1440p запас остаётся. На 4K марш облаков и High у лучей выключаются первыми. FSR только если запас кончился. Трассировку не добавлять.
