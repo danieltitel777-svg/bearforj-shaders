@@ -77,35 +77,65 @@ int main()
 	const float deepGap = 300.0f - SampleLandZ(0.0f, 0.0f, 0.0f, 0.0f, 100.0f, 2, land);
 	Expect(ShoreDamp(deepGap, 160.0f) == 1.0f, "shared land gap is full waves once the water is deep");
 
-	float calmSize = 0, calmAmp = 0, calmStorm = 0;
-	float breezeSize = 0, breezeAmp = 0, breezeStorm = 0;
-	float stormSize = 0, stormAmp = 0, stormStorm = 0;
-	WindShape(0.0f, calmSize, calmAmp, calmStorm);
-	WindShape(0.4f, breezeSize, breezeAmp, breezeStorm);
-	WindShape(1.2f, stormSize, stormAmp, stormStorm);
-	Expect(calmStorm == 0.0f && stormStorm == 1.0f, "storm blend is 0 in a calm and 1 at wind 1.2");
-	Expect(calmSize < breezeSize && breezeSize < stormSize, "wavelength grows from ripples to a breeze to a storm");
-	Expect(calmAmp < stormAmp, "amplitude grows from a calm to a storm");
-	float midA = 0, midB = 0, unusedA = 0, unusedB = 0, unusedC = 0, unusedD = 0;
-	WindShape(0.70f, midA, unusedA, unusedC);
-	WindShape(0.72f, midB, unusedB, unusedD);
-	Expect(std::fabs(midA - midB) < 0.08f, "wavelength changes smoothly across a small wind step");
+	const WaveResponse calm = WaveResponseAt(0.0f);
+	const WaveResponse breeze = WaveResponseAt(0.42f);
+	const WaveResponse storm = WaveResponseAt(1.05f);
+	const WaveResponse pastStorm = WaveResponseAt(1.5f);
+	Expect(calm.amplitude < breeze.amplitude && breeze.amplitude < storm.amplitude, "calm swell is smaller than a breeze, which is smaller than a storm");
+	Expect(calm.spread > breeze.spread && breeze.spread > storm.spread, "spread narrows as the wind rises so the swell runs with the wind");
+	Expect(calm.length < breeze.length && breeze.length < storm.length, "wavelength grows with the wind");
+	Expect(std::fabs(breeze.amplitude - 0.72f) < 1.0e-4f && std::fabs(breeze.storm - 0.08f) < 1.0e-4f, "the two weather segments meet at the breeze anchor");
+	Expect(std::fabs(pastStorm.amplitude - storm.amplitude) < 1.0e-4f && std::fabs(pastStorm.storm - 1.0f) < 1.0e-4f, "wind past the storm anchor stays on the storm");
+	const WaveResponse stepA = WaveResponseAt(0.70f);
+	const WaveResponse stepB = WaveResponseAt(0.72f);
+	Expect(std::fabs(stepA.amplitude - stepB.amplitude) < 0.08f && std::fabs(stepA.length - stepB.length) < 0.08f, "a small wind step does not pop the swell");
+	Expect(disabled.jacobian == 1.0f && river.jacobian == 1.0f, "disabled and flowmap water keep a flat jacobian");
 
-	auto peak = [](float wind) {
-		Params p{};
-		p.enabled = true;
-		p.amplitude = 22.0f;
-		p.chop = 0.6f;
-		p.scale = 1.0f;
-		p.windSpeed = wind;
-		p.time = 3.0f;
-		float m = 0.0f;
-		for (int y = 0; y < 12; ++y)
-			for (int x = 0; x < 12; ++x)
-				m = std::max(m, std::fabs(Evaluate(x * 90.0f, y * 70.0f, 20.0f, -15.0f, p, false).height));
-		return m;
-	};
-	Expect(peak(0.0f) < peak(0.4f) && peak(0.4f) < peak(1.2f), "a sampled patch is taller as the wind rises");
+	Params flat = sea;
+	flat.chop = 0.0f;
+	flat.windSpeed = 1.2f;
+	bool flatFold = true;
+	for (int i = 0; i < 16 && flatFold; ++i) {
+		flat.time = static_cast<float>(i) * 0.37f;
+		const Sample s = Evaluate(static_cast<float>(i) * 80.0f, static_cast<float>(i) * -35.0f, 10.0f, 4.0f, flat, false);
+		if (std::fabs(s.jacobian - 1.0f) > 1.0e-3f)
+			flatFold = false;
+	}
+	Expect(flatFold, "chop 0 leaves the jacobian at 1");
+
+	Params steep = sea;
+	steep.chop = 1.5f;
+	steep.windSpeed = 1.2f;
+	steep.amplitude = 40.0f;
+	float lowestJ = 1.0f;
+	for (int i = 0; i < 48; ++i) {
+		steep.time = static_cast<float>(i) * 0.17f;
+		const Sample s = Evaluate(1200.0f + static_cast<float>(i) * 17.0f, -400.0f, 20.0f, 8.0f, steep, false);
+		lowestJ = std::min(lowestJ, s.jacobian);
+	}
+	Expect(lowestJ < 0.9f, "a steep storm folds at least one crest");
+
+	const WaveRgb scene{ 0.4f, 0.2f, 0.1f };
+	const WaveRgb white{ 1.0f, 1.0f, 1.0f };
+	const WaveRgb blue{ 0.0f, 0.0f, 1.0f };
+	const WaveRgb shallow = WaveAbsorb(scene, 0.0f, 0.0f, 0.0f, white, white);
+	Expect(std::fabs(shallow.r - scene.r) < 1.0e-5f && std::fabs(shallow.g - scene.g) < 1.0e-5f && std::fabs(shallow.b - scene.b) < 1.0e-5f, "a zero path returns the scene");
+	Expect(WaveOpacity(0.0f, 0.0f) == 0.0f, "a zero path is fully clear");
+	const float shallowOpacity = WaveOpacity(40.0f, 0.0f);
+	const float deepOpacity = WaveOpacity(900.0f, 0.0f);
+	Expect(shallowOpacity < 0.35f, "a short path stays mostly clear");
+	Expect(deepOpacity > 0.75f, "a long path is mostly opaque");
+	Expect(WaveOpacity(200.0f, 1.0f) > WaveOpacity(200.0f, 0.0f), "murk hides the bottom sooner than clear water");
+
+	const WaveRgb shallowTint = WaveScatter(0.0f, 0.0f, white, white);
+	Expect(shallowTint.g > shallowTint.r && shallowTint.b > shallowTint.r && shallowTint.r < 0.1f, "clear shallows scatter turquoise, not red");
+	const WaveRgb deepTint = WaveScatter(800.0f, 0.0f, white, white);
+	Expect(deepTint.r < 0.05f && deepTint.g < 0.1f && deepTint.b < 0.1f, "deep scatter stays dark");
+	const WaveRgb authoredBlue = WaveScatter(800.0f, 0.0f, blue, blue);
+	const float deepLum = authoredBlue.r * 0.25f + authoredBlue.g * 0.50f + authoredBlue.b * 0.25f;
+	Expect(deepLum < 0.2f, "an authored blue only tints the deep scatter, it does not replace it with a flat blue");
+	const WaveRgb mud = WaveScatter(0.0f, 1.0f, white, white);
+	Expect(mud.r > shallowTint.r && mud.g < shallowTint.g, "rain and storm murk shifts the shallow scatter off turquoise");
 
 	if (fails) {
 		std::cerr << fails << " failed\n";

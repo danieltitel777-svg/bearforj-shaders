@@ -1,6 +1,7 @@
 #include "WaterWaves.h"
 
 #include "Bearforj/TipUI.h"
+#include "Features/Wind/Wind.h"
 #include "SubmersionWetness.h"
 
 #include "../I18n/I18n.h"
@@ -48,7 +49,9 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	SeaScale,
 	InteriorScale,
 	MaxTessFactor,
-	TessRange)
+	TessRange,
+	Foam,
+	Detail)
 
 namespace
 {
@@ -147,16 +150,96 @@ WaterWaveMath::Params WaterWaves::MakeParams(bool a_flowmap) const
 	if (params.enabled) {
 		params.scale = std::max(Util::IsInterior() ? settings.InteriorScale : settings.SeaScale, 0.0f);
 	}
-	// One wind source. The game blends sky->windSpeed across a weather change.
-	// Dynamic Wind Framework writes these same fields when it is installed, so it is shared
-	// and is not read again from its own plugin.
-	if (auto* sky = RE::Sky::GetSingleton()) {
-		if (std::isfinite(sky->windSpeed))
-			params.windSpeed = std::clamp(sky->windSpeed, 0.0f, 1.5f);
-		if (std::isfinite(sky->windAngle))
-			params.windAngle = sky->windAngle;
-	}
+	params.windSpeed = smoothedWind.load(std::memory_order_relaxed);
+	params.windAngle = smoothedAngle.load(std::memory_order_relaxed);
 	return params;
+}
+
+bool WaterWaves::ReadSharedWind(float& a_speed, float& a_angle) const
+{
+	auto& wind = globals::features::wind;
+	if (!wind.loaded)
+		return false;
+	const float blend = std::clamp(wind.windFieldTransitionBlend, 0.0f, 1.0f);
+	const float3 transitionVelocity = wind.windFieldTransition.direction * wind.windFieldTransition.speed;
+	const float3 selected = wind.windFieldSelectedVelocity;
+	const float3 velocity = transitionVelocity + (selected - transitionVelocity) * blend;
+	const float speed = std::hypot(velocity.x, velocity.y);
+	if (!std::isfinite(speed))
+		return false;
+	a_speed = speed;
+	if (speed > 0.0001f)
+		a_angle = std::atan2(velocity.y, velocity.x);
+	else if (auto* sky = RE::Sky::GetSingleton(); sky && std::isfinite(sky->windAngle))
+		a_angle = sky->windAngle;
+	else
+		a_angle = smoothedAngle.load(std::memory_order_relaxed);
+	return true;
+}
+
+float WaterWaves::RainTarget() const
+{
+	auto* sky = RE::Sky::GetSingleton();
+	if (!sky)
+		return 0.0f;
+	const float pct = std::isfinite(sky->currentWeatherPct) ? std::clamp(sky->currentWeatherPct, 0.0f, 1.0f) : 1.0f;
+	auto weight = [&](const RE::TESWeather* weather, bool current) {
+		if (!weather || !weather->data.flags.any(RE::TESWeather::WeatherDataFlag::kRainy))
+			return 0.0f;
+		if (current) {
+			const float fadeIn = static_cast<float>(weather->data.precipitationBeginFadeIn) * (1.0f / 255.0f);
+			if (fadeIn >= 1.0f)
+				return pct >= 1.0f ? 1.0f : 0.0f;
+			return std::clamp((pct - fadeIn) / (1.0f - fadeIn), 0.0f, 1.0f);
+		}
+		const float fadeOut = static_cast<float>(weather->data.precipitationEndFadeOut) * (1.0f / 255.0f);
+		if (fadeOut <= 0.0f)
+			return pct <= 0.0f ? 1.0f : 0.0f;
+		return 1.0f - std::clamp(pct / fadeOut, 0.0f, 1.0f);
+	};
+	return std::clamp(weight(sky->currentWeather, true) + weight(sky->lastWeather, false), 0.0f, 1.0f);
+}
+
+void WaterWaves::UpdateWeather()
+{
+	float targetSpeed = 0.0f;
+	float targetAngle = smoothedAngle.load(std::memory_order_relaxed);
+	if (!ReadSharedWind(targetSpeed, targetAngle)) {
+		if (auto* sky = RE::Sky::GetSingleton()) {
+			if (std::isfinite(sky->windSpeed))
+				targetSpeed = sky->windSpeed;
+			if (std::isfinite(sky->windAngle))
+				targetAngle = sky->windAngle;
+		}
+	}
+	targetSpeed = std::clamp(targetSpeed, 0.0f, 1.5f);
+	if (!std::isfinite(targetAngle))
+		targetAngle = 0.0f;
+	const float targetRain = RainTarget();
+	float dt = 0.0f;
+	if (!(globals::game::ui && globals::game::ui->GameIsPaused()))
+		dt = std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, 0.1f);
+	if (!weatherInit.load(std::memory_order_relaxed)) {
+		smoothedWind.store(targetSpeed, std::memory_order_relaxed);
+		smoothedAngle.store(targetAngle, std::memory_order_relaxed);
+		smoothedRain.store(targetRain, std::memory_order_relaxed);
+		weatherInit.store(true, std::memory_order_relaxed);
+		return;
+	}
+	const float k = 1.0f - std::exp(-dt * 1.4f);
+	const float speed = smoothedWind.load(std::memory_order_relaxed);
+	smoothedWind.store(speed + (targetSpeed - speed) * k, std::memory_order_relaxed);
+	const float angle = smoothedAngle.load(std::memory_order_relaxed);
+	const float currentX = std::cos(angle);
+	const float currentY = std::sin(angle);
+	const float targetX = std::cos(targetAngle);
+	const float targetY = std::sin(targetAngle);
+	const float mixedX = currentX + (targetX - currentX) * k;
+	const float mixedY = currentY + (targetY - currentY) * k;
+	if (std::hypot(mixedX, mixedY) > 1.0e-4f)
+		smoothedAngle.store(std::atan2(mixedY, mixedX), std::memory_order_relaxed);
+	const float rain = smoothedRain.load(std::memory_order_relaxed);
+	smoothedRain.store(rain + (targetRain - rain) * k, std::memory_order_relaxed);
 }
 
 bool WaterWaves::CellUsesFlowmap(const RE::TESObjectREFR* a_ref) const
@@ -190,7 +273,7 @@ float WaterWaves::DisplacedHeight(const RE::TESObjectREFR* a_ref, const RE::NiPo
 	return a_flatHeight + sample.height * damp;
 }
 
-void WaterWaves::ApplyShared(float& a_displacedHeight, float& a_cameraBelow, float& a_scale, float& a_amplitude, float& a_chop, float& a_shore, float& a_windSpeed, float& a_windAngle, float& a_shoreOriginX, float& a_shoreOriginY, float& a_shoreCellSize, float& a_shoreCellCount)
+void WaterWaves::ApplyShared(float& a_displacedHeight, float& a_cameraBelow, float& a_scale, float& a_amplitude, float& a_chop, float& a_shore, float& a_windSpeed, float& a_windAngle, float& a_shoreOriginX, float& a_shoreOriginY, float& a_shoreCellSize, float& a_shoreCellCount, float& a_foam, float& a_detail, float& a_murk, float& a_storm)
 {
 	a_displacedHeight = -RE::NI_INFINITY;
 	a_cameraBelow = 0.0f;
@@ -200,12 +283,23 @@ void WaterWaves::ApplyShared(float& a_displacedHeight, float& a_cameraBelow, flo
 	a_shore = std::max(settings.ShoreLength, 1.0f);
 	a_windSpeed = 0.0f;
 	a_windAngle = 0.0f;
+	a_foam = 0.0f;
+	a_detail = 0.0f;
+	a_murk = 0.0f;
+	a_storm = 0.0f;
 	a_shoreOriginX = 0.0f;
 	a_shoreOriginY = 0.0f;
 	a_shoreCellSize = 0.0f;
 	a_shoreCellCount = static_cast<float>(kShoreCells);
 	if (!loaded || !settings.Enabled)
 		return;
+	UpdateWeather();
+	const WaterWaveMath::WaveResponse weather = WaterWaveMath::WaveResponseAt(smoothedWind.load(std::memory_order_relaxed));
+	const float rain = smoothedRain.load(std::memory_order_relaxed);
+	a_foam = std::clamp(settings.Foam, 0.0f, 2.0f);
+	a_detail = std::clamp(settings.Detail, 0.0f, 2.0f);
+	a_storm = std::clamp(weather.storm, 0.0f, 1.0f);
+	a_murk = std::clamp(weather.storm * 0.55f + rain * 0.85f, 0.0f, 1.0f);
 	UpdateShoreGrid();
 	a_shoreOriginX = shoreOriginX;
 	a_shoreOriginY = shoreOriginY;
@@ -233,18 +327,11 @@ void WaterWaves::ApplyShared(float& a_displacedHeight, float& a_cameraBelow, flo
 
 	if (!tessCB)
 		return;
-	float windSize = 1.0f;
-	float windAmp = 1.0f;
-	float storm = 0.0f;
-	WaterWaveMath::WindShape(params.windSpeed, windSize, windAmp, storm);
-	const float slider = std::clamp(settings.MaxTessFactor, 1.0f, 8.0f);
-	// Long storm waves stay shaped with fewer new triangles. Ripples keep the slider.
-	const float cap = std::lerp(slider, std::max(slider * 0.5f, 2.0f), storm);
 	const float data[4] = {
-		slider,
+		std::clamp(settings.MaxTessFactor, 1.0f, 8.0f),
 		std::max(settings.TessRange, 1.0f),
 		params.enabled ? 1.0f : 0.0f,
-		std::clamp(cap, 1.0f, 8.0f)
+		0.0f
 	};
 	D3D11_MAPPED_SUBRESOURCE mapped{};
 	if (SUCCEEDED(globals::d3d::context->Map(tessCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -524,7 +611,7 @@ void WaterWaves::DrawSettings()
 	BFUI::Checkbox(T(TKEY("enabled"), "Enabled"), &settings.Enabled);
 	BFUI::SliderFloat(T(TKEY("amplitude"), "Wave Height"), &settings.Amplitude, 0.0f, 80.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::Text("%s", T(TKEY("amplitude_tt"), "Height of the longest wave, in game units, before the sky wind scales it. Calm wind shortens this into ripples. A storm stretches it into long waves. The height fades to a flat plane between 4000 and 7000 units."));
+		ImGui::Text("%s", T(TKEY("amplitude_tt"), "Height of the longest wave, in game units, before the weather scales it. Calm wind keeps this small. It fades to a flat plane between 4000 and 7000 units."));
 	BFUI::SliderFloat(T(TKEY("chop"), "Chop"), &settings.Chop, 0.0f, 1.5f, "%.2f");
 	BFUI::SliderFloat(T(TKEY("shore"), "Shore Length"), &settings.ShoreLength, 16.0f, 600.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())
@@ -534,8 +621,13 @@ void WaterWaves::DrawSettings()
 	BFUI::SliderFloat(T(TKEY("max_tess"), "Tessellation"), &settings.MaxTessFactor, 1.0f, 8.0f, "%.0f");
 	BFUI::SliderFloat(T(TKEY("tess_range"), "Tessellation Range"), &settings.TessRange, 256.0f, 4096.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::Text("%s", T(TKEY("tess_tt"), "Extra triangles near the camera, falling off with distance the same way raised ground does. At the range the factor is 1, so far water stays the original mesh. A storm uses a lower factor because its waves are long. Rivers and waterfalls are not moved."));
-	ImGui::TextDisabled("%s", T(TKEY("wind_tt"), "Length follows the sky wind. Calm is ripples, a breeze is larger waves along the wind, a storm is long waves with foam on the crests. The change is smooth. Dynamic Wind Framework is optional: it writes this same sky wind, so it is shared and not read a second time."));
+		ImGui::Text("%s", T(TKEY("tess_tt"), "Extra triangles near the camera, and only while the swell is large enough to need them. Calm water stays on the original mesh. At factor 1 the surface matches that mesh. Rivers and waterfalls are not moved."));
+	BFUI::SliderFloat(T(TKEY("foam"), "Foam"), &settings.Foam, 0.0f, 2.0f, "%.2f");
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text("%s", T(TKEY("foam_tt"), "White water on the shore, around rocks, and on storm crests. Crest foam grows with the wind."));
+	BFUI::SliderFloat(T(TKEY("detail"), "Detail"), &settings.Detail, 0.0f, 2.0f, "%.2f");
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text("%s", T(TKEY("detail_tt"), "Fine ripples on top of the swells. Two rotated samples of one normal map, so the pattern does not tile."));
 }
 
 void WaterWaves::LoadSettings(json& o_json)
