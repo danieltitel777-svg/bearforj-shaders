@@ -593,6 +593,7 @@ public:
 		float ShoreOriginY;
 		float ShoreCellSize;
 		float ShoreCellCount;
+		float4 WaveLook;  // x foam, y detail, z murk, w storm
 	};
 	STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
 	// Each float4 cbuffer field must start on a 16-byte boundary to match the HLSL SharedData
@@ -613,6 +614,7 @@ public:
 	static_assert(offsetof(SharedDataCB, WindFieldTransientImpulses) % 16 == 0);
 	static_assert(offsetof(SharedDataCB, WindFieldPreviousTransientImpulses) % 16 == 0);
 	static_assert(offsetof(SharedDataCB, ShoreOriginX) % 16 == 0);
+	static_assert(offsetof(SharedDataCB, WaveLook) % 16 == 0);
 	static_assert(sizeof(SharedDataCB) <= D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT * 16);
 
 	std::unique_ptr<ConstantBuffer> sharedDataCB;

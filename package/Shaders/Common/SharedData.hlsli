@@ -62,6 +62,7 @@ namespace SharedData
 		float ShoreOriginY;
 		float ShoreCellSize;
 		float ShoreCellCount;
+		float4 WaveLook;  // x foam, y detail, z murk, w storm. Mirrors State::SharedDataCB.
 	};
 
 	struct GrassLightingSettings

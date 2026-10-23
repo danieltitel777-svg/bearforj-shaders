@@ -1547,7 +1547,7 @@ void State::UpdateSharedData([[maybe_unused]] bool a_inWorld, [[maybe_unused]] b
 			}
 		}
 
-		globals::features::waterWaves.ApplyShared(data.DisplacedWaterHeight, data.CameraBelowWaves, data.WaveScale, data.WaveAmplitude, data.WaveChop, data.WaveShore, data.WindFieldTransitionData.z, data.WindFieldTransitionData.w, data.ShoreOriginX, data.ShoreOriginY, data.ShoreCellSize, data.ShoreCellCount);
+		globals::features::waterWaves.ApplyShared(data.DisplacedWaterHeight, data.CameraBelowWaves, data.WaveScale, data.WaveAmplitude, data.WaveChop, data.WaveShore, data.WindFieldTransitionData.z, data.WindFieldTransitionData.w, data.ShoreOriginX, data.ShoreOriginY, data.ShoreCellSize, data.ShoreCellCount, data.WaveLook.x, data.WaveLook.y, data.WaveLook.z, data.WaveLook.w);
 
 		data.InInterior = Util::IsInterior();
 		data.HasDirectionalShadows = HasDirectionalShadows();
