@@ -1107,7 +1107,7 @@ void LightLimitFix::SetExtLightData(RE::NiLight* niLight, const RE::TESObjectLIG
 {
 	const auto runtimeData = LLFCommon::RuntimeLightDataExt::Get(niLight);
 	runtimeData->flags.set(LightFlags::Initialised);
-	if (settings.ForceInverseSquare || ligh->data.flags.any(static_cast<RE::TES_LIGHT_FLAGS>(LLFCommon::TES_LIGHT_FLAGS_EXT::kInverseSquare)))
+	if (globals::features::lightLimitFix.settings.ForceInverseSquare || ligh->data.flags.any(static_cast<RE::TES_LIGHT_FLAGS>(LLFCommon::TES_LIGHT_FLAGS_EXT::kInverseSquare)))
 		runtimeData->flags.set(LightFlags::InverseSquare);
 	if (ligh->data.flags.any(static_cast<RE::TES_LIGHT_FLAGS>(LLFCommon::TES_LIGHT_FLAGS_EXT::kLinear)))
 		runtimeData->flags.set(LightFlags::Linear);
