@@ -822,7 +822,7 @@ void WetnessEffects::DrawCharacterRainSettings()
 	if (BFUI::Checkbox(T(TKEY("enable_character_rain_spots"), "Enable Character Wet Drops"), &enabled))
 		settings.EnableCharacterRainSpots = enabled;
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextUnformatted(T(TKEY("character_rain_spots_tooltip"), "Droplets on skin, clothing, armor and hair. In the rain they cover the whole character and run downward. When the rain stops they sit on the wet parts only and fade as those parts dry."));
+		ImGui::TextUnformatted(T(TKEY("character_rain_spots_tooltip"), "Three reflective water layers on compatible opaque skin, clothing and armor: tiny settled beads, fresh arriving drops, and long flowing rivulets. Activity follows Wetness rather than rain-particle visibility. Equipped weapons use stationary beads and a wet sheen instead of trails. All patterns remain attached to their model and require Enable Wetness."));
 	ImGui::EndDisabled();
 
 	const bool characterEffectsDisabled = !settings.EnableWetnessEffects || !settings.EnableCharacterRainSpots;
@@ -834,7 +834,7 @@ void WetnessEffects::DrawCharacterRainSettings()
 	BFUI::SliderFloat(T(TKEY("character_dry_time"), "Character Dry Time"), &settings.CharacterDryTime,
 		CharacterRainSettingLimits::kMinimumDryTime, CharacterRainSettingLimits::kMaximumDryTime, "%.0f sec");
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextUnformatted(T(TKEY("character_dry_time_tooltip"), "Seconds for a soaked character to dry back to damp, then dry, after the rain stops or they leave the water. The drying speed slider and the weather scale this."));
+		ImGui::TextUnformatted(T(TKEY("character_dry_time_tooltip"), "How long broad retained character sheen takes to fade after global weather wetness falls. Cover immediately suppresses localized beads, impacts, and rivulets; shelter does not start a separate per-character dry timer."));
 	BFUI::SliderFloat(T(TKEY("drying_speed"), "Drying Speed"), &dryingSpeed, 0.2f, 4.0f, "%.2fx");
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::TextUnformatted(T(TKEY("drying_speed_tooltip"), "How fast skin, hair and armor dry after rain or wading. 1 is the dry time above. Drying is faster indoors, in sunlight, and next to a flame, and slower in snow or thick fog."));
@@ -857,7 +857,7 @@ void WetnessEffects::DrawCharacterRainSettings()
 	ImGui::BeginDisabled(!settings.EnableWetnessEffects);
 	BFUI::SliderFloat(T(TKEY("hair_wetness"), "Hair Wetness"), &settings.HairWetness, 0.0f, 1.0f);
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextUnformatted(T(TKEY("hair_wetness_tooltip"), "How strongly hair darkens, glosses and clumps when it is wet. Hair uses the same staged soak and dry as the body, and it gets rain droplets too."));
+		ImGui::TextUnformatted(T(TKEY("hair_wetness_tooltip"), "Controls the existing uniform rain-wetness response on character hair. It is separate from model-attached drops and trails."));
 	ImGui::EndDisabled();
 	ImGui::BeginDisabled(characterEffectsDisabled);
 	BFUI::SliderFloat(T(TKEY("character_coat_intensity"), "Droplet Coat / Highlight Intensity"), &settings.CharacterCoatIntensity,

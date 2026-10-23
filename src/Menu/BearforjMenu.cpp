@@ -9,6 +9,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "Bearforj/Analyzer.h"
@@ -400,13 +401,37 @@ namespace
 		ImGui::PopID();
 	}
 
+	const char* SlotLabel(const char* id)
+	{
+		const std::string_view slot = id ? id : "";
+		if (slot == "clear")
+			return T("bearforj.presets.slot.clear", "Clear");
+		if (slot == "cloudy")
+			return T("bearforj.presets.slot.cloudy", "Cloudy");
+		if (slot == "rain")
+			return T("bearforj.presets.slot.rain", "Rain");
+		if (slot == "storm")
+			return T("bearforj.presets.slot.storm", "Storm");
+		if (slot == "snow")
+			return T("bearforj.presets.slot.snow", "Snow");
+		if (slot == "blizzard")
+			return T("bearforj.presets.slot.blizzard", "Blizzard");
+		if (slot == "fog")
+			return T("bearforj.presets.slot.fog", "Fog");
+		if (slot == "ash")
+			return T("bearforj.presets.slot.ash", "Ash / volcanic");
+		if (slot == "aurora_night")
+			return T("bearforj.presets.slot.aurora_night", "Aurora night");
+		return id;
+	}
+
 	void DrawWeatherPresets()
 	{
 		namespace WP = Bearforj::WeatherPresets;
 		ImGui::Spacing();
 		MonoLabel(T("bearforj.presets.title", "WEATHER // PRESETS"));
 		bool changed = ImGui::Checkbox(T("bearforj.presets.enable", "Switch the look by current weather"), &WP::Enabled());
-		ImGui::TextDisabled("%s: %s  //  %s: %s", T("bearforj.presets.now_weather", "Now"), WP::kSlotIds[WP::CurrentSlot()],
+		ImGui::TextDisabled("%s: %s  //  %s: %s", T("bearforj.presets.now_weather", "Now"), SlotLabel(WP::kSlotIds[WP::CurrentSlot()]),
 			T("bearforj.presets.now_preset", "preset"), WP::ActivePresetName().empty() ? "-" : WP::ActivePresetName().c_str());
 		const auto& presets = WP::GetPresets();
 		auto combo = [&](const char* label, std::string& value, const char* empty) {
@@ -432,7 +457,7 @@ namespace
 			if (v.empty())
 				v = "Auto";
 			ImGui::SetNextItemWidth(260.0f);
-			combo(std::format("{}##slot", T(std::format("bearforj.presets.slot.{}", id).c_str(), id)).c_str(), v, "Auto");
+			combo(std::format("{}##slot", SlotLabel(id)).c_str(), v, "Auto");
 		}
 		ImGui::EndDisabled();
 		// direct editing of any preset (live preview; Save writes the file)
@@ -451,7 +476,7 @@ namespace
 				auto sliders = [](const char* tag, WP::Look& l) {
 					ImGui::PushID(tag);
 					MonoLabel(tag);
-					ImGui::SliderFloat(T("bearforj_look.tonemap", "Warm ACES Look"), &l.TonemapStrength, 0.0f, 1.0f, "%.2f");
+					ImGui::SliderFloat(T("bearforj_look.tonemap", "Crimson filmic look"), &l.TonemapStrength, 0.0f, 1.0f, "%.2f");
 					ImGui::SliderFloat(T("bearforj_look.warmth", "Warmth"), &l.Warmth, 0.0f, 1.0f, "%.2f");
 					ImGui::SliderFloat(T("bearforj_look.night_lift", "Night Moonlight Lift"), &l.NightLift, 0.0f, 1.5f, "%.2f");
 					ImGui::SliderFloat(T("bearforj_look.aurora_snow", "Aurora Light on Snow"), &l.AuroraSnow, 0.0f, 2.0f, "%.2f");
@@ -521,7 +546,7 @@ namespace
 				if (ImGui::IsItemHovered()) {
 					ImGui::BeginTooltip();
 					ImGui::TextUnformatted(p->id.c_str());
-					ImGui::TextDisabled("%s %.2f  %s %.2f  %s %.2f  %s %.0f%%", T("bearforj_look.tonemap", "Warm ACES Look"), p->day.TonemapStrength,
+					ImGui::TextDisabled("%s %.2f  %s %.2f  %s %.2f  %s %.0f%%", T("bearforj_look.tonemap", "Crimson filmic look"), p->day.TonemapStrength,
 						T("bearforj_look.warmth", "Warmth"), p->day.Warmth, T("bearforj_look.night_lift", "Night Moonlight Lift"), p->day.NightLift,
 						T("bearforj_look.tonemap_mix", "Bearforj tonemap mix"), p->day.TonemapMix);
 					ImGui::TextUnformatted(locked ? T("bearforj.presets.click_unlock", "Click to unlock (back to auto by weather).") :
@@ -609,21 +634,39 @@ namespace
 	// Conflict detector: badge in the header + popup with a worried Mish Mish. Never disables anything itself.
 	std::string ConflictText(const Bearforj::Compat::ConflictInfo& c, const char* a_part)
 	{
-		static const std::map<std::string, std::pair<const char*, const char*>> en = {
-			{ "enb", { "ENB replaces the same render passes; Bearforj effects, Linear Lighting and particles can break or double up.", "Remove ENB (d3d11.dll + enbseries) or don't use Bearforj with it." } },
-			{ "reshade", { "ReShade runs after Bearforj; its tonemap / AO / bloom stack on top of ours.", "Turn off ReShade tonemap/AO/bloom, or lower Bearforj tonemap mix." } },
-			{ "second_shader_dll", { "A second Community/Open Shaders DLL is installed; both hook the same shaders.", "Delete the other shader DLL, keep only Bearforj." } },
-			{ "deformable_terrain", { "Another deformable-terrain mod also changes landscape height; footprints will double or flicker.", "Turn off Bearforj Terrain Deformation, or disable the other mod." } },
-			{ "footprints", { "Footprints mod also leaves prints; you get two sets.", "Turn off Bearforj Terrain Deformation or the Footprints mod." } },
-			{ "particle_engine", { "Another precipitation/particle engine draws rain or snow too; precipitation doubles.", "Turn off the other mod's rain/snow particles." } },
-			{ "embers", { "Embers mod adds fire embers; together with Bearforj spark particles fires look overloaded.", "Lower Physical Effect Particles, or keep only one embers mod." } },
-			{ "splashes", { "Splashes mod adds hit/rain splashes; Bearforj Physical Effect Particles does that too.", "Turn off Physical Effect Particles or the other mod." } },
-			{ "fog_mod", { "Fog mod adds volumetric fog; with Height Fog it gets too thick.", "Lower or turn off Bearforj Height Fog." } },
-			{ "wet_and_cold", { "Wet and Cold makes characters wet too; wetness doubles.", "Turn off Submersion Wetness or Wet and Cold wetness." } },
-		};
-		auto it = en.find(c.id);
-		const char* def = it == en.end() ? "" : (std::string(a_part) == "what" ? it->second.first : it->second.second);
-		return T(("bearforj.conflict." + c.id + "." + a_part).c_str(), def);
+		const std::string part = a_part;
+		const bool what = part == "what";
+		if (c.id == "enb")
+			return what ? T("bearforj.conflict.enb.what", "ENB replaces the same render passes; Bearforj effects, Linear Lighting and particles can break or double up.")
+			            : T("bearforj.conflict.enb.fix", "Remove ENB (d3d11.dll + enbseries) or don't use Bearforj with it.");
+		if (c.id == "reshade")
+			return what ? T("bearforj.conflict.reshade.what", "ReShade runs after Bearforj; its tonemap / AO / bloom stack on top of ours.")
+			            : T("bearforj.conflict.reshade.fix", "Turn off ReShade tonemap/AO/bloom, or lower Bearforj tonemap mix.");
+		if (c.id == "second_shader_dll")
+			return what ? T("bearforj.conflict.second_shader_dll.what", "A second Community/Bearforj Shaders DLL is installed; both hook the same shaders.")
+			            : T("bearforj.conflict.second_shader_dll.fix", "Delete the other shader DLL, keep only Bearforj.");
+		if (c.id == "deformable_terrain")
+			return what ? T("bearforj.conflict.deformable_terrain.what", "Another deformable-terrain mod also changes landscape height; footprints will double or flicker.")
+			            : T("bearforj.conflict.deformable_terrain.fix", "Turn off Bearforj Terrain Deformation, or disable the other mod.");
+		if (c.id == "footprints")
+			return what ? T("bearforj.conflict.footprints.what", "Footprints mod also leaves prints; you get two sets.")
+			            : T("bearforj.conflict.footprints.fix", "Turn off Bearforj Terrain Deformation or the Footprints mod.");
+		if (c.id == "particle_engine")
+			return what ? T("bearforj.conflict.particle_engine.what", "Another precipitation/particle engine draws rain or snow too; precipitation doubles.")
+			            : T("bearforj.conflict.particle_engine.fix", "Turn off the other mod's rain/snow particles.");
+		if (c.id == "embers")
+			return what ? T("bearforj.conflict.embers.what", "Embers mod adds fire embers; together with Bearforj spark particles fires look overloaded.")
+			            : T("bearforj.conflict.embers.fix", "Lower Physical Effect Particles, or keep only one embers mod.");
+		if (c.id == "splashes")
+			return what ? T("bearforj.conflict.splashes.what", "Splashes mod adds hit/rain splashes; Bearforj Physical Effect Particles does that too.")
+			            : T("bearforj.conflict.splashes.fix", "Turn off Physical Effect Particles or the other mod.");
+		if (c.id == "fog_mod")
+			return what ? T("bearforj.conflict.fog_mod.what", "Fog mod adds volumetric fog; with Height Fog it gets too thick.")
+			            : T("bearforj.conflict.fog_mod.fix", "Lower or turn off Bearforj Height Fog.");
+		if (c.id == "wet_and_cold")
+			return what ? T("bearforj.conflict.wet_and_cold.what", "Wet and Cold makes characters wet too; wetness doubles.")
+			            : T("bearforj.conflict.wet_and_cold.fix", "Turn off Submersion Wetness or Wet and Cold wetness.");
+		return {};
 	}
 
 	void DrawConflictBanner()

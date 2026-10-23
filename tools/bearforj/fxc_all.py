@@ -86,12 +86,27 @@ OVERRIDES = {
 jobs = [j for j in jobs if j[0] not in OVERRIDES] + [(f, "cs_5_0" if "CS" in f else "ps_5_0", "main", d) for f, ds in OVERRIDES.items() for d in ds]
 ONLY = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
 if ONLY: jobs = [j for j in jobs if re.search(ONLY, j[0])]
-FXC = "/workspace/bearforj/fxc/fxcw.exe"
+FXC = os.environ.get("FXCW") or "/workspace/bearforj/fxc/fxcw.exe"
+NATIVE_FXC = os.environ.get("FXC")
+
+def compile_command(sh, prof, entry, defs):
+    """fxcw.exe (wine) prints RESULT OK. Native fxc.exe is the Windows SDK compiler."""
+    if NATIVE_FXC and os.path.isfile(NATIVE_FXC):
+        cmd = [NATIVE_FXC, "/nologo", "/T", prof, "/E", entry, "/I", root]
+        for define in defs:
+            cmd.extend(["/D", define])
+        cmd.append(sh)
+        return cmd, True
+    return ["wine", FXC, sh, entry, prof] + defs, False
+
 def run(j):
     sh, prof, entry, defs = j
     if not os.path.exists(os.path.join(root, sh)): return j, False, ["missing file"]
-    r = subprocess.run(["wine", FXC, sh, entry, prof] + defs, cwd=root, capture_output=True, text=True, errors="ignore", env={**os.environ, "WINEDEBUG": "-all"})
-    return j, "RESULT OK" in r.stdout, [l.strip() for l in r.stdout.splitlines() if "error" in l.lower()]
+    cmd, native = compile_command(sh, prof, entry, defs)
+    r = subprocess.run(cmd, cwd=root, capture_output=True, text=True, errors="ignore", env={**os.environ, "WINEDEBUG": "-all"})
+    text = (r.stdout or "") + "\n" + (r.stderr or "")
+    ok = r.returncode == 0 if native else "RESULT OK" in r.stdout
+    return j, ok, [l.strip() for l in text.splitlines() if "error" in l.lower()]
 seen = set(); uniq = []
 for j in jobs:
     k = (j[0], j[1], j[2], tuple(sorted(j[3])))

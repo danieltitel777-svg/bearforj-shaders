@@ -145,7 +145,7 @@ void CSEditor::DrawLauncherButton()
 	const bool canOpen = loaded && EditorWindow::CanBeOpen();
 	ImGui::BeginDisabled(!canOpen);
 	ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.5f));
-	if (ImGui::Button(T(TKEY("open_editor"), "Open OS Editor"), { -1, 0 }))
+	if (ImGui::Button(T(TKEY("open_editor"), "Open BF Editor"), { -1, 0 }))
 		OpenEditorWindow();
 	ImGui::PopStyleVar();
 	ImGui::EndDisabled();
@@ -153,11 +153,11 @@ void CSEditor::DrawLauncherButton()
 	if (!canOpen) {
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			if (!loaded) {
-				ImGui::Text("%s", T(TKEY("open_editor_not_loaded_tooltip"), "OS Editor is not loaded."));
+				ImGui::Text("%s", T(TKEY("open_editor_not_loaded_tooltip"), "BF Editor is not loaded."));
 			} else if (globals::state->isLoadingMenuOpen) {
-				ImGui::Text("%s", T(TKEY("open_editor_loading_tooltip"), "OS Editor cannot be opened during a loading screen."));
+				ImGui::Text("%s", T(TKEY("open_editor_loading_tooltip"), "BF Editor cannot be opened during a loading screen."));
 			} else {
-				ImGui::Text("%s", T(TKEY("open_editor_enter_world_tooltip"), "Enter the game world to open OS Editor."));
+				ImGui::Text("%s", T(TKEY("open_editor_enter_world_tooltip"), "Enter the game world to open BF Editor."));
 			}
 		}
 	}
