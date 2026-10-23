@@ -138,7 +138,7 @@ void Skin::DrawParameters(SkinMaterials::Changes& a_changes, const SkinMaterials
 	for (const auto parameter : ParameterOrder)
 		if (ParameterSection(parameter) == editor.section)
 			labelWidth = std::max(labelWidth, ImGui::CalcTextSize(ParameterLabel(static_cast<size_t>(parameter))).x);
-	BrowserUI::RowShadeScope shade;
+	[[maybe_unused]] BrowserUI::RowShadeScope shade;
 	if (!ImGui::BeginTable("##skin_parameters", 2, kRowsFlags))
 		return;
 	ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, labelWidth + ImGui::GetStyle().CellPadding.x * 2.0f);
@@ -221,7 +221,7 @@ void Skin::DrawTextureInputs(SkinMaterials::Changes& a_changes, const SkinMateri
 		T("feature.skin.wet_help", "RGB tangent normal of the wet layer, A where wetness acts. Without it, wetness is flat and covers everything."),
 		T("feature.skin.detail_help", "RGB tileable normal, A region mask in the main UV. Without it, the common detail texture is used.") };
 	{
-		BrowserUI::RowShadeScope shade;
+		[[maybe_unused]] BrowserUI::RowShadeScope shade;
 		if (ImGui::BeginTable("##skin_textures", 2, kRowsFlags)) {
 			ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, labelWidth + ImGui::GetStyle().CellPadding.x * 2.0f);
 			ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
