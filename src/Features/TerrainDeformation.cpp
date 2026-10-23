@@ -517,7 +517,6 @@ void TerrainDeformation::UpdateStrideFallback()
 			return;
 		bool emit = false;
 		bool left = true;
-		RE::NiPoint3 last;
 		{
 			std::lock_guard lock(printsLock);
 			auto& track = tracks[a_actor->GetFormID()];
@@ -534,7 +533,6 @@ void TerrainDeformation::UpdateStrideFallback()
 				emit = true;
 				left = track.leftNext;
 				track.leftNext = !track.leftNext;
-				last = track.lastPrint;
 				track.lastPrint = pos;
 			}
 		}
@@ -684,8 +682,8 @@ void TerrainDeformation::StampHeightmap(ID3D11DeviceContext* a_context)
 	a_context->PSSetShaderResources(56, 1, &unbound);
 	a_context->PSSetShaderResources(57, 1, &unbound);
 
-	ID3D11ShaderResourceView* prints = printSRV.get();
-	a_context->CSSetShaderResources(0, 1, &prints);
+	ID3D11ShaderResourceView* printView = printSRV.get();
+	a_context->CSSetShaderResources(0, 1, &printView);
 	ID3D11UnorderedAccessView* uavs[2]{ heightUAV.get(), activityUAV.get() };
 	UINT counts[2]{ 0u, 0u };
 	a_context->CSSetUnorderedAccessViews(0, 2, uavs, counts);
