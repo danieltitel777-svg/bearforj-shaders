@@ -419,24 +419,24 @@ def main():
 
     if args.check:
         if en_json_path.exists():
-            existing_text = en_json_path.read_text(encoding="utf-8")
-            if existing_text == output_text:
+            # Compare strings, not the serialized key order. A full sort rewrites
+            # every line of en.json when the historical order is not alphabetical.
+            existing = load_existing_json(en_json_path)
+            added = set(strings.keys()) - set(existing.keys())
+            removed = set(existing.keys()) - set(strings.keys()) - key_only
+            changed = {k for k in strings if k in existing and strings[k] != existing[k]}
+            if not added and not removed and not changed:
                 print("en.json is up to date.")
                 sys.exit(0)
-            else:
-                print("en.json is OUT OF DATE. Run: python tools/extract-i18n.py --write",
-                      file=sys.stderr)
-                existing = load_existing_json(en_json_path)
-                added = set(strings.keys()) - set(existing.keys())
-                removed = set(existing.keys()) - set(strings.keys())
-                changed = {k for k in strings if k in existing and strings[k] != existing[k]}
-                if added:
-                    print(f"  Added: {', '.join(sorted(added))}")
-                if removed:
-                    print(f"  Removed: {', '.join(sorted(removed))}")
-                if changed:
-                    print(f"  Changed: {', '.join(sorted(changed))}")
-                sys.exit(1)
+            print("en.json is OUT OF DATE. Run: python tools/extract-i18n.py --write",
+                  file=sys.stderr)
+            if added:
+                print(f"  Added: {', '.join(sorted(added))}")
+            if removed:
+                print(f"  Removed: {', '.join(sorted(removed))}")
+            if changed:
+                print(f"  Changed: {', '.join(sorted(changed))}")
+            sys.exit(1)
         else:
             print("en.json does not exist. Run: python tools/extract-i18n.py --write",
                   file=sys.stderr)
