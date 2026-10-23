@@ -31,6 +31,15 @@ for dead in ("Shaders/PhysicalBlood", "Shaders/PhysicalLeaves"):
     shutil.rmtree(f"{core}/{dead}", ignore_errors=True)
 # 0.6.5: overlay copies a previous stage, so files the repo deleted would ship again.
 # Mirrors the local package fix that drops stale Unified Water and the pre-helmet mascots.
+# 0.6.6: SSPP, FootstepKick, old FootstepParticles, PhysicalBlood/Leaves, PrecipitationPhysics and NativeParticlePhysics are gone from the repo; their stage leftovers must not ship.
+for dead in ("Shaders/ScreenSpacePhysicalParticles", "Textures/Bearforj/Particles", "textures/BearForge/FX", "meshes/BearForge/FX"):
+    shutil.rmtree(f"{core}/{dead}", ignore_errors=True)
+for ini in ("FootstepKickParticles", "FootstepParticles", "NativeParticlePhysics", "PhysicalBlood", "PhysicalLeaves", "PrecipitationPhysics", "ScreenSpacePhysicalParticles"):
+    for base in ("Shaders/Features", "SKSE/Plugins/CommunityShaders/Shaders/Features"):
+        try:
+            os.remove(f"{core}/{base}/{ini}.ini")
+        except OSError:
+            pass
 for dead in ("Shaders/UnifiedWater", "SKSE/Plugins/CommunityShaders/UnifiedWaterCache"):
     shutil.rmtree(f"{core}/{dead}", ignore_errors=True)
 for stale in (
@@ -53,6 +62,9 @@ for stale in (
 for dp, dn, fn in os.walk(core):  # no water file left
     for f in fn + dn:
         assert not re.search(r"unified.?water|water.?cache", f, re.I), os.path.join(dp, f)
+for dp, dn, fn in os.walk(core):
+    for f in fn + dn:
+        assert not re.search(r"sspp|ScreenSpacePhysicalParticles|FootstepKick|^FootstepParticles", f, re.I), os.path.join(dp, f)
 for need in ("PhysicalEffectParticles", "GPUFootstepParticles"):
     assert os.path.exists(f"{core}/SKSE/Plugins/CommunityShaders/Shaders/Features/{need}.ini") or os.path.exists(f"{core}/Shaders/Features/{need}.ini"), need
 lib = f"{core}/SKSE/Plugins/CommunityShaders/Bearforj/Profiles/Library"

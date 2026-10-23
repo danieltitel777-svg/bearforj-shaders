@@ -3,7 +3,7 @@
 /**
  * @brief Bearforj 0.6 world context for the living-world particles (plan step 2).
  *
- * Refreshed on the CPU about twice a second (cheap), uploaded to the GPU with the SSPP frame.
+ * Refreshed on the CPU about twice a second (cheap), uploaded to the GPU with the particle frame.
  * Everything is derived from engine data that every mod uses - weather classification/flags,
  * location keywords, loaded references - never from specific weather/lighting mod FormIDs,
  * so NAT III CS, NAT, Azurite, Obsidian, Cathedral, Vespro, Rustic, etc. all work the same.

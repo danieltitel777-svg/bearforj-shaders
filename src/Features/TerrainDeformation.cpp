@@ -468,7 +468,7 @@ void TerrainDeformation::AddPrint(RE::Actor* a_actor, const RE::NiPoint3& a_posi
 	if (a_actor && a_actor->IsInWater())
 		return;
 	const auto material = tes->GetLandMaterialType(a_position);
-	// 0.6.3: footstep particles come from SSPP's own BGSFootstepEvent sink (not tied to prints any more)
+	// footstep particles come from the GPU Footstep Particles feature (not tied to prints)
 	const float strength = MaterialStrength(material);
 	if (strength <= 0.0f)
 		return;
