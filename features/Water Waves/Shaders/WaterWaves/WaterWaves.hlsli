@@ -57,7 +57,22 @@ namespace WaterWaves
 	{
 		float3 offset;
 		float2 slope;
+		float foam;
 	};
+
+	// Same curve as WaterWaveMath::WindShape. size/amp/storm are written by the caller there.
+	void WindShape(float windIn, out float size, out float amp, out float storm)
+	{
+		float wind = clamp(windIn, 0.0, 1.5);
+		float breezeT = saturate((wind - 0.05) / 0.50);
+		float breeze = breezeT * breezeT * (3.0 - 2.0 * breezeT);
+		float stormT = saturate((wind - 0.55) / 0.65);
+		storm = stormT * stormT * (3.0 - 2.0 * stormT);
+		float midSize = lerp(0.18, 1.0, breeze);
+		float midAmp = lerp(0.10, 0.85, breeze);
+		size = lerp(midSize, 2.05, storm);
+		amp = lerp(midAmp, 1.45, storm);
+	}
 
 	WaveSample Eval(float2 absXY, float2 camRelXY, bool normalFade)
 	{
@@ -70,12 +85,14 @@ namespace WaterWaves
 		float fade = 1.0 - smoothstep(fadeStart, fadeEnd, dist);
 		if (fade <= 0.0)
 			return s;
-		float wind = clamp(SharedData::WindFieldTransitionData.z, 0.0, 1.5);
-		float windAmp = 0.35 + wind * wind;
+		float windSize, windAmp, storm;
+		WindShape(SharedData::WindFieldTransitionData.z, windSize, windAmp, storm);
 		float angle = SharedData::WindFieldTransitionData.w;
+		float crest = 0.0;
+		float crestWeight = 0.0;
 		[unroll] for (int i = 0; i < 9; i++)
 		{
-			float lambda = SharedData::WaveScale * 420.0 * pow(0.70, (float)i);
+			float lambda = SharedData::WaveScale * 420.0 * windSize * pow(0.70, (float)i);
 			float k = kTwoPi / lambda;
 			float omega = sqrt(kGravity * k);
 			float slopeA = 0.095 - 0.006 * (float)i;
@@ -90,9 +107,17 @@ namespace WaterWaves
 			s.offset.z += amp * sn;
 			s.offset.xy += float2(dirX, dirY) * (q * amp * cs);
 			s.slope += float2(dirX, dirY) * (k * amp * cs);
+			// The three longest waves carry the white cap. pow(sn) keeps it on the crest, not the trough.
+			if (i < 3) {
+				float top = saturate(sn);
+				crest += amp * top * top * top;
+				crestWeight += amp;
+			}
 		}
 		s.offset *= fade;
 		s.slope *= fade;
+		float cap = saturate(crest / max(crestWeight, 1e-4) * 3.2 - 1.6);
+		s.foam = storm * cap * fade;
 		return s;
 	}
 
@@ -120,6 +145,25 @@ namespace WaterWaves
 		float2 absXY = plane.xy + FrameBuffer::CameraPosAdjust[eye].xy;
 		WaveSample s = Eval(absXY, plane.xy, true);
 		return s.slope * ShoreDampGPU(plane, eye);
+#endif
+	}
+
+	// One evaluation for the normal and the crest foam, so the pixel shader does not sum the waves twice.
+	void Surface(float3 plane, uint eye, out float2 slope, out float foam)
+	{
+#if defined(FLOWMAP)
+		slope = 0.0.xx;
+		foam = 0.0;
+#else
+		slope = 0.0.xx;
+		foam = 0.0;
+		if (SharedData::WaveScale <= 0.0)
+			return;
+		float2 absXY = plane.xy + FrameBuffer::CameraPosAdjust[eye].xy;
+		WaveSample s = Eval(absXY, plane.xy, true);
+		float damp = ShoreDampGPU(plane, eye);
+		slope = s.slope * damp;
+		foam = s.foam * damp;
 #endif
 	}
 }

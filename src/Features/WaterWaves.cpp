@@ -147,6 +147,9 @@ WaterWaveMath::Params WaterWaves::MakeParams(bool a_flowmap) const
 	if (params.enabled) {
 		params.scale = std::max(Util::IsInterior() ? settings.InteriorScale : settings.SeaScale, 0.0f);
 	}
+	// One wind source. The game blends sky->windSpeed across a weather change.
+	// Dynamic Wind Framework writes these same fields when it is installed, so it is shared
+	// and is not read again from its own plugin.
 	if (auto* sky = RE::Sky::GetSingleton()) {
 		if (std::isfinite(sky->windSpeed))
 			params.windSpeed = std::clamp(sky->windSpeed, 0.0f, 1.5f);
@@ -230,11 +233,18 @@ void WaterWaves::ApplyShared(float& a_displacedHeight, float& a_cameraBelow, flo
 
 	if (!tessCB)
 		return;
+	float windSize = 1.0f;
+	float windAmp = 1.0f;
+	float storm = 0.0f;
+	WaterWaveMath::WindShape(params.windSpeed, windSize, windAmp, storm);
+	const float slider = std::clamp(settings.MaxTessFactor, 1.0f, 8.0f);
+	// Long storm waves stay shaped with fewer new triangles. Ripples keep the slider.
+	const float cap = std::lerp(slider, std::max(slider * 0.5f, 2.0f), storm);
 	const float data[4] = {
-		std::clamp(settings.MaxTessFactor, 1.0f, 8.0f),
+		slider,
 		std::max(settings.TessRange, 1.0f),
 		params.enabled ? 1.0f : 0.0f,
-		0.0f
+		std::clamp(cap, 1.0f, 8.0f)
 	};
 	D3D11_MAPPED_SUBRESOURCE mapped{};
 	if (SUCCEEDED(globals::d3d::context->Map(tessCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -514,7 +524,7 @@ void WaterWaves::DrawSettings()
 	BFUI::Checkbox(T(TKEY("enabled"), "Enabled"), &settings.Enabled);
 	BFUI::SliderFloat(T(TKEY("amplitude"), "Wave Height"), &settings.Amplitude, 0.0f, 80.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::Text("%s", T(TKEY("amplitude_tt"), "Height of the longest wave, in game units, before wind. It fades to a flat plane between 4000 and 7000 units."));
+		ImGui::Text("%s", T(TKEY("amplitude_tt"), "Height of the longest wave, in game units, before the sky wind scales it. Calm wind shortens this into ripples. A storm stretches it into long waves. The height fades to a flat plane between 4000 and 7000 units."));
 	BFUI::SliderFloat(T(TKEY("chop"), "Chop"), &settings.Chop, 0.0f, 1.5f, "%.2f");
 	BFUI::SliderFloat(T(TKEY("shore"), "Shore Length"), &settings.ShoreLength, 16.0f, 600.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())
@@ -524,7 +534,8 @@ void WaterWaves::DrawSettings()
 	BFUI::SliderFloat(T(TKEY("max_tess"), "Tessellation"), &settings.MaxTessFactor, 1.0f, 8.0f, "%.0f");
 	BFUI::SliderFloat(T(TKEY("tess_range"), "Tessellation Range"), &settings.TessRange, 256.0f, 4096.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::Text("%s", T(TKEY("tess_tt"), "Extra triangles near the camera. At factor 1 the surface matches the untessellated mesh. Rivers and waterfalls are not moved."));
+		ImGui::Text("%s", T(TKEY("tess_tt"), "Extra triangles near the camera, falling off with distance the same way raised ground does. At the range the factor is 1, so far water stays the original mesh. A storm uses a lower factor because its waves are long. Rivers and waterfalls are not moved."));
+	ImGui::TextDisabled("%s", T(TKEY("wind_tt"), "Length follows the sky wind. Calm is ripples, a breeze is larger waves along the wind, a storm is long waves with foam on the crests. The change is smooth. Dynamic Wind Framework is optional: it writes this same sky wind, so it is shared and not read a second time."));
 }
 
 void WaterWaves::LoadSettings(json& o_json)

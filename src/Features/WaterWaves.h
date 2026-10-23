@@ -26,8 +26,8 @@ struct WaterWaves : Feature
 
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
-		return { T("feature.water_waves.description", "The existing water mesh is pushed into waves. The far water stays flat."),
-			{ T("feature.water_waves.key_1", "Nine waves on the vanilla water mesh"),
+		return { T("feature.water_waves.description", "The water mesh is tessellated into waves. The far water stays flat."),
+			{ T("feature.water_waves.key_1", "Nine waves on the tessellated water mesh, shorter in a calm and longer in a storm"),
 				T("feature.water_waves.key_2", "The shoreline stays on the flat plane"),
 				T("feature.water_waves.key_3", "Actors and the camera use the same height") } };
 	}

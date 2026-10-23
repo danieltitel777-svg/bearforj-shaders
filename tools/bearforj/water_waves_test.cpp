@@ -77,6 +77,36 @@ int main()
 	const float deepGap = 300.0f - SampleLandZ(0.0f, 0.0f, 0.0f, 0.0f, 100.0f, 2, land);
 	Expect(ShoreDamp(deepGap, 160.0f) == 1.0f, "shared land gap is full waves once the water is deep");
 
+	float calmSize = 0, calmAmp = 0, calmStorm = 0;
+	float breezeSize = 0, breezeAmp = 0, breezeStorm = 0;
+	float stormSize = 0, stormAmp = 0, stormStorm = 0;
+	WindShape(0.0f, calmSize, calmAmp, calmStorm);
+	WindShape(0.4f, breezeSize, breezeAmp, breezeStorm);
+	WindShape(1.2f, stormSize, stormAmp, stormStorm);
+	Expect(calmStorm == 0.0f && stormStorm == 1.0f, "storm blend is 0 in a calm and 1 at wind 1.2");
+	Expect(calmSize < breezeSize && breezeSize < stormSize, "wavelength grows from ripples to a breeze to a storm");
+	Expect(calmAmp < stormAmp, "amplitude grows from a calm to a storm");
+	float midA = 0, midB = 0, unusedA = 0, unusedB = 0, unusedC = 0, unusedD = 0;
+	WindShape(0.70f, midA, unusedA, unusedC);
+	WindShape(0.72f, midB, unusedB, unusedD);
+	Expect(std::fabs(midA - midB) < 0.08f, "wavelength changes smoothly across a small wind step");
+
+	auto peak = [](float wind) {
+		Params p{};
+		p.enabled = true;
+		p.amplitude = 22.0f;
+		p.chop = 0.6f;
+		p.scale = 1.0f;
+		p.windSpeed = wind;
+		p.time = 3.0f;
+		float m = 0.0f;
+		for (int y = 0; y < 12; ++y)
+			for (int x = 0; x < 12; ++x)
+				m = std::max(m, std::fabs(Evaluate(x * 90.0f, y * 70.0f, 20.0f, -15.0f, p, false).height));
+		return m;
+	};
+	Expect(peak(0.0f) < peak(0.4f) && peak(0.4f) < peak(1.2f), "a sampled patch is taller as the wind rises");
+
 	if (fails) {
 		std::cerr << fails << " failed\n";
 		return 1;

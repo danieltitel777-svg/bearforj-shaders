@@ -44,6 +44,20 @@ namespace WaterWaveMath
 		return a_t * a_t * (3.0f - 2.0f * a_t);
 	}
 
+	// Sky wind is already blended, including by Dynamic Wind Framework when that mod is installed.
+	// Calm (near 0) is short ripples. A breeze is the base wave, aimed along the wind. A storm
+	// (near 1.2) is a longer, taller wave. Every step is a smoothstep, so weather fades do not pop.
+	inline void WindShape(float a_wind, float& a_size, float& a_amp, float& a_storm)
+	{
+		const float wind = std::clamp(a_wind, 0.0f, 1.5f);
+		const float breeze = Smooth((wind - 0.05f) / 0.50f);
+		a_storm = Smooth((wind - 0.55f) / 0.65f);
+		const float midSize = 0.18f + (1.0f - 0.18f) * breeze;
+		const float midAmp = 0.10f + (0.85f - 0.10f) * breeze;
+		a_size = midSize + (2.05f - midSize) * a_storm;
+		a_amp = midAmp + (1.45f - midAmp) * a_storm;
+	}
+
 	// 0 on dry ground and in the 4-unit contact band, 1 once the water is ShoreLength deep.
 	inline float ShoreDamp(float a_waterMinusLand, float a_shoreLength)
 	{
@@ -69,11 +83,13 @@ namespace WaterWaveMath
 		const float fade = DistanceFade(distance, a_normalFade);
 		if (fade <= 0.0f)
 			return sample;
-		const float wind = std::clamp(a_params.windSpeed, 0.0f, 1.5f);
-		const float windAmp = 0.35f + wind * wind;
+		float windSize = 1.0f;
+		float windAmp = 1.0f;
+		float storm = 0.0f;
+		WindShape(a_params.windSpeed, windSize, windAmp, storm);
 		for (int i = 0; i < kWaveCount; ++i) {
 			const float fi = static_cast<float>(i);
-			const float lambda = a_params.scale * 420.0f * std::pow(0.70f, fi);
+			const float lambda = a_params.scale * 420.0f * windSize * std::pow(0.70f, fi);
 			const float k = kTwoPi / lambda;
 			const float omega = std::sqrt(kGravity * k);
 			const float slopeA = 0.095f - 0.006f * fi;

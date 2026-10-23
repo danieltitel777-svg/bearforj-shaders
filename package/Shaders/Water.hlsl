@@ -401,7 +401,7 @@ VS_OUTPUT main(VS_INPUT input)
 #if defined(WATER_WAVES) && (defined(HSHADER) || defined(DSHADER)) && !defined(LOD) && !defined(FLOWMAP)
 cbuffer WaterWaveTess : register(b7)
 {
-	float4 WaveTess;  // x max factor, y range, z enabled, w unused
+	float4 WaveTess;  // x slider max, y range, z enabled, w wind-capped factor
 };
 
 struct WavePatch
@@ -414,10 +414,13 @@ float WaveEdge(float3 a_a, float3 a_b)
 {
 	float dist = length(0.5 * (a_a.xy + a_b.xy));
 	float range = max(WaveTess.y, 1.0);
+	// Same shape as terrain: factor 1 past the range, so that edge stays shut against the flat far mesh.
 	if (dist >= range || WaveTess.z < 0.5)
 		return 1.0;
 	float t = saturate(1.0 - dist / range);
-	return clamp(lerp(1.0, WaveTess.x, t * t), 1.0, 8.0);
+	// w is the wind cap. Long storm waves do not need the full slider. Ripples keep it.
+	float cap = clamp(WaveTess.w, 1.0, 8.0);
+	return clamp(lerp(1.0, cap, t * t), 1.0, 8.0);
 }
 
 #	if defined(HSHADER)
@@ -881,12 +884,14 @@ struct WaterNormalData
 {
 	float3 normal;
 	float4 rippleInfo;  // xyz = scaled ripple normal (normalized normal * intensity), w = splash effect intensity
+	float crestFoam;
 };
 
 WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float normalsDepthFactor, float3 viewDirection, float depth, uint eyeIndex, float wetnessOcclusion)
 {
 	WaterNormalData result;
 	result.rippleInfo = float4(0, 0, 0, 0);
+	result.crestFoam = 0.0;
 
 	float3 normalScalesRcp = rcp(input.NormalsScale.xyz);
 	float4 normalsAmplitude = NormalsAmplitude;
@@ -1054,8 +1059,11 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 
 #			if defined(WATER_WAVES) && !defined(FLOWMAP)
 	{
-		float2 waveSlope = WaterWaves::Slope(input.WaveBase.xyz, eyeIndex);
+		float2 waveSlope;
+		float crestFoam;
+		WaterWaves::Surface(input.WaveBase.xyz, eyeIndex, waveSlope, crestFoam);
 		finalNormal = normalize(float3(finalNormal.xy + waveSlope, finalNormal.z));
+		result.crestFoam = crestFoam;
 	}
 #			endif
 	float waveAmplitude = SharedData::csUtilitySettings.waterWaveAmplitude;
@@ -1612,6 +1620,7 @@ PS_OUTPUT main(PS_INPUT input)
 #					if defined(VC)
 	float specularFraction = lerp(1, fresnel * surfaceMul, distanceBlendFactor);
 	float3 finalColorPreFog = lerp(diffuseColor, specularColor, specularFraction) + sunColor * sunMul;
+	finalColorPreFog = lerp(finalColorPreFog, float3(0.78, 0.82, 0.84), waterData.crestFoam);
 
 #						if defined(PHYSICAL_SKY)
 	if (SharedData::physSkyData.enabled) {
@@ -1675,6 +1684,7 @@ PS_OUTPUT main(PS_INPUT input)
 	} else {
 		finalColorPreFog = lerp(diffuseOutput.refractionDiffuseColor, specularColor, specularFraction) + sunColor * depthControl.w;
 	}
+	finalColorPreFog = lerp(finalColorPreFog, float3(0.78, 0.82, 0.84), waterData.crestFoam);
 
 #						if defined(PHYSICAL_SKY)
 	if (SharedData::physSkyData.enabled) {
