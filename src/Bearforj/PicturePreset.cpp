@@ -7,6 +7,7 @@
 #include "Features/PostProcessing/Camera.h"
 #include "Features/VolumetricLighting.h"
 #include "Globals.h"
+#include "State.h"
 #include "Utils/FileSystem.h"
 
 #include <cmath>
