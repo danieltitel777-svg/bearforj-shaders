@@ -9,11 +9,8 @@
     "TrueStorms.esp",
     "TrueStormsSE_AOS.esp"
   ],
-  "notes": "Heavy/light storm variants, ash and dust storms (Solstheim) -> SSPP ash fall + drizzle react automatically; more rain particles for heavy storms. Its rain/snow textures are replaced by SSPP particles where SSPP is on.",
+  "notes": "Heavy/light storm variants, ash and dust storms (Solstheim). Heavier storms get more rain wetness and faster weather transitions.",
   "patch": {
-    "ScreenSpacePhysicalParticles": {
-      "RainCount": 50000
-    },
     "WetnessEffects": {
       "MaxRainWetness": 1.2,
       "WeatherTransitionSpeed": 4.0
