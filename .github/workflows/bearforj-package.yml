@@ -10,6 +10,11 @@ on:
     branches:
       - cursor/bearforj-0.6.7-78ba
 
+# One package at a time. A newer push cancels the older Windows build.
+concurrency:
+  group: bearforj-067-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -24,7 +29,8 @@ jobs:
           python-version: "3.12"
 
       - name: Install check dependencies
-        run: pip install lxml pyyaml pyfomod
+        # pyfomod still imports distutils. setuptools 84 puts that module back on 3.12.
+        run: pip install --upgrade lxml pyyaml pyfomod setuptools
 
       - name: FOMOD schema
         run: python tools/bearforj/gate_fomod.py

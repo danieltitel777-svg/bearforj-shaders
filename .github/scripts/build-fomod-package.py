@@ -42,6 +42,10 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+try:
+    import setuptools  # pyfomod imports distutils, which Python 3.12 removed
+except ImportError:
+    pass
 import pyfomod
 import yaml
 

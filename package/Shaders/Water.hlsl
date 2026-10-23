@@ -968,28 +968,20 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 
 #				if defined(WATER_PARALLAX)
 	float3 normals2 = Normals02Tex.SampleBias(Normals02Sampler, input.TexCoord1.zw + parallaxOffset.xy * normalScalesRcp.y, SharedData::MipBias).xyz * 2.0 - 1.0;
-	float3 normals3 = Normals03Tex.SampleBias(Normals03Sampler, input.TexCoord2.xy + parallaxOffset.xy * normalScalesRcp.z, SharedData::MipBias).xyz * 2.0 - 1.0;
 #				else
 	float3 normals2 = Normals02Tex.SampleBias(Normals02Sampler, input.TexCoord1.zw, SharedData::MipBias).xyz * 2.0 - 1.0;
-	float3 normals3 = Normals03Tex.SampleBias(Normals03Sampler, input.TexCoord2.xy, SharedData::MipBias).xyz * 2.0 - 1.0;
 #				endif
 
-	// One extra sample of a map that is already bound. A rotated prime scale
-	// breaks the repeat. Past about 40 m the wavefront is fully faded, so the fetch is skipped.
+	// The third fetch is the same bound map, rotated and scaled so the tiles do not line up.
+	// It replaces Normals03. The sample count stays three.
 	float2 detailUv = input.TexCoord1.zw;
 #				if defined(WATER_PARALLAX)
 	detailUv += parallaxOffset.xy * normalScalesRcp.y;
 #				endif
 	float2 detailRot = float2(detailUv.x * 0.8192 - detailUv.y * 0.5736, detailUv.x * 0.5736 + detailUv.y * 0.8192) * 2.41;
-	float detailFade = saturate(1.0 - length(input.WPosition.xy) / 2800.0);
-	float3 detailNormal = 0.0.xxx;
-	[branch]
-	if (detailFade > 0.001) {
-		detailNormal = Normals02Tex.SampleBias(Normals02Sampler, detailRot, SharedData::MipBias).xyz * 2.0 - 1.0;
-		detailNormal.xy *= 0.45 * detailFade;
-	}
+	float3 normals3 = Normals02Tex.SampleBias(Normals02Sampler, detailRot, SharedData::MipBias).xyz * 2.0 - 1.0;
 	float3 blendedNormal = normalize(float3(0, 0, 1) + normalsAmplitude.x * normals1 +
-									 normalsAmplitude.y * normals2 + normalsAmplitude.z * normals3 + detailNormal);
+									 normalsAmplitude.y * normals2 + normalsAmplitude.z * normals3);
 #				if defined(UNDERWATER)
 	float3 finalNormal = blendedNormal;
 #				else
@@ -1191,11 +1183,29 @@ struct DiffuseOutput
 	float3 refractedViewDirection;
 };
 
-// Shore band plus the wave crest. No extra pass.
-float3 ApplyWaterFoam(float3 color, float4 distanceMul, float crestFoam, float3 normal)
+// column is the water thickness in world units, or -1 when this permutation has no scene depth.
+// Contact foam is the thin band where that thickness goes to zero: the shore, and the ring
+// around a rock, post or body. It uses the depth already read for the water colour. No extra pass.
+float WaterFoamColumn(float4 distanceMul)
 {
-	float shore = saturate(1.0 - distanceMul.w * 5.0) * saturate(normal.z);
-	float foam = saturate(max(shore * 0.5, crestFoam));
+#			if defined(DEPTH) && !defined(VERTEX_ALPHA_DEPTH)
+	return distanceMul.w * max(FogParam.z, 1.0);
+#			else
+	return -1.0;
+#			endif
+}
+
+float3 ApplyWaterFoam(float3 color, float column, float crestFoam, float3 normal, float2 worldXY)
+{
+	float foam = saturate(crestFoam);
+	if (column >= 0.0) {
+		float reach = saturate(1.0 - max(length(worldXY) - 2800.0, 0.0) / 2800.0);
+		float grain = frac(sin(dot(worldXY, float2(12.9898, 78.233))) * 43758.5453);
+		// About half a metre. Knee-deep water stays clear. A post still gets a ring.
+		float contact = (1.0 - smoothstep(4.0, 36.0, column)) * reach * lerp(0.72, 1.0, grain);
+		float shore = (1.0 - smoothstep(8.0, 80.0, column)) * saturate(normal.z) * reach * lerp(0.8, 1.0, grain);
+		foam = saturate(max(foam, max(contact * 0.9, shore * 0.5)));
+	}
 	return lerp(color, float3(0.78, 0.82, 0.84), foam);
 }
 
@@ -1660,7 +1670,7 @@ PS_OUTPUT main(PS_INPUT input)
 #					if defined(VC)
 	float specularFraction = lerp(1, fresnel * surfaceMul, distanceBlendFactor);
 	float3 finalColorPreFog = lerp(diffuseColor, specularColor, specularFraction) + sunColor * sunMul;
-	finalColorPreFog = ApplyWaterFoam(finalColorPreFog, distanceMul, waterData.crestFoam, normal);
+	finalColorPreFog = ApplyWaterFoam(finalColorPreFog, WaterFoamColumn(distanceMul), waterData.crestFoam, normal, input.WPosition.xy);
 
 #						if defined(PHYSICAL_SKY)
 	if (SharedData::physSkyData.enabled) {
@@ -1722,7 +1732,7 @@ PS_OUTPUT main(PS_INPUT input)
 	} else {
 		finalColorPreFog = lerp(diffuseOutput.refractionDiffuseColor, specularColor, specularFraction) + sunColor * depthControl.w;
 	}
-	finalColorPreFog = ApplyWaterFoam(finalColorPreFog, distanceMul, waterData.crestFoam, normal);
+	finalColorPreFog = ApplyWaterFoam(finalColorPreFog, WaterFoamColumn(distanceMul), waterData.crestFoam, normal, input.WPosition.xy);
 
 #						if defined(PHYSICAL_SKY)
 	if (SharedData::physSkyData.enabled) {
