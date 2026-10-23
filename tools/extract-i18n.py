@@ -274,6 +274,26 @@ def extract_strings(src_dir: Path):
                 default = concat_string_literals(default_expr)
                 add_string(key, default, rel_path)
 
+            # Tab labels and other { "dotted.key", "English" } pairs that are not T() calls.
+            # Includes bearforj.ui.tab.water. Do not override a real T() default.
+            pair_pattern = re.compile(
+                r'\{\s*"((?:bearforj|feature|menu|cs_editor|overlay|common|ui|weather_editor)'
+                r'(?:\.[A-Za-z0-9_]+)+)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*\}'
+            )
+            for match in pair_pattern.finditer(clean):
+                key = match.group(1)
+                if key not in strings:
+                    add_string(key, unescape_cpp_string(match.group(2)), rel_path)
+
+            # Image-analyzer tips go through add("key", "english", ...) into T(key, english).
+            add_call_pattern = re.compile(
+                r'\badd\(\s*"([^"]+\.[^"]+)"\s*,\s*"((?:[^"\\]|\\.)*)"'
+            )
+            for match in add_call_pattern.finditer(clean):
+                key = match.group(1)
+                if key not in strings:
+                    add_string(key, unescape_cpp_string(match.group(2)), rel_path)
+
             # Track T("key") key-only calls
             for match in t_keyonly_pattern.finditer(clean):
                 key = match.group(1)
@@ -292,6 +312,21 @@ def extract_strings(src_dir: Path):
             print(f"Warning: Key '{key}' has conflicting defaults:", file=sys.stderr)
             print(f"  Existing: {old!r}", file=sys.stderr)
             print(f"  New:      {new!r}  (in {path})", file=sys.stderr)
+
+    # Tooltip ids are generated into Tooltips.json. tooltips.py rewrites both
+    # language files, so this check keeps the English already stored for each
+    # id instead of regenerating it. Ids that are not in that map are orphans.
+    root = src_dir.parent
+    tips_path = (root / "package" / "SKSE" / "Plugins" / "CommunityShaders"
+                 / "Bearforj" / "Tooltips.json")
+    en_path = (root / "package" / "SKSE" / "Plugins" / "CommunityShaders"
+               / "Translations" / "en.json")
+    if tips_path.exists() and en_path.exists():
+        tips = json.loads(tips_path.read_text(encoding="utf-8"))
+        existing = load_existing_json(en_path)
+        for tid in tips.values():
+            if isinstance(tid, str) and tid.startswith("tt.") and tid in existing and tid not in strings:
+                strings[tid] = existing[tid]
 
     return strings, key_only
 
@@ -384,24 +419,24 @@ def main():
 
     if args.check:
         if en_json_path.exists():
-            existing_text = en_json_path.read_text(encoding="utf-8")
-            if existing_text == output_text:
+            # Compare strings, not the serialized key order. A full sort rewrites
+            # every line of en.json when the historical order is not alphabetical.
+            existing = load_existing_json(en_json_path)
+            added = set(strings.keys()) - set(existing.keys())
+            removed = set(existing.keys()) - set(strings.keys()) - key_only
+            changed = {k for k in strings if k in existing and strings[k] != existing[k]}
+            if not added and not removed and not changed:
                 print("en.json is up to date.")
                 sys.exit(0)
-            else:
-                print("en.json is OUT OF DATE. Run: python tools/extract-i18n.py --write",
-                      file=sys.stderr)
-                existing = load_existing_json(en_json_path)
-                added = set(strings.keys()) - set(existing.keys())
-                removed = set(existing.keys()) - set(strings.keys())
-                changed = {k for k in strings if k in existing and strings[k] != existing[k]}
-                if added:
-                    print(f"  Added: {', '.join(sorted(added))}")
-                if removed:
-                    print(f"  Removed: {', '.join(sorted(removed))}")
-                if changed:
-                    print(f"  Changed: {', '.join(sorted(changed))}")
-                sys.exit(1)
+            print("en.json is OUT OF DATE. Run: python tools/extract-i18n.py --write",
+                  file=sys.stderr)
+            if added:
+                print(f"  Added: {', '.join(sorted(added))}")
+            if removed:
+                print(f"  Removed: {', '.join(sorted(removed))}")
+            if changed:
+                print(f"  Changed: {', '.join(sorted(changed))}")
+            sys.exit(1)
         else:
             print("en.json does not exist. Run: python tools/extract-i18n.py --write",
                   file=sys.stderr)

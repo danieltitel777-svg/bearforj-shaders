@@ -195,8 +195,9 @@ public:
 	/** Short names of upstream Alpha/Beta features that start OFF because they are crash-prone. */
 	static constexpr std::array<std::string_view, 0> kBearforjUnstablePreReleaseFeatures{};
 
-	// Bearforj 0.6: every feature starts ON. Only features dropped by the 0.6 conflict decisions start OFF:
-	// Scene Manager (breaks NAT). Fur Shells is Open fur (#964-984), the one we keep, so it stays ON.
+	// Bearforj 0.6.7 starter set: features start ON except Scene Manager (breaks NAT),
+	// Screen Space GI, and Volumetric Shadows. Those two override IsDisabledByDefault.
+	// Fur Shells stays ON.
 	virtual bool IsDisabledByDefault() const
 	{
 		const auto name = const_cast<Feature*>(this)->GetShortName();

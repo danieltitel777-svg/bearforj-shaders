@@ -14,6 +14,8 @@
 #include "TerrainShadows.h"
 #include "VolumetricShadows.h"
 
+#include "Bearforj/PicturePreset.h"
+#include "Bearforj/WeatherPresets.h"
 #include "State.h"
 
 #define I18N_KEY_PREFIX "feature.physical_sky."
@@ -281,6 +283,35 @@ namespace
 			return {};
 
 		return { first, last };
+	}
+
+	float WeatherCloudCoverage()
+	{
+		using Slot = Bearforj::WeatherPresets::Slot;
+		constexpr float kSlotCoverage[Bearforj::WeatherPresets::kSlotCount] = {
+			0.18f, 0.62f, 0.78f, 0.92f, 0.55f, 0.88f, 0.40f, 0.50f, 0.30f
+		};
+		const int slot = std::clamp(static_cast<int>(Bearforj::WeatherPresets::CurrentSlot()), 0, Bearforj::WeatherPresets::kSlotCount - 1);
+		float coverage = kSlotCoverage[slot];
+		const auto sky = globals::game::sky;
+		auto* weather = sky ? sky->currentWeather : nullptr;
+		if (!weather)
+			return coverage;
+		const auto day = static_cast<size_t>(RE::TESWeather::ColorTimes::kDay);
+		float sum = 0.0f;
+		int count = 0;
+		for (size_t layer = 0; layer < static_cast<size_t>(RE::TESWeather::kTotalLayers); ++layer) {
+			if (weather->cloudLayerDisabledBits & (1u << layer))
+				continue;
+			float alpha = static_cast<float>(weather->cloudAlpha[layer][day]);
+			if (alpha > 1.5f)
+				alpha /= 255.0f;
+			sum += std::clamp(alpha, 0.0f, 1.0f);
+			++count;
+		}
+		if (count == 0)
+			return coverage;
+		return std::clamp(coverage * (sum / static_cast<float>(count)), 0.0f, 1.0f);
 	}
 
 	void InfoBox(const char* str)
@@ -1014,6 +1045,9 @@ void PhysicalSky::Reset()
 		return;
 	}
 
+	Bearforj::PicturePreset::TryApplyResolutionPreset();
+	const bool marchClouds = settings.enableVolumetricClouds && texShadowVolume;
+
 	// resolution
 	float2 res{ (float)globals::game::graphicsState->screenWidth, (float)globals::game::graphicsState->screenHeight };
 	float2 dynres = Util::ConvertToDynamic(res);
@@ -1056,12 +1090,12 @@ void PhysicalSky::Reset()
 		.ozoneAltitude = settings.ozoneAltitude / Util::Units::GAME_UNIT_TO_KM,
 		.ozoneThickness = settings.ozoneThickness / Util::Units::GAME_UNIT_TO_KM,
 		.ozoneAbsorption = settings.ozoneAbsorption * 1e-3 * Util::Units::GAME_UNIT_TO_KM,
-		.enableVanillaClouds = settings.enableVanillaClouds ? 1u : 0u,
+		.enableVanillaClouds = marchClouds ? 0u : (settings.enableVanillaClouds ? 1u : 0u),
 		.cloudRelightMix = settings.cloudRelightMix,
 		.cloudOriginalMix = settings.cloudOriginalMix,
 		.silverLiningMix = settings.silverLiningMix,
 		.silverLiningSpread = settings.silverLiningSpread,
-		.enableVolumetricClouds = settings.enableVolumetricClouds ? 1u : 0u,
+		.enableVolumetricClouds = marchClouds ? 1u : 0u,
 		.shadowVolumeRange = settings.shadowVolumeRange / Util::Units::GAME_UNIT_TO_KM,
 		.lowestCloudAltitude = settings.cloudLayer.lowestAltitude / Util::Units::GAME_UNIT_TO_KM,
 		.highestCloudAltitude = settings.cloudLayer.highestAltitude / Util::Units::GAME_UNIT_TO_KM,
@@ -1119,8 +1153,13 @@ void PhysicalSky::Prepass()
 		const bool renderVolumetricClouds = settings.enableVolumetricClouds && csVolMainView && csVolReproject && csVolUpscale && csVolShadowVolume && csVolShadowFilter && csVolCubemap && csVolAmbientSH && texVolCloudAmbientSH;
 
 		if (renderVolumetricClouds) {
-			ndfManager.UpdateNdf(settings.cloudMap, settings.cloudLayer);
-			RenderVolumetricClouds(VolumetricCloudPass::kShadowVolume);
+			auto cloudMap = settings.cloudMap;
+			cloudMap.skyCoverage = WeatherCloudCoverage();
+			ndfManager.UpdateNdf(cloudMap, settings.cloudLayer);
+			// The shadow cookie is one sample reused by the rays. Refresh it every other frame.
+			static uint32_t shadowCookieFrame = 0;
+			if ((shadowCookieFrame++ & 1u) == 0)
+				RenderVolumetricClouds(VolumetricCloudPass::kShadowVolume);
 		}
 
 		AccumShadow();

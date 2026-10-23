@@ -82,10 +82,14 @@ public:
 	// of writing back into a_upscalingTexture (needed when kMAIN is renderRes, e.g. PerfMode).
 	void Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_depth, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors, float a_sharpness, ID3D11Resource* a_colorOut = nullptr);
 
-	/** @brief AMD adapter classes FSR 4.1.1 can run on: RDNA 3 discrete (RX 7000) and RDNA 4 (RX 9000). */
+	/** @brief AMD adapter classes that may request runtime FSR Upscaling 4.1.
+	 *  RX 7000 and RX 9000 are the classes documented by FSR SDK 2.3.0.
+	 *  RX 6000 (Navi 21/22/23/24) is experimental: Adrenalin 26.10.1 added an INT8 model,
+	 *  and a failed provider create falls back to FSR 3.1. */
 	enum class Fsr4AdapterSupport
 	{
 		Unsupported,
+		RadeonRx6000,
 		RadeonRx7000,
 		RadeonRx9000
 	};

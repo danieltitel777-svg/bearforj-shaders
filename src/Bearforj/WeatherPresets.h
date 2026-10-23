@@ -34,7 +34,7 @@ namespace Bearforj::WeatherPresets
 
 	struct Look
 	{
-		float TonemapStrength = 0.35f, Warmth = 0.5f, NightLift = 0.45f, AuroraSnow = 0.6f, TonemapMix = 100.0f;
+		float TonemapStrength = 0.32f, Warmth = 0.45f, NightLift = 0.42f, AuroraSnow = 0.6f, TonemapMix = 100.0f;
 	};
 
 	struct Preset

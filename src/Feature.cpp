@@ -636,7 +636,7 @@ std::string Feature::GetDisplayCategory() const
 {
 	const auto category = GetCategory();
 	if (category == FeatureCategories::kCharacters)
-		return T("feature.category.characters", "Characters");
+		return T("feature.category.characters", "Character");
 	if (category == FeatureCategories::kDisplay)
 		return T("feature.category.display", "Display");
 	if (category == FeatureCategories::kFoliage)

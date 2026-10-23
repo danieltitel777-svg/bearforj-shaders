@@ -528,7 +528,7 @@ float TD_EdgeFactor(float3 a_relA, float3 a_relB, bool a_patchActive)
 	if (dist >= range)
 		return 1.0;
 	float t = saturate(1.0 - dist / range);
-	// A raised layer covers the whole near field, so every edge inside the range tessellates together.
+	// A full raised layer covers the whole near field. Otherwise only footprints and the bubble under the player tessellate.
 	if (!TerrainDeformation::RaiseField()) {
 		// 0.6.4 activity gate (after Dynamic Terrain Deformation, GPL-3.0): only edges touching a stamped cell tessellate
 		float2 a = a_relA.xy + FrameBuffer::CameraPosAdjust[0].xy, b = a_relB.xy + FrameBuffer::CameraPosAdjust[0].xy;
@@ -536,7 +536,8 @@ float TD_EdgeFactor(float3 a_relA, float3 a_relB, bool a_patchActive)
 		// 9 samples: a long landscape edge can skip a 64-unit activity cell if only the endpoints are tested
 		[unroll] for (int k = 0; k <= 8; k++)
 			active = active || TerrainDeformation::Active(lerp(a, b, k * 0.125));
-		if (!active)
+		bool underFeet = TerrainDeformation::FeetBubble() && length(mid.xy) < TerrainDeformation::TD_FEET_RADIUS;
+		if (!active && !underFeet)
 			return 1.0;
 	}
 	return clamp(lerp(1.0, TerrainDeformation::MaxTessFactor(), t * t), 1.0, 64.0);
@@ -558,7 +559,7 @@ TD_PATCH_CONSTANTS TD_PatchConstants(InputPatch<VS_OUTPUT, 3> patch)
 	o.Inside = max(o.Edges[0], max(o.Edges[1], o.Edges[2]));
 	if (centre)
 		o.Inside = max(o.Inside, TD_EdgeFactor((p0 + p1 + p2) / 3.0, (p0 + p1 + p2) / 3.0, true));
-	if (!TerrainDeformation::TessellationEnabled() || (TerrainDeformation::Count() == 0 && !TerrainDeformation::RaiseField())) {
+	if (!TerrainDeformation::TessellationEnabled() || (TerrainDeformation::Count() == 0 && !TerrainDeformation::RaiseField() && !TerrainDeformation::FeetBubble())) {
 		o.Edges[0] = o.Edges[1] = o.Edges[2] = o.Inside = 1.0;
 	}
 	return o;
@@ -2956,20 +2957,23 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 #	endif
 
 #	if defined(SIMPLE_TREE_WETNESS)
-	static const float treeWetRoughnessScale = 0.85;
+	static const float treeWetRoughnessScale = 0.55;
 	static const float treeWetMinRoughness = 0.04;
-	static const float treeWetAlbedoScale = 0.90;
+	static const float treeWetAlbedoScale = 0.72;
 	const float treeWetness = (inWorld || inReflection) ?
 	                              saturate(SharedData::wetnessEffectsSettings.Wetness * SharedData::wetnessEffectsSettings.MaxRainWetness) :
 	                              0.0;
-	material.Roughness = lerp(material.Roughness, max(material.Roughness * treeWetRoughnessScale, treeWetMinRoughness), treeWetness);
+	// Extra gloss only on nearby trunks. Distant forest still darkens, and the wind path is unchanged.
+	const float nearDrop = saturate(1.0 - length(input.WorldPosition.xyz) / 1400.0);
+	const float glossWet = saturate(treeWetness * lerp(0.65, 1.0, nearDrop));
+	material.Roughness = lerp(material.Roughness, max(material.Roughness * treeWetRoughnessScale, treeWetMinRoughness), glossWet);
 	material.BaseColor *= lerp(1.0, treeWetAlbedoScale, treeWetness);
 #		if !defined(TRUE_PBR)
 	if (HasSpecular()) {
-		static const float treeWetGlossinessIncrease = 0.05;
-		static const float treeWetShininessScale = 1.10;
-		material.Glossiness = saturate(material.Glossiness + treeWetGlossinessIncrease * treeWetness);
-		material.Shininess *= lerp(1.0, treeWetShininessScale, treeWetness);
+		static const float treeWetGlossinessIncrease = 0.18;
+		static const float treeWetShininessScale = 1.45;
+		material.Glossiness = saturate(material.Glossiness + treeWetGlossinessIncrease * glossWet);
+		material.Shininess *= lerp(1.0, treeWetShininessScale, glossWet);
 	}
 #		endif
 #	endif

@@ -3,7 +3,9 @@
 
 #include <bit>
 #include <cassert>
+#include <cctype>
 #include <cmath>
+#include <string>
 
 #include "../../Deferred.h"
 #include "../../EngineFixes/AlphaGeometryGroupCeilingFix.h"
@@ -1545,6 +1547,35 @@ namespace ShadowCasterManager
 		}
 	}
 
+	static bool TextHas(const char* a_text, const char* a_needle)
+	{
+		if (!a_text || !a_text[0] || !a_needle)
+			return false;
+		std::string lower(a_text);
+		for (char& c : lower)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		return lower.find(a_needle) != std::string::npos;
+	}
+
+	// Candles and magic/particle lights stay unshadowed. Torches and lamps still compete for a slot.
+	static bool SkipsPlacedShadow(RE::BSShadowLight* a_light)
+	{
+		auto* ni = a_light->light.get();
+		if (!ni)
+			return false;
+		const char* name = ni->name.c_str();
+		if (TextHas(name, "candle") || TextHas(name, "magelight") || TextHas(name, "magiclight") || TextHas(name, "particle"))
+			return true;
+		auto* refr = ni->GetUserData();
+		auto* base = refr ? refr->GetBaseObject() : nullptr;
+		if (!base)
+			return false;
+		const char* editorId = base->GetFormEditorID();
+		const char* formName = base->GetName();
+		return TextHas(editorId, "candle") || TextHas(editorId, "magelight") || TextHas(editorId, "magiclight") ||
+		       TextHas(formName, "candle") || TextHas(formName, "magelight") || TextHas(formName, "magiclight");
+	}
+
 	static void ScoreShadowCandidates(RE::ShadowSceneNode* ssn, RE::NiCamera* camera,
 		RE::BSShadowLight* sunLight, std::vector<CandidateLight>& candidates)
 	{
@@ -1561,6 +1592,8 @@ namespace ShadowCasterManager
 			for (auto& sp : ssn->GetRuntimeData().activeShadowLights) {
 				auto* l = sp.get();
 				if (!l || l == sunLight)
+					continue;
+				if (SkipsPlacedShadow(l))
 					continue;
 				// Promoted lights are allocated non-zeroed; their descriptor pool-slots stay
 				// garbage until init. EnableLight only inits lights that win a render slot, so

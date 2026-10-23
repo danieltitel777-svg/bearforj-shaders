@@ -44,7 +44,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	SnowRaise,
 	MudRaise,
 	SandRaise,
-	SinkFraction)
+	SinkFraction,
+	RaiseFullField)
 
 namespace
 {
@@ -516,7 +517,6 @@ void TerrainDeformation::UpdateStrideFallback()
 			return;
 		bool emit = false;
 		bool left = true;
-		RE::NiPoint3 last;
 		{
 			std::lock_guard lock(printsLock);
 			auto& track = tracks[a_actor->GetFormID()];
@@ -533,7 +533,6 @@ void TerrainDeformation::UpdateStrideFallback()
 				emit = true;
 				left = track.leftNext;
 				track.leftNext = !track.leftNext;
-				last = track.lastPrint;
 				track.lastPrint = pos;
 			}
 		}
@@ -615,8 +614,10 @@ void TerrainDeformation::UpdateHeightmap()
 		raiseCenter = player->GetPosition();
 	UpdateRaiseMap(raiseCenter);
 	upload[0].A = float4(static_cast<float>(count), std::clamp(settings.MaxTessFactor, 1.0f, 64.0f), settings.TessRange, settings.DisplacementScale);
-	// 2 = tessellate the whole near field (raised snow/mud/sand). 1 = footprints only. 0 = off.
-	const float tessMode = tess ? (raiseActive ? 2.0f : 1.0f) : 0.0f;
+	// 2 = tessellate the whole near field. 1.25 = footprints plus a bubble under the player. 1 = footprints only. 0 = off.
+	float tessMode = 0.0f;
+	if (tess)
+		tessMode = raiseActive ? (settings.RaiseFullField ? 2.0f : 1.25f) : 1.0f;
 	upload[0].B = float4(settings.NormalStrength, tessMode, windowOriginX, windowOriginY);
 
 	D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -681,8 +682,8 @@ void TerrainDeformation::StampHeightmap(ID3D11DeviceContext* a_context)
 	a_context->PSSetShaderResources(56, 1, &unbound);
 	a_context->PSSetShaderResources(57, 1, &unbound);
 
-	ID3D11ShaderResourceView* prints = printSRV.get();
-	a_context->CSSetShaderResources(0, 1, &prints);
+	ID3D11ShaderResourceView* printView = printSRV.get();
+	a_context->CSSetShaderResources(0, 1, &printView);
 	ID3D11UnorderedAccessView* uavs[2]{ heightUAV.get(), activityUAV.get() };
 	UINT counts[2]{ 0u, 0u };
 	a_context->CSSetUnorderedAccessViews(0, 2, uavs, counts);
@@ -988,9 +989,12 @@ void TerrainDeformation::DrawSettings()
 	BFUI::SliderFloat(T(TKEY("radius"), "Visible Radius"), &settings.Radius, 512.0f, 16384.0f, "%.0f");
 
 	ImGui::SeparatorText(T(TKEY("raise_section"), "Raised Ground"));
+	BFUI::Checkbox(T(TKEY("raise_full"), "Raise the whole near field"), &settings.RaiseFullField);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text("%s", T(TKEY("raise_full_tt"), "Off: snow, mud and sand stand only under your feet and in footprints. On: the raised layer covers the whole tessellation range."));
 	BFUI::SliderFloat(T(TKEY("snow_raise"), "Snow Height"), &settings.SnowRaise, 0.0f, 120.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::Text("%s", T(TKEY("snow_raise_tt"), "How far snow stands above the ground, in game units. It fades out at the tessellation range so the far ground stays flat."));
+		ImGui::Text("%s", T(TKEY("snow_raise_tt"), "How far snow stands above the ground, in game units. Under the player it covers about 2.5 metres. The whole near field is only raised when that option is on."));
 	BFUI::SliderFloat(T(TKEY("mud_raise"), "Mud Height"), &settings.MudRaise, 0.0f, 60.0f, "%.0f");
 	BFUI::SliderFloat(T(TKEY("sand_raise"), "Sand Height"), &settings.SandRaise, 0.0f, 40.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())

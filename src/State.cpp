@@ -5,6 +5,7 @@
 
 #include <pystring/pystring.h>
 
+#include "Bearforj/PicturePreset.h"
 #include "Deferred.h"
 #include "EngineFixes/LODBlendRingFix.h"
 #include "EngineFixes/LandscapeSeamsFix.h"
@@ -549,12 +550,28 @@ void State::Load(ConfigMode a_configMode, bool a_allowReload)
 	// LOADING ORDER: Default → User → Overrides → User Overrides (.user files)
 
 	// Step 1: Generate the baseline before any user settings can reach live state
-	if (defaultSettingsBaseline.is_null()) {
+		if (defaultSettingsBaseline.is_null()) {
 		std::fill(enabledClasses, enabledClasses + magic_enum::enum_integer(RE::BSShader::Type::Total) - 1, true);
 		json generatedDefaults;
 		std::string serializedDefaults;
+		json shippedDisplay;
+		{
+			std::ifstream shipped(defaultConfigFilePath);
+			if (shipped.is_open()) {
+				try {
+					json disk;
+					shipped >> disk;
+					if (disk.contains("Volumetric Lighting Display") && disk["Volumetric Lighting Display"].is_object())
+						shippedDisplay = disk["Volumetric Lighting Display"];
+				} catch (const std::exception& e) {
+					logger::warn("Picture preset display block in {} was not readable: {}", defaultConfigFilePath, e.what());
+				}
+			}
+		}
 		try {
 			SaveToJson(generatedDefaults);
+			if (shippedDisplay.is_object())
+				generatedDefaults["Volumetric Lighting Display"] = shippedDisplay;
 			auto& disabledByDefault = generatedDefaults["Disable at Boot"];
 			for (auto* feature : Feature::GetFeatureList())
 				disabledByDefault[feature->GetShortName()] = feature->IsDisabledByDefault();
@@ -701,6 +718,8 @@ void State::Load(ConfigMode a_configMode, bool a_allowReload)
 		}
 #endif
 
+		Bearforj::PicturePreset::ApplyDisplaySettings();
+		Bearforj::PicturePreset::TryApplyResolutionPreset();
 		logger::info("Loading Settings Complete");
 	} catch (const json::exception& e) {
 		logger::warn("General JSON error accessing settings: {}", e.what());
@@ -762,6 +781,7 @@ void State::SaveToJson(nlohmann::json& settings)
 	settings["Favorites"] = favoriteFeatures;
 
 	settings["Version"] = Plugin::VERSION.string();
+	Bearforj::PicturePreset::WriteDisplaySettings(settings);
 
 	// Save feature settings
 	for (auto* feature : Feature::GetFeatureList()) {
@@ -796,6 +816,8 @@ void State::LoadFromJson(nlohmann::json& settings)
 			disabledFeatures[featureName] = true;
 	}
 
+	Bearforj::PicturePreset::ReadDisplaySettings(settings);
+
 	favoriteFeatures.clear();
 	if (const auto favorites = settings.find("Favorites"); favorites != settings.end() && favorites->is_object()) {
 		for (const auto& [featureName, favorite] : favorites->items()) {
@@ -828,7 +850,7 @@ void State::LoadFromJson(nlohmann::json& settings)
 		if (advanced.contains("Compiler Threads") && advanced["Compiler Threads"].is_number_integer())
 			shaderCache->compilationThreadCount = std::clamp(advanced["Compiler Threads"].get<int32_t>(), 1, static_cast<int32_t>(std::thread::hardware_concurrency()));
 		if (advanced.contains("Background Compiler Threads") && advanced["Background Compiler Threads"].is_number_integer())
-			shaderCache->backgroundCompilationThreadCount = std::clamp(advanced["Background Compiler Threads"].get<int32_t>(), 1, static_cast<int32_t>(std::thread::hardware_concurrency()));
+			shaderCache->backgroundCompilationThreadCount = std::clamp(advanced["Background Compiler Threads"].get<int32_t>(), 1, SIE::ShaderCache::kMaxBackgroundCompilationThreads);
 		if (advanced.contains("Use FileWatcher") && advanced["Use FileWatcher"].is_boolean())
 			shaderCache->SetFileWatcher(advanced["Use FileWatcher"]);
 		if (advanced.contains("Frame Annotations") && advanced["Frame Annotations"].is_boolean())
@@ -1525,7 +1547,7 @@ void State::UpdateSharedData([[maybe_unused]] bool a_inWorld, [[maybe_unused]] b
 			}
 		}
 
-		globals::features::waterWaves.ApplyShared(data.DisplacedWaterHeight, data.CameraBelowWaves, data.WaveScale, data.WaveAmplitude, data.WaveChop, data.WaveShore, data.WindFieldTransitionData.z, data.WindFieldTransitionData.w, data.ShoreOriginX, data.ShoreOriginY, data.ShoreCellSize, data.ShoreCellCount);
+		globals::features::waterWaves.ApplyShared(data.DisplacedWaterHeight, data.CameraBelowWaves, data.WaveScale, data.WaveAmplitude, data.WaveChop, data.WaveShore, data.WindFieldTransitionData.z, data.WindFieldTransitionData.w, data.ShoreOriginX, data.ShoreOriginY, data.ShoreCellSize, data.ShoreCellCount, data.WaveLook.x, data.WaveLook.y, data.WaveLook.z, data.WaveLook.w);
 
 		data.InInterior = Util::IsInterior();
 		data.HasDirectionalShadows = HasDirectionalShadows();

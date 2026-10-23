@@ -324,6 +324,8 @@ namespace ShadowCasterManager
 		if (s_bootAtlasEnabled && !AtlasActive())
 			capped.ShadowLightCount = SliceCappedLightCount(capped.ShadowLightCount, kVanillaShadowSliceCount);
 
+		// Size the pool from the installed count first. The outdoor/indoor budget below
+		// must not shrink that pool on every cell change.
 		int newTotal = LightContainerSize(capped);
 		if (newTotal != s_lights.Size) {
 			auto* newLights = new LightEntry[newTotal]();
@@ -380,6 +382,8 @@ namespace ShadowCasterManager
 		reparseIfChanged(s_formulaRedrawInterval, s_settings.RedrawIntervalFormula, capped.RedrawIntervalFormula, "RedrawIntervalFormula");
 		reparseIfChanged(s_formulaRedrawBudget, s_settings.RedrawBudgetFormula, capped.RedrawBudgetFormula, "RedrawBudgetFormula");
 
+		const int32_t placedBudget = Util::IsInterior() ? 6 : 4;
+		capped.ShadowLightCount = std::min(capped.ShadowLightCount, placedBudget);
 		s_settings = capped;
 	}
 

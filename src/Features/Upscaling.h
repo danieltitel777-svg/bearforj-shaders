@@ -118,8 +118,8 @@ public:
 		// Boot-locked; the preset is inert while set. DLSS clamps into NGX range.
 		float vrRenderScale = 0.0f;
 
-		// Opt in to AMD's runtime FSR4 upscaler DLL on eligible RDNA4 hardware instead of the
-		// host-linked FSR3 SDK; falls back to FSR3 on any failure.
+		// Opt in to AMD's runtime FSR4 upscaler DLL on RX 9000, RX 7000, and (experimental)
+		// RX 6000 instead of the host-linked FSR3 SDK. A failed provider create falls back to FSR 3.1.
 		bool fsr4RuntimeEnable = false;
 
 		// Tracks whether fsr4RuntimeEnable has been auto-migrated for the detected adapter.

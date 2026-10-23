@@ -319,7 +319,7 @@ void EditorWindow::DrawBrowserHeader()
 			ImGui::SetWindowCollapsed(false);
 		}
 	};
-	drawMode(T(TKEY("weather_lighting_browser"), "OS Editor Browser"), BrowserMode::Editor);
+	drawMode(T(TKEY("weather_lighting_browser"), "BF Editor Browser"), BrowserMode::Editor);
 	ImGui::SameLine();
 	drawMode(T(TKEY("os_menu"), "OS Menu"), BrowserMode::Menu);
 	if (browserMode == BrowserMode::Menu) {
@@ -343,7 +343,7 @@ void EditorWindow::ShowObjectsWindow()
 		browserMode = static_cast<BrowserMode>(requestedMode);
 
 	const auto& headerStyle = ImGui::GetStyle();
-	const float modeButtonsWidth = ImGui::CalcTextSize(T(TKEY("weather_lighting_browser"), "OS Editor Browser")).x +
+	const float modeButtonsWidth = ImGui::CalcTextSize(T(TKEY("weather_lighting_browser"), "BF Editor Browser")).x +
 	                               ImGui::CalcTextSize(T(TKEY("os_menu"), "OS Menu")).x + headerStyle.FramePadding.x * 4.0f;
 	const float headerInset = std::max(headerStyle.WindowPadding.x, headerStyle.WindowRounding + headerStyle.WindowBorderSize);
 	const float minWidth = ImGui::GetFrameHeight() + modeButtonsWidth + MenuHeaderRenderer::GetCompactActionsWidth(globals::menu->uiIcons) +
@@ -353,7 +353,7 @@ void EditorWindow::ShowObjectsWindow()
 	const auto* previousWindow = ImGui::FindWindowByName(windowId);
 	const auto* dockNode = previousWindow ? previousWindow->DockNode : nullptr;
 	const bool docked = dockNode && dockNode->HostWindow;
-	const auto title = std::format("{}{}", docked ? T(TKEY("weather_lighting_browser"), "OS Editor Browser") : "", windowId);
+	const auto title = std::format("{}{}", docked ? T(TKEY("weather_lighting_browser"), "BF Editor Browser") : "", windowId);
 	ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
 	if (docked)
 		flags |= ImGuiWindowFlags_MenuBar;
@@ -1369,7 +1369,7 @@ void EditorWindow::RenderUI()
 			ImGui::EndMenu();
 		}
 		if (ImGui::BeginMenu(T(TKEY("help"), "Help"))) {
-			ImGui::Text("%s", T(TKEY("cs_editor"), "OS Editor"));
+			ImGui::Text("%s", T(TKEY("cs_editor"), "BF Editor"));
 			ImGui::Separator();
 			ImGui::TextColored(Menu::GetSingleton()->GetTheme().StatusPalette.InfoColor, "%s", T(TKEY("keyboard_shortcuts"), "Keyboard Shortcuts:"));
 			ImGui::BulletText("%s", T(TKEY("shortcut_ctrl_f"), "Ctrl+F: Focus search"));
@@ -1605,7 +1605,7 @@ void EditorWindow::RenderUI()
 		ImGui::SetCursorScreenPos(ImVec2(xButtonX, cursorY));
 		if (Util::ErrorTextButton("X", ImVec2(closeButtonSize, closeButtonSize)))
 			open = false;
-		Util::AddTooltip(T(TKEY("close_cs_editor"), "Close OS Editor (Esc)"));
+		Util::AddTooltip(T(TKEY("close_cs_editor"), "Close BF Editor (Esc)"));
 
 		ImGui::PopClipRect();
 		ImGui::EndMainMenuBar();

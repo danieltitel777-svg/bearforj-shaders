@@ -6,7 +6,9 @@
 #	include "Effects11/SettingManager.h"
 #endif
 #include "../I18n/I18n.h"
+#include <cmath>
 #include "Globals.h"
+#include "PhysicalSky.h"
 #include "State.h"
 #include "Utils/D3D.h"
 
@@ -58,6 +60,7 @@ CloudShadows::Settings CloudShadows::GetCommonBufferData()
 		return settings;
 
 	auto data = settings;
+	const bool march = globals::features::physicalSky.loaded && globals::features::physicalSky.settings.enableVolumetricClouds;
 
 #if defined(ENABLE_EFFECTS11)
 	if (globals::features::effects11.loaded) {
@@ -73,6 +76,10 @@ CloudShadows::Settings CloudShadows::GetCommonBufferData()
 	}
 #endif
 
+	if (march)
+		data.Opacity = 0.2f;
+	else if (std::abs(settings.Opacity - 0.2f) <= 0.001f)
+		data.Opacity = 0.85f;
 	return data;
 }
 

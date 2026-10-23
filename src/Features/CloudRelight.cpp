@@ -3,6 +3,7 @@
 
 #include "../I18n/I18n.h"
 #include "CloudShadows.h"
+#include "PhysicalSky.h"
 #include "SkySync.h"
 
 #define I18N_KEY_PREFIX "feature.cloud_relight."
@@ -82,6 +83,15 @@ CloudRelight::Settings CloudRelight::GetCommonBufferData() const
 {
 	auto data = settings;
 	ClampSettings(data);
+	const bool march = globals::features::physicalSky.loaded && globals::features::physicalSky.settings.enableVolumetricClouds;
+	if (march) {
+		data.enabled = false;
+	} else if (!settings.enabled && settings.silverLiningSpread == 0.0f) {
+		// Flat clouds are the 4K / march-off picture: silver lining on, volume off.
+		data.enabled = true;
+		data.silverLiningMix = 1.0f;
+		data.silverLiningSpread = 0.35f;
+	}
 	data.celestialLightWeights = globals::features::skySync.GetCelestialLightWeights().value_or(DirectionalLightFallbackWeights);
 	return data;
 }

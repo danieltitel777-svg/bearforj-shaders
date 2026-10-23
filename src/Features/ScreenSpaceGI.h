@@ -16,6 +16,7 @@ public:
 	virtual inline std::string GetShortName() override { return "ScreenSpaceGI"; }
 	virtual inline std::string GetFeatureModLink() override { return MakeNexusModURL(MOD_ID); }
 	virtual std::string_view GetCategory() const override { return FeatureCategories::kLighting; }
+	virtual bool IsDisabledByDefault() const override { return true; }
 
 	/** @brief Returns a localized description and list of key features for the UI summary panel. */
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override

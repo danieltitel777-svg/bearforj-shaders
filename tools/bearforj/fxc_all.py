@@ -5,8 +5,10 @@ Matrix mirrors src/ShaderCache.cpp:
     (feature sets taken from each Feature::HasShaderDefine), with all features off and all on;
   * Water: GetWaterShaderDefines (WATER FOG, flags, exactly one technique: SPECULAR+NUM_SPECULAR_LIGHTS / UNDERWATER / LOD / STENCIL / SIMPLE);
   * feature compute/aux shaders: every Util::CompileShader / LazyShader::Get call in src/ (file, literal defines, profile, entry).
-Usage: fxc_all.py <merged_shader_root> <log>. Exit 1 if any job fails."""
-import sys, os, subprocess, itertools, glob, re
+Usage: fxc_all.py <merged_shader_root> <log> [--shard N --shards M] [--only REGEX] [--dry-run].
+--shard keeps jobs whose index modulo M equals N, so CI can compile in parallel.
+The log is flushed as each compile finishes. Exit 1 if any job in this shard fails."""
+import sys, os, subprocess, itertools, glob, re, threading
 from concurrent.futures import ThreadPoolExecutor
 root, log = sys.argv[1], sys.argv[2]
 SRC = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -84,25 +86,80 @@ OVERRIDES = {
     "VR/StereoBlendCS.hlsl": [["COMPUTESHADER", "VR", "FRAMEBUFFER"]],  # VR/StereoBlend.cpp:13 (VR only)
 }
 jobs = [j for j in jobs if j[0] not in OVERRIDES] + [(f, "cs_5_0" if "CS" in f else "ps_5_0", "main", d) for f, ds in OVERRIDES.items() for d in ds]
-ONLY = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
+def flag(name):
+    if name not in sys.argv:
+        return None
+    i = sys.argv.index(name)
+    if i + 1 >= len(sys.argv):
+        sys.exit(f"missing value for {name}")
+    return sys.argv[i + 1]
+
+ONLY = flag("--only")
 if ONLY: jobs = [j for j in jobs if re.search(ONLY, j[0])]
-FXC = "/workspace/bearforj/fxc/fxcw.exe"
+shard_s, shards_s = flag("--shard"), flag("--shards")
+if (shard_s is None) != (shards_s is None):
+    sys.exit("--shard and --shards are used together")
+shard, shards = int(shard_s or 0), int(shards_s or 1)
+if shards < 1 or shard < 0 or shard >= shards:
+    sys.exit(f"bad shard {shard}/{shards}")
+FXC = os.environ.get("FXCW") or "/workspace/bearforj/fxc/fxcw.exe"
+NATIVE_FXC = os.environ.get("FXC")
+
+def compile_command(sh, prof, entry, defs):
+    """fxcw.exe (wine) prints RESULT OK. Native fxc.exe is the Windows SDK compiler."""
+    if NATIVE_FXC and os.path.isfile(NATIVE_FXC):
+        cmd = [NATIVE_FXC, "/nologo", "/T", prof, "/E", entry, "/I", root]
+        for define in defs:
+            cmd.extend(["/D", define])
+        cmd.append(sh)
+        return cmd, True
+    return ["wine", FXC, sh, entry, prof] + defs, False
+
 def run(j):
     sh, prof, entry, defs = j
     if not os.path.exists(os.path.join(root, sh)): return j, False, ["missing file"]
-    r = subprocess.run(["wine", FXC, sh, entry, prof] + defs, cwd=root, capture_output=True, text=True, errors="ignore", env={**os.environ, "WINEDEBUG": "-all"})
-    return j, "RESULT OK" in r.stdout, [l.strip() for l in r.stdout.splitlines() if "error" in l.lower()]
+    cmd, native = compile_command(sh, prof, entry, defs)
+    r = subprocess.run(cmd, cwd=root, capture_output=True, text=True, errors="ignore", env={**os.environ, "WINEDEBUG": "-all"})
+    text = (r.stdout or "") + "\n" + (r.stderr or "")
+    ok = r.returncode == 0 if native else "RESULT OK" in r.stdout
+    return j, ok, [l.strip() for l in text.splitlines() if "error" in l.lower()]
 seen = set(); uniq = []
 for j in jobs:
     k = (j[0], j[1], j[2], tuple(sorted(j[3])))
     if k not in seen: seen.add(k); uniq.append(j)
-with ThreadPoolExecutor(12) as ex: res = list(ex.map(run, uniq))
-bad = [r for r in res if not r[1]]
-allcs = {os.path.relpath(p, root).replace(os.sep, "/") for p in glob.glob(f"{root}/**/*.hlsl", recursive=True)}
-with open(log, "w") as L:
-    for (sh, prof, entry, defs), ok, errs in res:
-        L.write(f"{'OK  ' if ok else 'FAIL'} {sh} {prof}:{entry} [{' '.join(defs)}]\n")
-        for e in errs[:20]: L.write(f"      {e}\n")
-    L.write(f"\nTOTAL {len(res)} jobs, {len(res)-len(bad)} OK, {len(bad)} FAIL\n")
-print(f"TOTAL {len(res)} jobs, {len(res)-len(bad)} OK, {len(bad)} FAIL -> {log}")
+uniq = [j for i, j in enumerate(uniq) if i % shards == shard]
+if "--dry-run" in sys.argv:
+    print(f"TOTAL {len(uniq)} jobs shard {shard}/{shards}")
+    sys.exit(0)
+workers = int(os.environ.get("FXC_WORKERS") or 0)
+if workers < 1:
+    workers = max(2, min(12, (os.cpu_count() or 2) * 2))
+print(f"fxc shard {shard}/{shards} jobs {len(uniq)} workers {workers}", flush=True)
+lock = threading.Lock()
+done = {"n": 0, "bad": 0}
+with open(log, "w", encoding="utf-8") as logf:
+    def record(j):
+        result = run(j)
+        (sh, prof, entry, defs), ok, errs = result
+        with lock:
+            done["n"] += 1
+            if not ok:
+                done["bad"] += 1
+            logf.write(f"{'OK  ' if ok else 'FAIL'} {sh} {prof}:{entry} [{' '.join(defs)}]\n")
+            for e in errs[:20]:
+                logf.write(f"      {e}\n")
+            logf.flush()
+            if done["n"] % 25 == 0 or not ok:
+                print(f"progress {done['n']}/{len(uniq)} fail {done['bad']} {sh} {prof}:{entry}", flush=True)
+                if not ok:
+                    for e in errs[:8]:
+                        print(f"      {e}", flush=True)
+        return result
+    with ThreadPoolExecutor(workers) as ex:
+        res = list(ex.map(record, uniq))
+    bad = [r for r in res if not r[1]]
+    summary = f"TOTAL {len(res)} jobs, {len(res)-len(bad)} OK, {len(bad)} FAIL"
+    logf.write(f"\n{summary}\n")
+    logf.flush()
+print(f"{summary} -> {log}", flush=True)
 sys.exit(1 if bad else 0)

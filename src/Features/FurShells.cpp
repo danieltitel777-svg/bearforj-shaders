@@ -867,7 +867,16 @@ void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
 			return;
 	}
 
-	const float layers = std::clamp(pixels / PixelsPerShell, 1.0f, static_cast<float>(std::min(values.ShellCount, MaxShells)));
+	// Distance bands in metres (70 units). Near keeps 8–12 layers; farther shells drop, then stop.
+	constexpr float kUnitsPerMetre = 70.0f;
+	if (distance >= 25.0f * kUnitsPerMetre)
+		return;
+	uint32_t lodCap = std::clamp(values.ShellCount, 8u, 12u);
+	if (distance >= 15.0f * kUnitsPerMetre)
+		lodCap = 2;
+	else if (distance >= 8.0f * kUnitsPerMetre)
+		lodCap = 4;
+	const float layers = std::clamp(pixels / PixelsPerShell, 1.0f, static_cast<float>(std::min(lodCap, MaxShells)));
 	const auto shells = static_cast<uint32_t>(std::ceil(layers));
 	const float tipWeight = layers - static_cast<float>(shells - 1);
 	maxShells = std::max(maxShells, shells);

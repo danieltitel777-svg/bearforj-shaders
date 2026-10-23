@@ -51,7 +51,7 @@ struct ColorGrading : public PostProcessFeature
 		};
 
 		// Contrast
-		float4 contrast = { 1.f, 1.f, 1.f, 0.f };
+		float4 contrast = { 1.06f, 1.06f, 1.06f, 0.f };
 		float4 pivot = { 0.18f, 0.18f, 0.18f, 0.f };
 
 		// Exposure/Temperature/Tint
@@ -77,7 +77,7 @@ struct ColorGrading : public PostProcessFeature
 		bool useLog = false;
 		uint logType = 0;
 		bool invertLog = false;
-		bool enableTonemap = true;
+		bool enableTonemap = false;
 		int processColorSpace = 0;
 
 		OpenDRTSettings odrtConfig;

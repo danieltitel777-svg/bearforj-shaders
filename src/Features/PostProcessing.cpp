@@ -35,17 +35,17 @@ namespace
 		switch (a_index) {
 		case Index::Vignette:
 		case Index::AutoExposure:
-		case Index::CODBloom:
 		case Index::Composite:
 		case Index::ColorGrading:
+		case Index::Camera:
 			return true;
+		case Index::CODBloom:
 		case Index::DoF:
 		case Index::LocalExposure:
 		case Index::MotionBlur:
 		case Index::PhysicalGlare:
 		case Index::LensFlare:
 		case Index::LUT:
-		case Index::Camera:
 		case Index::Border:
 		case Index::COUNT:
 			return false;

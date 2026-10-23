@@ -20,6 +20,7 @@
 #include "Features/HDRDisplay.h"
 #include "Features/InteriorSun.h"
 #include "Features/LightLimitFix.h"
+#include "Features/PhysicalSky.h"
 #include "Features/PostProcessing.h"
 #include "Features/ProceduralAurora.h"
 #include "Features/RainRefraction.h"
@@ -1112,6 +1113,12 @@ namespace Hooks
 				auto shaderCache = globals::shaderCache;
 				auto& vl = globals::features::volumetricLighting;
 
+				const bool volumetricGenerate = CurrentlyDispatchedComputeShader && CurrentlyDispatchedComputeShader->name == "ISVolumetricLightingGenerateCS"sv;
+				if (volumetricGenerate) {
+					auto& sky = globals::features::physicalSky;
+					ID3D11ShaderResourceView* cookie = sky.loaded && sky.settings.enableVolumetricClouds && sky.texShadowVolume ? sky.texShadowVolume->srv.get() : nullptr;
+					globals::d3d::context->CSSetShaderResources(4, 1, &cookie);
+				}
 				if (state->ShaderEnabled(RE::BSShader::Type::ImageSpace)) {
 					RE::BSImagespaceShader* isShader = CurrentlyDispatchedShader;
 					uint32_t techniqueId = CurrentComputeShaderTechniqueId;
@@ -1142,6 +1149,10 @@ namespace Hooks
 					}
 				}
 				func(renderer, shader, threadGroupCountX, threadGroupCountY, threadGroupCountZ);
+				if (volumetricGenerate) {
+					ID3D11ShaderResourceView* unbound = nullptr;
+					globals::d3d::context->CSSetShaderResources(4, 1, &unbound);
+				}
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};

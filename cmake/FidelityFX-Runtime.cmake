@@ -1,3 +1,8 @@
+# Checked 2026-10-23 against GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.
+# The newest public commit is still v2.3.0 (60f4ea8, 2026-06-24). Its notes
+# document FSR Upscaling 4.1.1 on RX 7000 and RX 9000 only. RX 6000 INT8
+# support was announced with Adrenalin 26.10.1 on 2026-10-20 and is not a
+# newer signed DLL in that repository, so this pin is unchanged.
 set(FFX_RUNTIME_SDK_COMMIT "60f4ea81909200d8542eca14dccb2628b763a9a3")
 set(FFX_RUNTIME_BASE_URL
     "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/${FFX_RUNTIME_SDK_COMMIT}/Kits/FidelityFX/signedbin"

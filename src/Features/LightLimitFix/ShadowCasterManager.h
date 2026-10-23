@@ -224,7 +224,7 @@ namespace ShadowCasterManager
 		bool Enabled = true;
 
 		/// Number of simultaneous shadow-casting point/spot lights.
-		int32_t ShadowLightCount = 16;
+		int32_t ShadowLightCount = 6;
 
 		/// Number of additional converted-light slots when ConvertExcessToNormal is enabled.
 		int32_t ConvertedShadowSlots = 32;

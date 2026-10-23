@@ -218,7 +218,7 @@ struct HpLightingSettings
 	uint32_t phaseModel = 0;
 	// 0 = legacy scalar in-scattering integral
 	// 1 = Frostbite energy-conserving per-channel albedo * (1 - transmittance)
-	uint32_t scatterIntegration = 0;
+	uint32_t scatterIntegration = 1;
 	// Fades the secondary (light) march step budget down to one step with view
 	// distance. 0 disables the LOD, 1 applies it fully.
 	float lightStepDistanceLod = 1.f;

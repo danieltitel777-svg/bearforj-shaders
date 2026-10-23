@@ -5,8 +5,11 @@ VFS) becomes Recommended (pre-checked); otherwise Optional."""
 import json, os, shutil, glob, sys, re, zipfile, hashlib
 from xml.sax.saxutils import escape as E, quoteattr as QA
 stage, dll, version, stamp = sys.argv[1:5]      # stage = unpacked previous package root (has '00 Core', '20 Presets', 'fomod/images')
-SRC = "/workspace/bearforj/src"
-OUTDIR = f"/workspace/bearforj/dist07/{version}_{stamp}"
+SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+OUTDIR = os.environ.get("BEARFORJ_OUTDIR")
+if not OUTDIR:
+    legacy = f"/workspace/bearforj/dist07/{version}_{stamp}"
+    OUTDIR = legacy if os.path.isdir("/workspace/bearforj") else os.path.join(SRC, "dist", f"{version}_{stamp}")
 ROOT = f"/tmp/bf_pkg_{version}"
 if os.path.exists(ROOT): shutil.rmtree(ROOT)
 shutil.copytree(stage, ROOT)
@@ -73,7 +76,8 @@ profiles = [json.load(open(f, encoding="utf-8")) for f in sorted(glob.glob(lib +
 for p in profiles:
     d = f"{ROOT}/10 Profiles/{p['id']}/SKSE/Plugins/CommunityShaders/Bearforj/Profiles/Selected"; os.makedirs(d)
     shutil.copy2(f"{lib}/{p['id']}.json", d)
-packs = json.load(open("/workspace/bearforj/tools_bf/packs.json"))
+# packs.json used to drive the old SelectAny weather page. The gate installer
+# does not read it. A missing path must not stop the zip.
 
 def deps(files, op="Or"):
     return f'<dependencies operator="{op}">' + "".join(f'<fileDependency file={QA(f)} state="Active"/>' for f in files) + "</dependencies>"
@@ -86,38 +90,27 @@ def opt(name, desc, image, files, td):
     fl = f"<files>{files}</files>"
     return f'<plugin name={QA(name)}><description>{E(desc)}</description>{img}{fl}{td}</plugin>'
 def folder(src): return f'<folder source={QA(src)} destination="" priority="0"/>'
-weather_plugins = sorted({f for p in profiles if p["kind"] == "weather" for f in p["plugins"]})
-# Auto: Recommended only when NO known weather plugin is active.
-auto_td = (f'<typeDescriptor><dependencyType><defaultType name="Recommended"/><patterns><pattern>{deps(weather_plugins)}'
-           f'<type name="Optional"/></pattern></patterns></dependencyType></typeDescriptor>')
-W = [opt("Auto-detect (no fixed choice)", "Bearforj finds your weather mod by its plugin at startup. / Bearforj сам найдёт погодный мод по плагину.", "auto", "", auto_td)]
-L = []; S = []; PP = []
-for p in profiles:
-    desc = f"{p['notes']}\n{p['url']}".strip()
-    if p["plugins"]: desc += "\nDetected by / ищем плагин: " + ", ".join(p["plugins"])
-    o = opt(p["name"], desc, p["id"], folder(f"10 Profiles\\{p['id']}"), detect_type(p["plugins"]))
-    {"weather": W, "storm": S, "post": PP}.get(p["kind"], L).append(o)
-P = [opt(f"Preset pack: {n}", f"9 weather presets tuned for {n}. Any preset can be assigned to any weather slot in the menu.", f"weather_{k}", folder(f"20 Presets\\{k}"),
-         '<typeDescriptor><type name="Recommended"/></typeDescriptor>') for k, n in packs if os.path.isdir(f"{ROOT}/20 Presets/{k}")]
-O = [opt("Advanced menu", "Show debug tools and advanced settings from the first start. / Сразу показывать отладку и продвинутые настройки.", "advanced", folder("30 Options\\advanced"),
-         '<typeDescriptor><type name="Optional"/></typeDescriptor>')]
-def group(n, t, o): return f'<group name={QA(n)} type="{t}"><plugins order="Explicit">{"".join(o)}</plugins></group>'
-def step(n, g): return f'<installStep name={QA(n)}><optionalFileGroups order="Explicit">{"".join(g)}</optionalFileGroups></installStep>'
-steps = [step("Weather / Погода", [group("Weather mod (pick one, detected one is pre-selected)", "SelectExactlyOne", W)]),
-         step("Lighting / Свет", [group("Lighting mods (detected ones are pre-checked)", "SelectAny", L)])]
-if S: steps.append(step("Storms / Грозы", [group("Storm / lightning mods (detected ones are pre-checked)", "SelectAny", S)]))
-if PP: steps.append(step("Post-processing", [group("Post-processing mods (detected ones are pre-checked)", "SelectAny", PP)]))
-steps += [step("Weather presets / Пресеты погоды", [group("Preset packs", "SelectAny", P)]), step("Options / Опции", [group("Menu", "SelectAny", O)])]
-xml = f'''<?xml version="1.0" encoding="UTF-16"?>
-<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
-<moduleName>Bearforj Shaders {version}</moduleName>
-<moduleImage path="fomod\\images\\header.png"/>
-<requiredInstallFiles>{folder("00 Core")}</requiredInstallFiles>
-<installSteps order="Explicit">{"".join(steps)}</installSteps>
-</config>'''
-open(f"{ROOT}/fomod/ModuleConfig.xml", "w", encoding="utf-16").write(xml)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gate_fomod
+weather_profiles = gate_fomod.weather_profiles(__import__("pathlib").Path(lib))
+# The core is not a requiredInstallFile. It is installed only on the picture-preset
+# step, and that step stays hidden until every dependency gate is yes. A failed
+# check installs fomod/stop and nothing else. No shader cache is offered.
+stop_dir = f"{ROOT}/fomod/stop"
+os.makedirs(stop_dir, exist_ok=True)
+repo_stop = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "fomod", "stop", "Bearforj_FOMOD_STOP.txt")
+if os.path.isfile(repo_stop):
+    shutil.copy2(repo_stop, os.path.join(stop_dir, "Bearforj_FOMOD_STOP.txt"))
+preset_dir = f"{ROOT}/preset/default"
+os.makedirs(preset_dir, exist_ok=True)
+repo_preset = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "preset", "default", "SettingsDefault.json")
+if os.path.isfile(repo_preset):
+    shutil.copy2(repo_preset, os.path.join(preset_dir, "SettingsDefault.json"))
+xml = gate_fomod.module_xml(profiles=weather_profiles, core_source="00 Core")
+xml = xml.replace("<moduleName>Bearforj Shaders</moduleName>", f"<moduleName>Bearforj Shaders {version}</moduleName>", 1)
+open(f"{ROOT}/fomod/ModuleConfig.xml", "w", encoding="utf-8").write(xml)
 open(f"{ROOT}/fomod/info.xml", "w", encoding="utf-16").write(f'''<?xml version="1.0" encoding="UTF-16"?>
-<fomod><Name>Bearforj Shaders</Name><Author>Bearforj team (fork of Open Shaders / Community Shaders)</Author><Version>{version}</Version><Description>Bearforj Shaders {version} with weather/lighting compatibility profiles (auto-detected).</Description><Groups><element>Visuals and Graphics</element></Groups></fomod>''')
+<fomod><Name>Bearforj Shaders</Name><Author>Bearforj team (fork of Open Shaders / Community Shaders)</Author><Version>{version}</Version><Description>Bearforj Shaders {version}. One weather, True Light and Light Placer. Lux is optional and off. No shader cache.</Description><Groups><element>Visuals and Graphics</element></Groups></fomod>''')
 from lxml import etree
 schema = etree.XMLSchema(etree.parse(f"{SRC}/tools/bearforj/ModuleConfig.xsd"))
 ok = schema.validate(etree.parse(f"{ROOT}/fomod/ModuleConfig.xml")); print("schema valid:", ok, schema.error_log)
