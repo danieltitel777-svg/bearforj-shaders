@@ -564,7 +564,9 @@ public:
 		uint HideSky;
 		float MipBias;
 		float WaterSystemHeight;  // TES::GetWaterHeight at eye-0 in camera-relative Z; -NI_INFINITY when no water body found (VR only)
-		float3 pad0;
+		float DisplacedWaterHeight;
+		float CameraBelowWaves;
+		float WaveScale;
 		float4 AmbientSHR;
 		float4 AmbientSHG;
 		float4 AmbientSHB;
@@ -572,7 +574,9 @@ public:
 		float4 VRFoveationCenterOffsets;  // xy=left eye center offset, zw=right eye center offset
 		float4 HDRData;                   // xyz + menu scene encoding in w — see HDRDisplay::GetSharedDataHDR
 		float RefractionScale;            // ISRefraction.hlsl heat-shimmer multiplier; 1.0 = unmodified vanilla strength
-		float3 pad1;
+		float WaveAmplitude;
+		float WaveChop;
+		float WaveShore;
 		WindField::WindTuning WindFieldTuning;
 		float4 WindFieldAmbient;  // xyz: selected mean weather velocity, w: accumulated gust travel
 		float4 WindFieldPreviousAmbient;
@@ -585,6 +589,10 @@ public:
 		std::array<uint32_t, 4> WindFieldActiveCounts;
 		std::array<WindField::TransientWindSource, WindField::kTransientImpulseCapacity> WindFieldTransientImpulses;
 		std::array<WindField::TransientWindSource, WindField::kTransientImpulseCapacity> WindFieldPreviousTransientImpulses;
+		float ShoreOriginX;
+		float ShoreOriginY;
+		float ShoreCellSize;
+		float ShoreCellCount;
 	};
 	STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
 	// Each float4 cbuffer field must start on a 16-byte boundary to match the HLSL SharedData
@@ -604,6 +612,7 @@ public:
 	static_assert(offsetof(SharedDataCB, WindFieldActiveCounts) % 16 == 0);
 	static_assert(offsetof(SharedDataCB, WindFieldTransientImpulses) % 16 == 0);
 	static_assert(offsetof(SharedDataCB, WindFieldPreviousTransientImpulses) % 16 == 0);
+	static_assert(offsetof(SharedDataCB, ShoreOriginX) % 16 == 0);
 	static_assert(sizeof(SharedDataCB) <= D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT * 16);
 
 	std::unique_ptr<ConstantBuffer> sharedDataCB;

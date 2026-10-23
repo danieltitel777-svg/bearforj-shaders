@@ -24,11 +24,9 @@
 #include "Features/HairSpecular.h"
 #include "Features/TerrainDeformation.h"
 #include "Features/SubmersionWetness.h"
-#include "Features/ScreenSpacePhysicalParticles.h"
-#include "Features/NativeParticlePhysics.h"
-#include "Features/FootstepKickParticles.h"
+#include "Features/ColdBreath.h"
+#include "Features/PhysicalEffectParticles.h"
 #include "Features/GPUFootstepParticles.h"
-#include "Features/SSPPSubFeatures.h"
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
 #include "Features/InteriorSun.h"
@@ -63,6 +61,7 @@
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
 #include "Features/WaterEffects.h"
+#include "Features/WaterWaves.h"
 #include "Features/WetnessEffects.h"
 #include "Features/Wind/Wind.h"
 #include "I18n/I18n.h"
@@ -285,14 +284,8 @@ namespace
 			&globals::features::hairSpecular,
 			&globals::features::terrainDeformation,
 			&globals::features::submersionWetness,
-			&globals::features::screenSpacePhysicalParticles,
-			&SSPPSub::Blood(),
-			&SSPPSub::Effects(),
-			&SSPPSub::Leaves(),
-			&SSPPSub::Footsteps(),
-			&SSPPSub::Precipitation(),
-			&globals::features::nativeParticlePhysics,
-			&globals::features::footstepKickParticles,
+			&globals::features::coldBreath,
+			&globals::features::physicalEffectParticles,
 			&globals::features::gpuFootstepParticles,
 			&globals::features::interiorSun,
 			&globals::features::furShells,
@@ -324,7 +317,8 @@ namespace
 			&globals::features::hdrDisplay,
 			&globals::features::skin,
 			&globals::features::reverseZ,
-			&globals::features::postProcessing
+			&globals::features::postProcessing,
+			&globals::features::waterWaves
 		};
 		return features;
 	}

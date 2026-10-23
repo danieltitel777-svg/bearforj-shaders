@@ -46,7 +46,7 @@ namespace Bearforj::Perf
 			static const std::map<std::string, int> v = {
 				{ "ScreenSpaceGI", 4 }, { "Skylighting", 5 }, { "ScreenSpaceShadows", 3 }, { "LightLimitFix", 5 },
 				{ "TerrainShadows", 4 }, { "CloudShadows", 3 }, { "WetnessEffects", 4 }, { "VolumetricLighting", 4 },
-				{ "ExponentialHeightFog", 3 }, { "ScreenSpacePhysicalParticles", 4 }, { "TerrainDeformation", 3 },
+				{ "ExponentialHeightFog", 3 }, { "PhysicalEffectParticles", 2 }, { "TerrainDeformation", 3 },
 				{ "SubsurfaceScattering", 3 }, { "DynamicCubemaps", 3 }, { "TerrainBlending", 2 }, { "GrassCollision", 2 },
 				{ "GrassLighting", 3 }, { "RainRefraction", 2 }, { "LODBlending", 2 }, { "IBL", 3 }, { "BearforjLook", 5 },
 				{ "Upscaling", 5 }, { "PhysicalSky", 4 }, { "SubmersionWetness", 2 }, { "ContactShadows", 2 },

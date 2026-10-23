@@ -524,15 +524,21 @@ float TD_EdgeFactor(float3 a_relA, float3 a_relB, bool a_patchActive)
 	float3 mid = 0.5 * (a_relA + a_relB);
 	float dist = length(mid);
 	float range = max(TerrainDeformation::TessRange(), 1.0);
-	float t = saturate(1.0 - dist / range);
-	// 0.6.4 activity gate (after Dynamic Terrain Deformation, GPL-3.0): only edges touching a stamped cell tessellate
-	float2 a = a_relA.xy + FrameBuffer::CameraPosAdjust[0].xy, b = a_relB.xy + FrameBuffer::CameraPosAdjust[0].xy;
-	bool active = a_patchActive;
-	// 9 samples: a long landscape edge can skip a 64-unit activity cell if only the endpoints are tested
-	[unroll] for (int k = 0; k <= 8; k++)
-		active = active || TerrainDeformation::Active(lerp(a, b, k * 0.125));
-	if (!active)
+	// Past the range the mesh is not tessellated. Factor 1 and a faded height of 0 keep that shared edge shut.
+	if (dist >= range)
 		return 1.0;
+	float t = saturate(1.0 - dist / range);
+	// A raised layer covers the whole near field, so every edge inside the range tessellates together.
+	if (!TerrainDeformation::RaiseField()) {
+		// 0.6.4 activity gate (after Dynamic Terrain Deformation, GPL-3.0): only edges touching a stamped cell tessellate
+		float2 a = a_relA.xy + FrameBuffer::CameraPosAdjust[0].xy, b = a_relB.xy + FrameBuffer::CameraPosAdjust[0].xy;
+		bool active = a_patchActive;
+		// 9 samples: a long landscape edge can skip a 64-unit activity cell if only the endpoints are tested
+		[unroll] for (int k = 0; k <= 8; k++)
+			active = active || TerrainDeformation::Active(lerp(a, b, k * 0.125));
+		if (!active)
+			return 1.0;
+	}
 	return clamp(lerp(1.0, TerrainDeformation::MaxTessFactor(), t * t), 1.0, 64.0);
 }
 
@@ -552,7 +558,7 @@ TD_PATCH_CONSTANTS TD_PatchConstants(InputPatch<VS_OUTPUT, 3> patch)
 	o.Inside = max(o.Edges[0], max(o.Edges[1], o.Edges[2]));
 	if (centre)
 		o.Inside = max(o.Inside, TD_EdgeFactor((p0 + p1 + p2) / 3.0, (p0 + p1 + p2) / 3.0, true));
-	if (!TerrainDeformation::TessellationEnabled() || TerrainDeformation::Count() == 0) {
+	if (!TerrainDeformation::TessellationEnabled() || (TerrainDeformation::Count() == 0 && !TerrainDeformation::RaiseField())) {
 		o.Edges[0] = o.Edges[1] = o.Edges[2] = o.Inside = 1.0;
 	}
 	return o;
@@ -2705,8 +2711,8 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 		[branch] if (SubmersionWetness::Active())
 		{
 			float absZ = input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z;
-			float submerged = SubmersionWetness::SubmergedMask(absZ, input.ModelPosition.xyz);
-			dropMask = lerp(submerged * saturate(SubmersionWetness::SubA.w), 1.0f, rainingNow);
+			float wetRegion = max(SubmersionWetness::RainMask(absZ), SubmersionWetness::SubmergedMask(absZ, input.ModelPosition.xyz));
+			dropMask = wetRegion * SubmersionWetness::AboveWaterMask(absZ);
 		}
 		else
 			dropMask = lerp(saturate(SharedData::wetnessEffectsSettings.CharacterRetainedWetness), 1.0f, rainingNow);
@@ -2736,7 +2742,8 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 #		else
 		float3 ripplePosition = !FrameBuffer::FrameParams.y ? input.ModelPosition.xyz : input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust[eyeIndex].xyz;
 #		endif
-		raindropInfo = WetnessEffects::GetRainDrops(ripplePosition, SharedData::wetnessEffectsSettings.Time, wetnessNormal, flatnessAmount);
+		float wetImpact = smoothstep(0.02, 0.2, max(SharedData::wetnessEffectsSettings.Wetness, SharedData::wetnessEffectsSettings.Raining));
+		raindropInfo = WetnessEffects::GetRainDrops(ripplePosition, SharedData::wetnessEffectsSettings.Time, wetnessNormal, max(flatnessAmount, wetImpact * 0.7));
 	}
 
 	// Calculate different wetness types
@@ -2894,12 +2901,19 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 		[branch] if (SubmersionWetness::Active())
 		{
 			float absZ = input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z;
-			regionMask = lerp(SubmersionWetness::SubmergedMask(absZ, input.ModelPosition.xyz) * saturate(SubmersionWetness::SubA.w), 1.0f, rainingNow);
+			regionMask = max(SubmersionWetness::RainMask(absZ), SubmersionWetness::SubmergedMask(absZ, input.ModelPosition.xyz)) * SubmersionWetness::AboveWaterMask(absZ);
 		}
 #			endif
 		characterCoatMask *= regionMask;
-		// Droplets can cover the whole character as soon as rain is falling. Darkening, gloss
-		// and clumping follow the staged coat (wetness), and reverse as that coat dries.
+#			if defined(SUBMERSION_WETNESS)
+		{
+			float snowAbsZ = input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z;
+			float settledSnow = SubmersionWetness::Snow(input.ModelPosition.xyz, worldNormal.xyz, snowAbsZ);
+			if (settledSnow > 0.001)
+				material.BaseColor = lerp(material.BaseColor, float3(0.72, 0.76, 0.80), settledSnow);
+		}
+#			endif
+		// Droplets and sheen stay on the wet region. Darkening follows the coat and dries back off.
 		float wetAmount = saturate(wetness);
 		float metal = 0.0f;
 #			if defined(TRUE_PBR)
@@ -3684,8 +3698,26 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 #			elif defined(ENVMAP) || defined(MULTI_LAYER_PARALLAX)
 	porosity = lerp(porosity, 0.0, saturate(sqrt(envMask)));
 #			endif
-	float wetnessDarkeningAmount = porosity * wetnessGlossinessAlbedo;
-	material.BaseColor = lerp(material.BaseColor, pow(abs(material.BaseColor), 1.0 + wetnessDarkeningAmount), 0.5);
+	float actorWet = 0.0;
+#		if defined(SUBMERSION_WETNESS) && defined(CHARACTER_RAIN_SURFACE)
+	if (characterRainSurface && SubmersionWetness::Active())
+		actorWet = SubmersionWetness::Coat(input.WorldPosition.z + FrameBuffer::CameraPosAdjust[eyeIndex].z, input.ModelPosition.xyz, 1.0);
+#		endif
+	[branch] if (actorWet > 0.02)
+	{
+		float actorMetal = 0.0;
+#		if defined(TRUE_PBR)
+		actorMetal = saturate(material.Metallic);
+#		endif
+		float actorPorosity = lerp(1.0, 0.15, actorMetal);
+		float actorDark = actorPorosity * actorWet * actorWet * 2.4;
+		material.BaseColor = lerp(material.BaseColor, pow(abs(material.BaseColor), 1.0 + actorDark), 0.75) * lerp(1.0, 0.78, actorWet * actorPorosity);
+	}
+	else
+	{
+		float wetnessDarkeningAmount = porosity * wetnessGlossinessAlbedo;
+		material.BaseColor = lerp(material.BaseColor, pow(abs(material.BaseColor), 1.0 + wetnessDarkeningAmount), 0.5);
+	}
 #		endif
 #	endif
 

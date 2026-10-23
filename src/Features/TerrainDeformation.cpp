@@ -1,10 +1,10 @@
 #include "TerrainDeformation.h"
 #include "Bearforj/TipUI.h"
+#include "SubmersionWetness.h"
 
 #include "../I18n/I18n.h"
 #include "../Utils/UI.h"
 #include "Globals.h"
-#include "ScreenSpacePhysicalParticles.h"
 #include "ShaderCache.h"
 #include "State.h"
 #include "Utils/D3D.h"
@@ -40,7 +40,11 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	MaxTessFactor,
 	TessRange,
 	DisplacementScale,
-	NormalStrength)
+	NormalStrength,
+	SnowRaise,
+	MudRaise,
+	SandRaise,
+	SinkFraction)
 
 namespace
 {
@@ -160,6 +164,27 @@ void TerrainDeformation::SetupResources()
 	CreateUintTexture(kHeightmapSize, heightTexture, heightSRV, heightUAV, "TerrainDeformation Heightmap");
 	CreateUintTexture(kActivitySize, activityTexture, activitySRV, activityUAV, "TerrainDeformation Activity");
 
+	{
+		D3D11_TEXTURE2D_DESC raiseDesc{};
+		raiseDesc.Width = kRaiseCells;
+		raiseDesc.Height = kRaiseCells;
+		raiseDesc.MipLevels = 1;
+		raiseDesc.ArraySize = 1;
+		raiseDesc.Format = DXGI_FORMAT_R32G32_FLOAT;
+		raiseDesc.SampleDesc.Count = 1;
+		raiseDesc.Usage = D3D11_USAGE_DEFAULT;
+		raiseDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		DX::ThrowIfFailed(globals::d3d::device->CreateTexture2D(&raiseDesc, nullptr, raiseTexture.put()));
+		D3D11_SHADER_RESOURCE_VIEW_DESC raiseSrv{};
+		raiseSrv.Format = DXGI_FORMAT_R32G32_FLOAT;
+		raiseSrv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		raiseSrv.Texture2D.MipLevels = 1;
+		DX::ThrowIfFailed(globals::d3d::device->CreateShaderResourceView(raiseTexture.get(), &raiseSrv, raiseSRV.put()));
+		Util::SetResourceName(raiseTexture.get(), "TerrainDeformation Raise");
+		Util::SetResourceName(raiseSRV.get(), "TerrainDeformation Raise SRV");
+	}
+	raiseCPU.assign(kRaiseCells * kRaiseCells, {});
+
 	D3D11_BUFFER_DESC cb{};
 	cb.ByteWidth = 16;
 	cb.Usage = D3D11_USAGE_DYNAMIC;
@@ -255,6 +280,154 @@ float TerrainDeformation::MaterialStrength(RE::MATERIAL_ID a_material) const
 	}
 }
 
+float TerrainDeformation::LayerRaise(RE::MATERIAL_ID a_material) const
+{
+	using M = RE::MATERIAL_ID;
+	switch (a_material) {
+	case M::kSnow:
+	case M::kSnowStairs:
+		return std::max(settings.SnowRaise, 0.0f);
+	case M::kMud:
+		return std::max(settings.MudRaise, 0.0f);
+	case M::kSand:
+		return std::max(settings.SandRaise, 0.0f);
+	default:
+		return 0.0f;
+	}
+}
+
+void TerrainDeformation::UploadRaiseMap()
+{
+	auto context = globals::d3d::context;
+	if (!context || !raiseTexture || raiseCPU.size() != kRaiseCells * kRaiseCells)
+		return;
+	context->UpdateSubresource(raiseTexture.get(), 0, nullptr, raiseCPU.data(), kRaiseCells * sizeof(RaiseTexel), 0);
+}
+
+void TerrainDeformation::UpdateRaiseMap(const RE::NiPoint3& a_center)
+{
+	if (!raiseTexture)
+		return;
+	if (raiseCPU.size() != kRaiseCells * kRaiseCells)
+		raiseCPU.assign(kRaiseCells * kRaiseCells, {});
+
+	const bool want = settings.Enabled && (settings.SnowRaise > 0.5f || settings.MudRaise > 0.5f || settings.SandRaise > 0.5f);
+	if (!want) {
+		if (raiseActive || raisePrimed) {
+			std::fill(raiseCPU.begin(), raiseCPU.end(), RaiseTexel{});
+			UploadRaiseMap();
+		}
+		raiseActive = false;
+		raisePrimed = false;
+		return;
+	}
+
+	const float originX = std::floor(windowOriginX / kRaiseCell) * kRaiseCell;
+	const float originY = std::floor(windowOriginY / kRaiseCell) * kRaiseCell;
+	int dx = 0;
+	int dy = 0;
+	if (raisePrimed) {
+		dx = static_cast<int>(std::lround((originX - raiseOriginX) / kRaiseCell));
+		dy = static_cast<int>(std::lround((originY - raiseOriginY) / kRaiseCell));
+		if (std::abs(dx) >= static_cast<int>(kRaiseCells) || std::abs(dy) >= static_cast<int>(kRaiseCells)) {
+			raisePrimed = false;
+			dx = 0;
+			dy = 0;
+		} else if (dx != 0 || dy != 0) {
+			std::vector<RaiseTexel> shifted(raiseCPU.size());
+			for (int y = 0; y < static_cast<int>(kRaiseCells); ++y) {
+				const int sy = y + dy;
+				if (sy < 0 || sy >= static_cast<int>(kRaiseCells))
+					continue;
+				for (int x = 0; x < static_cast<int>(kRaiseCells); ++x) {
+					const int sx = x + dx;
+					if (sx < 0 || sx >= static_cast<int>(kRaiseCells))
+						continue;
+					shifted[static_cast<size_t>(y) * kRaiseCells + x] = raiseCPU[static_cast<size_t>(sy) * kRaiseCells + sx];
+				}
+			}
+			raiseCPU.swap(shifted);
+		}
+	}
+	raiseOriginX = originX;
+	raiseOriginY = originY;
+
+	auto* tes = RE::TES::GetSingleton();
+	if (!tes) {
+		raiseActive = false;
+		return;
+	}
+
+	float waterZ = -1.0e8f;
+	if (globals::features::submersionWetness.loaded) {
+		if (auto* player = RE::PlayerCharacter::GetSingleton())
+			waterZ = SubmersionWetness::WaterHeightAt(player, a_center);
+	}
+	const float sink = std::clamp(settings.SinkFraction, 0.0f, 1.0f);
+
+	auto fill = [&](uint32_t x, uint32_t y) {
+		const float wx = originX + (static_cast<float>(x) + 0.5f) * kRaiseCell;
+		const float wy = originY + (static_cast<float>(y) + 0.5f) * kRaiseCell;
+		RE::NiPoint3 probe{ wx, wy, a_center.z };
+		float landZ = a_center.z;
+		tes->GetLandHeight(probe, landZ);
+		probe.z = landZ;
+		const auto material = tes->GetLandMaterialType(probe);
+		float raise = LayerRaise(material);
+		// A shallow hollow in sand, with the water close above it, is washed down so shore run-up can take it.
+		if (material == RE::MATERIAL_ID::kSand && raise > 0.5f && waterZ > landZ - 5.0f && waterZ < landZ + 30.0f) {
+			float sum = 0.0f;
+			int n = 0;
+			const float step = kRaiseCell;
+			const float offsets[4][2] = { { step, 0.0f }, { -step, 0.0f }, { 0.0f, step }, { 0.0f, -step } };
+			for (const auto& offset : offsets) {
+				RE::NiPoint3 neighbor{ wx + offset[0], wy + offset[1], a_center.z };
+				float height = landZ;
+				if (tes->GetLandHeight(neighbor, height)) {
+					sum += height;
+					++n;
+				}
+			}
+			if (n > 0 && landZ + 8.0f < sum / static_cast<float>(n))
+				raise *= 0.25f;
+		}
+		raiseCPU[static_cast<size_t>(y) * kRaiseCells + x] = { raise, sink };
+	};
+
+	if (!raisePrimed) {
+		for (uint32_t y = 0; y < kRaiseCells; ++y)
+			for (uint32_t x = 0; x < kRaiseCells; ++x)
+				fill(x, y);
+		raisePrimed = true;
+	} else if (dx != 0 || dy != 0) {
+		for (uint32_t y = 0; y < kRaiseCells; ++y) {
+			for (uint32_t x = 0; x < kRaiseCells; ++x) {
+				const bool freshX = dx > 0 ? x >= kRaiseCells - static_cast<uint32_t>(dx) : (dx < 0 ? x < static_cast<uint32_t>(-dx) : false);
+				const bool freshY = dy > 0 ? y >= kRaiseCells - static_cast<uint32_t>(dy) : (dy < 0 ? y < static_cast<uint32_t>(-dy) : false);
+				if (freshX || freshY)
+					fill(x, y);
+			}
+		}
+	} else {
+		const uint32_t y0 = raiseCursor;
+		raiseCursor = (raiseCursor + kRaiseRowsPerFrame) % kRaiseCells;
+		for (uint32_t row = 0; row < kRaiseRowsPerFrame; ++row) {
+			const uint32_t y = (y0 + row) % kRaiseCells;
+			for (uint32_t x = 0; x < kRaiseCells; ++x)
+				fill(x, y);
+		}
+	}
+
+	raiseActive = false;
+	for (const auto& texel : raiseCPU) {
+		if (texel.raise > 0.5f) {
+			raiseActive = true;
+			break;
+		}
+	}
+	UploadRaiseMap();
+}
+
 void TerrainDeformation::OnFootstep(RE::Actor* a_actor, std::string_view a_tag)
 {
 	if (!a_actor || !a_actor->Is3DLoaded() || a_actor->IsDead())
@@ -295,7 +468,7 @@ void TerrainDeformation::AddPrint(RE::Actor* a_actor, const RE::NiPoint3& a_posi
 	if (a_actor && a_actor->IsInWater())
 		return;
 	const auto material = tes->GetLandMaterialType(a_position);
-	// 0.6.3: footstep particles come from SSPP's own BGSFootstepEvent sink (not tied to prints any more)
+	// footstep particles come from the GPU Footstep Particles feature (not tied to prints)
 	const float strength = MaterialStrength(material);
 	if (strength <= 0.0f)
 		return;
@@ -436,15 +609,21 @@ void TerrainDeformation::UpdateHeightmap()
 	}
 
 	const bool tess = settings.Enabled && settings.EnableTessellation && !vr;
+	uploadedCount = count;
+	RE::NiPoint3 raiseCenter{};
+	if (auto* player = RE::PlayerCharacter::GetSingleton())
+		raiseCenter = player->GetPosition();
+	UpdateRaiseMap(raiseCenter);
 	upload[0].A = float4(static_cast<float>(count), std::clamp(settings.MaxTessFactor, 1.0f, 64.0f), settings.TessRange, settings.DisplacementScale);
-	upload[0].B = float4(settings.NormalStrength, tess ? 1.0f : 0.0f, windowOriginX, windowOriginY);
+	// 2 = tessellate the whole near field (raised snow/mud/sand). 1 = footprints only. 0 = off.
+	const float tessMode = tess ? (raiseActive ? 2.0f : 1.0f) : 0.0f;
+	upload[0].B = float4(settings.NormalStrength, tessMode, windowOriginX, windowOriginY);
 
 	D3D11_MAPPED_SUBRESOURCE mapped{};
 	if (SUCCEEDED(context->Map(printBuffer.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 		std::memcpy(mapped.pData, upload.data(), sizeof(GPUPrint) * (count + 1));
 		context->Unmap(printBuffer.get(), 0);
 	}
-	uploadedCount = count;
 	StampHeightmap(context);
 	BindHeightViews(ShaderStage::PS);
 }
@@ -457,27 +636,32 @@ void TerrainDeformation::BindHeightViews(ShaderStage a_stage) const
 	ID3D11ShaderResourceView* print = printSRV.get();
 	ID3D11ShaderResourceView* height = heightSRV.get();
 	ID3D11ShaderResourceView* activity = activitySRV.get();
-	// t54 prints, t56 heightmap, t57 activity. t55 is Terrain Blending and is not touched.
+	ID3D11ShaderResourceView* raise = raiseSRV.get();
+	// t54 prints, t56 heightmap, t57 activity, t58 raise. t55 is Terrain Blending and is not touched.
 	switch (a_stage) {
 	case ShaderStage::VS:
 		context->VSSetShaderResources(54, 1, &print);
 		context->VSSetShaderResources(56, 1, &height);
 		context->VSSetShaderResources(57, 1, &activity);
+		context->VSSetShaderResources(58, 1, &raise);
 		break;
 	case ShaderStage::HS:
 		context->HSSetShaderResources(54, 1, &print);
 		context->HSSetShaderResources(56, 1, &height);
 		context->HSSetShaderResources(57, 1, &activity);
+		context->HSSetShaderResources(58, 1, &raise);
 		break;
 	case ShaderStage::DS:
 		context->DSSetShaderResources(54, 1, &print);
 		context->DSSetShaderResources(56, 1, &height);
 		context->DSSetShaderResources(57, 1, &activity);
+		context->DSSetShaderResources(58, 1, &raise);
 		break;
 	case ShaderStage::PS:
 		context->PSSetShaderResources(54, 1, &print);
 		context->PSSetShaderResources(56, 1, &height);
 		context->PSSetShaderResources(57, 1, &activity);
+		context->PSSetShaderResources(58, 1, &raise);
 		break;
 	}
 }
@@ -665,7 +849,7 @@ void TerrainDeformation::OnLightingSetupGeometry(RE::BSShader* a_shader, RE::BSR
 		OnLightingRestoreGeometry();
 	if (loaded && settings.Enabled && heightSRV)
 		BindHeightViews(ShaderStage::PS);
-	if (!loaded || !settings.Enabled || !settings.EnableTessellation || vr || uploadedCount == 0 || !a_shader || !a_pass)
+	if (!loaded || !settings.Enabled || !settings.EnableTessellation || vr || (uploadedCount == 0 && !raiseActive) || !a_shader || !a_pass)
 		return;
 
 	auto* state = globals::state;
@@ -725,7 +909,7 @@ void TerrainDeformation::OnLightingRestoreGeometry()
 void TerrainDeformation::OnUtilitySetupGeometry(RE::BSShader*, RE::BSRenderPass* a_pass)
 {
 	SetDepthDisplace(false);
-	if (!loaded || !settings.Enabled || uploadedCount == 0 || !heightSRV || !a_pass)
+	if (!loaded || !settings.Enabled || (uploadedCount == 0 && !raiseActive) || !heightSRV || !a_pass)
 		return;
 	if (!IsNearLandscape(a_pass))
 		return;
@@ -802,6 +986,18 @@ void TerrainDeformation::DrawSettings()
 	BFUI::SliderFloat(T(TKEY("darkening"), "Darkening"), &settings.Darkening, 0.0f, 1.0f, "%.2f");
 	BFUI::SliderFloat(T(TKEY("lifetime"), "Fill-in Time (s)"), &settings.Lifetime, 5.0f, 1200.0f, "%.0f");
 	BFUI::SliderFloat(T(TKEY("radius"), "Visible Radius"), &settings.Radius, 512.0f, 16384.0f, "%.0f");
+
+	ImGui::SeparatorText(T(TKEY("raise_section"), "Raised Ground"));
+	BFUI::SliderFloat(T(TKEY("snow_raise"), "Snow Height"), &settings.SnowRaise, 0.0f, 120.0f, "%.0f");
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text("%s", T(TKEY("snow_raise_tt"), "How far snow stands above the ground, in game units. It fades out at the tessellation range so the far ground stays flat."));
+	BFUI::SliderFloat(T(TKEY("mud_raise"), "Mud Height"), &settings.MudRaise, 0.0f, 60.0f, "%.0f");
+	BFUI::SliderFloat(T(TKEY("sand_raise"), "Sand Height"), &settings.SandRaise, 0.0f, 40.0f, "%.0f");
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text("%s", T(TKEY("sand_raise_tt"), "Shallow hollows in sand near the water are lowered, so small shore waves can wash them out."));
+	BFUI::SliderFloat(T(TKEY("sink_fraction"), "Leg Sink"), &settings.SinkFraction, 0.0f, 1.0f, "%.2f");
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text("%s", T(TKEY("sink_tt"), "How much of the raised layer a foot presses down. 0.65 sinks about two thirds of the drift."));
 
 	ImGui::SeparatorText(T(TKEY("materials"), "Ground Materials"));
 	BFUI::SliderFloat(T(TKEY("snow"), "Snow"), &settings.SnowStrength, 0.0f, 2.0f, "%.2f");

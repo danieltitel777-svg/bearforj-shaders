@@ -1,4 +1,4 @@
-Bearforj Shaders — сборка 0.2 (21.10.2026)
+Bearforj Shaders — сборка 0.6.6
 Основа: Open Shaders 2.19.0 для Skyrim SE 1.6.1170.
 DLL называется CommunityShaders.dll, папки, ключи настроек, Overrides и SceneSettings не изменены —
 пресеты NAT.CS III и Dlizzio подхватываются как в Open.
@@ -21,13 +21,10 @@ DLL называется CommunityShaders.dll, папки, ключи настр
   - Pseudo Sun Bounce — отражённый от земли солнечный свет (из Jiaye). Выкл.
  Ландшафт и текстуры:
   - Terrain Deformation — следы в снегу, грязи и песке (на уровне шейдера). Выкл.
-  - Footstep Particles — снег/грязь/песок/брызги из-под ног, лужи и мелкая вода.
+  - GPU Footstep Particles — пыль, снег, грязь и брызги из-под ног.
  Прочее:
-  - Screen Space Physical Particles — экранная физика частиц. Выкл.
-  - Physical Effect Particles — физика для всех частиц игры, 9 категорий. Выкл.
-  - Precipitation Physics — дождь и снег: ветер, столкновение с землёй и крышами,
-    брызги, оседание снега. Выкл.
-  - Physical Blood, Physical Leaves — физика крови и листьев. Выкл.
+  - Physical Effect Particles — искры при блоке, моты магии, по желанию искры от костра.
+    Дождь и снег SSPP убраны: они дёргали кадр.
  Также:
   - Inverse Square Lighting — уже есть в основе (флаг света + Light Editor).
   - Снята жёсткая блокировка DTD (NMN_DeformableTerrain.dll).

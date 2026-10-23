@@ -276,9 +276,7 @@ namespace
 	{
 		const std::string s = f->GetShortName();
 		static const std::unordered_map<std::string, Tab> overrides = {
-			{ "ScreenSpacePhysicalParticles", kParticles }, { "PhysicalLeaves", kParticles }, { "PhysicalBlood", kParticles },
-			{ "NativeParticlePhysics", kParticles }, { "FootstepKickParticles", kParticles }, { "GPUFootstepParticles", kParticles },
-			{ "PrecipitationPhysics", kParticles }, { "FootstepParticles", kParticles },
+			{ "PhysicalEffectParticles", kParticles }, { "GPUFootstepParticles", kParticles },
 			{ "GrassCollision", kParticles },
 			{ "WetnessEffects", kSkyWeather }, { "RainRefraction", kSkyWeather }, { "WeatherPicker", kSkyWeather },
 			{ "SkySync", kSkyWeather }, { "PhysicalSky", kSkyWeather }, { "CloudShadows", kSkyWeather }, { "CloudRelight", kSkyWeather },
@@ -617,9 +615,9 @@ namespace
 			{ "second_shader_dll", { "A second Community/Open Shaders DLL is installed; both hook the same shaders.", "Delete the other shader DLL, keep only Bearforj." } },
 			{ "deformable_terrain", { "Another deformable-terrain mod also changes landscape height; footprints will double or flicker.", "Turn off Bearforj Terrain Deformation, or disable the other mod." } },
 			{ "footprints", { "Footprints mod also leaves prints; you get two sets.", "Turn off Bearforj Terrain Deformation or the Footprints mod." } },
-			{ "particle_engine", { "Another precipitation/particle engine draws rain or snow too; precipitation doubles.", "Turn off SSPP Rain/Snow, or the other mod's particles." } },
-			{ "embers", { "Embers mod adds fire embers; with SSPP embers fires look overloaded.", "Lower SSPP magic/ember particles, or keep only one." } },
-			{ "splashes", { "Splashes mod adds hit/rain splashes; SSPP does that too.", "Turn off SSPP Sparks/Splashes or the other mod." } },
+			{ "particle_engine", { "Another precipitation/particle engine draws rain or snow too; precipitation doubles.", "Turn off the other mod's rain/snow particles." } },
+			{ "embers", { "Embers mod adds fire embers; together with Bearforj spark particles fires look overloaded.", "Lower Physical Effect Particles, or keep only one embers mod." } },
+			{ "splashes", { "Splashes mod adds hit/rain splashes; Bearforj Physical Effect Particles does that too.", "Turn off Physical Effect Particles or the other mod." } },
 			{ "fog_mod", { "Fog mod adds volumetric fog; with Height Fog it gets too thick.", "Lower or turn off Bearforj Height Fog." } },
 			{ "wet_and_cold", { "Wet and Cold makes characters wet too; wetness doubles.", "Turn off Submersion Wetness or Wet and Cold wetness." } },
 		};
@@ -1104,9 +1102,9 @@ namespace
 		ImGui::BeginGroup();
 		ImGui::Dummy({ 0.0f, logoH * 0.18f });
 		MonoLabel("SYS.01 // SHADERS-ONLINE");
-		if (!logo || !logo->srv) {
-			FontScope title(menu.GetFont(Menu::FontRole::Title), ImGui::GetFontSize() * 1.7f);
-			ImGui::TextColored(ImColor(kWhite), "Bearforj.");
+		{
+			FontScope title(menu.GetFont(Menu::FontRole::Title), ImGui::GetFontSize() * 1.25f);
+			ImGui::TextColored(ImColor(kWhite), "%s", T("bearforj.ui.brand", "Bearforj Shaders"));
 		}
 		ImGui::EndGroup();
 

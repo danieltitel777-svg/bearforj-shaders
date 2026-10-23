@@ -23,9 +23,8 @@
 #include "Features/HairSpecular.h"
 #include "Features/TerrainDeformation.h"
 #include "Features/SubmersionWetness.h"
-#include "Features/ScreenSpacePhysicalParticles.h"
-#include "Features/NativeParticlePhysics.h"
-#include "Features/FootstepKickParticles.h"
+#include "Features/ColdBreath.h"
+#include "Features/PhysicalEffectParticles.h"
 #include "Features/GPUFootstepParticles.h"
 #include "Features/HorizonFix.h"
 #include "Features/IBL.h"
@@ -63,6 +62,7 @@
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
 #include "Features/WaterEffects.h"
+#include "Features/WaterWaves.h"
 #include "Features/WetnessEffects.h"
 #include "Features/Wind/Wind.h"
 #include "Menu.h"
@@ -100,9 +100,8 @@ namespace globals
 		HairSpecular hairSpecular{};
 		TerrainDeformation terrainDeformation{};
 		SubmersionWetness submersionWetness{};
-		ScreenSpacePhysicalParticles screenSpacePhysicalParticles{};
-		NativeParticlePhysics nativeParticlePhysics{};
-		FootstepKickParticles footstepKickParticles{};
+		ColdBreath coldBreath{};
+		PhysicalEffectParticles physicalEffectParticles{};
 		GPUFootstepParticles gpuFootstepParticles{};
 		HorizonFix horizonFix{};
 		InteriorSun interiorSun{};
@@ -125,6 +124,7 @@ namespace globals
 		VolumetricLighting volumetricLighting{};
 		VR vr{};
 		WaterEffects waterEffects{};
+		WaterWaves waterWaves{};
 		SceneSelector sceneSelector{};
 		PerformanceOverlay performanceOverlay{};
 		WetnessEffects wetnessEffects{};

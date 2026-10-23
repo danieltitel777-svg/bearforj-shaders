@@ -8,6 +8,8 @@
 #include "State.h"
 #include "Skylighting.h"
 #include "WetnessEffects.h"
+#include "TerrainDeformation.h"
+#include "WaterWaves.h"
 #include "Utils/D3D.h"
 
 #define I18N_KEY_PREFIX "feature.submersion_wetness."
@@ -204,19 +206,19 @@ void SubmersionWetness::UpdateActor(RE::Actor* a_actor, float a_dt, float a_rain
 	st.feetZ = pos.z;
 	st.height = std::max(a_actor->GetHeight(), 16.0f);
 
-	float waterZ = kNoWater;
-	if (a_actor->IsInWater()) {
-		const float h = a_actor->GetWaterHeight();
-		if (std::isfinite(h) && h > -1.0e8f)
-			waterZ = h;
-	}
+	float waterZ = WaterHeightAt(a_actor, pos);
 	const float prevDepth = st.depth;
 	st.depth = waterZ > kNoWater ? std::clamp(waterZ - st.feetZ, 0.0f, st.height + 16.0f) : 0.0f;
 	st.waterZ = waterZ;
 
 	const float dryScale = globals::features::wetnessEffects.GetDryingScale(a_actor);
 	const float dryTime = std::max(settings.DryTime, 1.0f) / std::max(dryScale, 0.15f);
-	if (st.depth > 1.0f) {
+	const bool fullyUnder = st.depth >= st.height * 0.98f;
+	if (fullyUnder) {
+		// The whole body is under the surface: soak immediately. A 60% threshold is not used.
+		st.soakLine = st.height;
+		st.soak = 1.0f;
+	} else if (st.depth > 1.0f) {
 		// Wading in: the wet line climbs toward the water over SoakInTime (ankles, then knees, then
 		// waist) instead of jumping to the current depth, and the soaked part fills in over the same time.
 		const float desired = std::max(st.soakLine, st.depth);
@@ -242,10 +244,45 @@ void SubmersionWetness::UpdateActor(RE::Actor* a_actor, float a_dt, float a_rain
 	// Rain soak: rises while the actor stands under open sky, dries (like the water soak) under cover.
 	const float shelter = settings.RespectShelter ? std::clamp((st.skyVisibility - 0.25f) / 0.5f, 0.0f, 1.0f) : 1.0f;
 	const float target = (settings.RainSoak && exterior) ? a_rain * settings.RainCoatStrength * shelter : 0.0f;
-	if (target > st.rain)
-		st.rain = std::min(target, st.rain + a_dt / std::max(settings.RainSoakTime, 0.5f));
+	const float soakTime = std::max(settings.RainSoakTime, 0.5f);
+	if (target > 0.02f) {
+		// Droplets reach from the head downward first. Darkening follows that front.
+		st.rainProgress = std::min(1.0f, st.rainProgress + a_dt / soakTime);
+		const float darkTarget = std::clamp((st.rainProgress - 0.08f) / 0.92f, 0.0f, 1.0f) * std::min(target / std::max(settings.RainCoatStrength, 0.05f), 1.0f);
+		st.rainDarken = std::min(darkTarget, st.rainDarken + a_dt / (soakTime * 1.35f));
+	} else {
+		st.rainDarken = std::max(0.0f, st.rainDarken - a_dt / dryTime);
+		st.rainProgress = std::max(0.0f, st.rainProgress - a_dt / dryTime);
+	}
+	st.rain = st.rainDarken * std::max(settings.RainCoatStrength, 0.0f);
+
+	bool snowing = false;
+	if (auto* sky = RE::Sky::GetSingleton()) {
+		if (auto* weather = sky->currentWeather)
+			snowing = weather->data.flags.any(RE::TESWeather::WeatherDataFlag::kSnow);
+	}
+	if (snowing && exterior && shelter > 0.2f)
+		st.snow = std::min(1.0f, st.snow + a_dt / 45.0f);
 	else
-		st.rain = std::max(target, st.rain - a_dt / dryTime);
+		st.snow = std::max(0.0f, st.snow - a_dt / 30.0f);
+
+	st.driftZ = 0.0f;
+	st.legDrift = 0.0f;
+	auto& ground = globals::features::terrainDeformation;
+	if (exterior && ground.loaded && ground.settings.Enabled && ground.settings.SnowRaise > 0.5f) {
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		const float keep = ground.settings.TessRange * 0.65f;
+		if (!player || pos.GetDistance(player->GetPosition()) <= keep) {
+			if (auto* tes = RE::TES::GetSingleton()) {
+				const auto material = tes->GetLandMaterialType(pos);
+				if (material == RE::MATERIAL_ID::kSnow || material == RE::MATERIAL_ID::kSnowStairs) {
+					// Coat up to the undisturbed drift. The sole sinks, the snow beside the leg does not.
+					st.driftZ = st.feetZ + ground.settings.SnowRaise;
+					st.legDrift = std::clamp(ground.settings.SnowRaise / 60.0f, 0.2f, 1.0f);
+				}
+			}
+		}
+	}
 }
 
 void SubmersionWetness::Prepass()
@@ -304,17 +341,16 @@ void SubmersionWetness::OnLightingSetupGeometry(RE::BSRenderPass* a_pass)
 	const auto& st = it->second;
 	const float waterCoat = st.soak;
 	const float coat = std::max(waterCoat, st.rain);
-	if (coat <= 0.001f && st.flow <= 0.0f)
+	if (coat <= 0.001f && st.flow <= 0.0f && st.rainProgress <= 0.001f && st.snow <= 0.001f && st.legDrift <= 0.001f)
 		return;
 
-	// Rain wets the whole body; water wets up to the soak line.
-	const float line = st.rain > waterCoat ? st.height + 32.0f : st.soakLine;
+	const bool fullyUnder = st.depth >= st.height * 0.98f;
 	PerGeometry data{};
-	data.SubA = float4(st.feetZ, line, st.waterZ, coat);
-	// Beads follow the coat, rain included. Water-only bead amount left characters glossy in the rain
-	// with no droplets; CharacterRainSpots still max() with these so the two layers are not added twice.
-	data.SubB = float4(std::clamp(coat * 1.5f, 0.0f, 1.0f), st.flow, settings.EdgeSoftness, 1.0f);
+	data.SubA = float4(st.feetZ, st.soakLine, st.waterZ, waterCoat);
+	data.SubB = float4(std::clamp(std::max(waterCoat, st.rainDarken) * 1.5f, 0.0f, 1.0f), st.flow, settings.EdgeSoftness, 1.0f);
 	data.SubC = float4(settings.Strength, settings.BeadDensity, settings.HairStrength, settings.ArmorStrength);
+	data.SubD = float4(st.rainProgress, st.rainDarken, st.height, fullyUnder ? 1.0f : 0.0f);
+	data.SubE = float4(st.snow, st.driftZ, st.legDrift, 0.0f);
 	perGeometryCB->Update(data);
 	ID3D11Buffer* cb = perGeometryCB->CB();
 	globals::d3d::context->PSSetConstantBuffers(9, 1, &cb);
@@ -383,23 +419,25 @@ float SubmersionWetness::WaterHeightAt(const RE::TESObjectREFR* a_ref, const RE:
 {
 	if (!a_ref)
 		return -RE::NI_INFINITY;
-	float waterHeight = a_ref->GetWaterHeight();
-	if (waterHeight != -RE::NI_INFINITY)
-		return waterHeight;
-	if (const auto waterManager = RE::TESWaterSystem::GetSingleton()) {
-		for (const auto& waterObject : waterManager->waterObjects) {
-			if (!waterObject)
-				continue;
-			for (const auto& bound : waterObject->multiBounds) {
-				if (bound && bound->size.z <= 10.0f) {
-					const auto c = bound->center;
-					const auto s = bound->size;
-					if (a_pos.x >= c.x - s.x && a_pos.x <= c.x + s.x && a_pos.y >= c.y - s.y && a_pos.y <= c.y + s.y)
-						return c.z;
+	float flat = a_ref->GetWaterHeight();
+	if (flat == -RE::NI_INFINITY) {
+		if (const auto waterManager = RE::TESWaterSystem::GetSingleton()) {
+			for (const auto& waterObject : waterManager->waterObjects) {
+				if (!waterObject || flat != -RE::NI_INFINITY)
+					continue;
+				for (const auto& bound : waterObject->multiBounds) {
+					if (bound && bound->size.z <= 10.0f) {
+						const auto c = bound->center;
+						const auto s = bound->size;
+						if (a_pos.x >= c.x - s.x && a_pos.x <= c.x + s.x && a_pos.y >= c.y - s.y && a_pos.y <= c.y + s.y) {
+							flat = c.z;
+							break;
+						}
+					}
 				}
 			}
 		}
 	}
-	return -RE::NI_INFINITY;
+	return globals::features::waterWaves.DisplacedHeight(a_ref, a_pos, flat);
 }
 

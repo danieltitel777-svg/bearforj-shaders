@@ -33,6 +33,7 @@
 #include "Features/SkySync.h"
 #include "Features/Skylighting.h"
 #include "Features/TerrainBlending.h"
+#include "Features/WaterWaves.h"
 #include "Features/TerrainHelper.h"
 #include "Features/Upscaling.h"
 #include "Features/VR.h"
@@ -1523,6 +1524,8 @@ void State::UpdateSharedData([[maybe_unused]] bool a_inWorld, [[maybe_unused]] b
 				}
 			}
 		}
+
+		globals::features::waterWaves.ApplyShared(data.DisplacedWaterHeight, data.CameraBelowWaves, data.WaveScale, data.WaveAmplitude, data.WaveChop, data.WaveShore, data.WindFieldTransitionData.z, data.WindFieldTransitionData.w, data.ShoreOriginX, data.ShoreOriginY, data.ShoreCellSize, data.ShoreCellCount);
 
 		data.InInterior = Util::IsInterior();
 		data.HasDirectionalShadows = HasDirectionalShadows();

@@ -1,5 +1,9 @@
 Texture2D<float4> WaterCaustics : register(t65);
 
+#if defined(WATER_WAVES)
+#	include "WaterWaves/WaterWaves.hlsli"
+#endif
+
 namespace WaterEffects
 {
 	static const float CausticsUVScale = 0.005;
@@ -30,6 +34,12 @@ namespace WaterEffects
 	{
 		float3 result = 1.0.xxx;
 		float causticsDistToWater = waterData.w - worldPosition.z;
+#if defined(WATER_WAVES)
+		{
+			float3 wavePlane = float3(worldPosition.xy, waterData.w);
+			causticsDistToWater = (waterData.w + WaterWaves::Offset(wavePlane, eyeIndex, false).z) - worldPosition.z;
+		}
+#endif
 		float shoreFactorCaustics = saturate(causticsDistToWater / 64.0);
 
 		if (shoreFactorCaustics > 0.0 && SharedData::csUtilitySettings.waterCausticsStrength > 0.0) {

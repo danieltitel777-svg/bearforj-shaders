@@ -107,9 +107,8 @@ namespace Bearforj::Compat
 			static const std::vector<ConflictRule> rules = {
 				{ "deformable_terrain", "TerrainDeformation", 2, { "deformableterrain", "nmn_deform", "nmndeform" } },
 				{ "footprints", "TerrainDeformation", 1, { "footprints" } },
-				{ "particle_engine", "ScreenSpacePhysicalParticles", 1, { "rainfx", "rain fx", "snowfx" } },
-				{ "embers", "ScreenSpacePhysicalParticles", 1, { "embersxd", "embers xd", "embershd", "embers hd" } },
-				{ "splashes", "ScreenSpacePhysicalParticles", 1, { "splashesofskyrim", "splashes of skyrim", "splashesofstorms", "splashes of storms" } },
+				{ "embers", "PhysicalEffectParticles", 1, { "embersxd", "embers xd", "embershd", "embers hd" } },
+				{ "splashes", "GPUFootstepParticles", 1, { "splashesofskyrim", "splashes of skyrim", "splashesofstorms", "splashes of storms" } },
 				{ "fog_mod", "ExponentialHeightFog", 1, { "volumetricfog", "supremefog", "supreme and volumetric fog" } },
 				{ "wet_and_cold", "SubmersionWetness", 1, { "wetandcold", "wet and cold" } },
 			};

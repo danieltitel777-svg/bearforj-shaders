@@ -12,8 +12,8 @@ root, log = sys.argv[1], sys.argv[2]
 SRC = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 UNIV = "CLOUD_SHADOWS DYNAMIC_CUBEMAPS EXP_HEIGHT_FOG IBL LOD_BLENDING LIGHT_LIMIT_FIX PHYSICAL_SKY SKYLIGHTING SSS TERRAIN_BLENDING TERRAIN_SHADOWS VANILLA_FRESNEL WETNESS_EFFECTS VOLUMETRIC_SHADOWS WATER_EFFECTS SCREEN_SPACE_SHADOWS".split()
 FEAT = {
- "Lighting": UNIV + "CS_UTILITY HAIR_BACKLIGHTING EXTENDED_MATERIALS EXTENDED_TRANSLUCENCY CS_HAIR CS_SKIN SUBMERSION_WETNESS TERRAIN_DEFORMATION TERRAIN_VARIATION".split(),  # TRUE_PBR is per-material (yaml entries)
- "Water": UNIV + "CS_UTILITY HORIZON_FIX".split(),
+ "Lighting": UNIV + "CS_UTILITY HAIR_BACKLIGHTING EXTENDED_MATERIALS EXTENDED_TRANSLUCENCY CS_HAIR CS_SKIN SUBMERSION_WETNESS TERRAIN_DEFORMATION TERRAIN_VARIATION WATER_WAVES".split(),  # TRUE_PBR is per-material (yaml entries)
+ "Water": UNIV + "CS_UTILITY HORIZON_FIX WATER_WAVES".split(),
  "Sky": UNIV + "CLOUD_RELIGHT HDR_OUTPUT HORIZON_FIX PROCEDURAL_AURORA PROCEDURAL_SUN".split(),
  "Grass": UNIV + "GRASS_LIGHTING GRASS_COLLISION GRASS_OPTIMIZATIONS".split(),
  "Particle": UNIV + ["RAIN_REFRACTION"],
@@ -48,6 +48,11 @@ jobs.append(("DeferredCompositeCS.hlsl", "cs_5_0", "main", ["CSHADER"])); jobs.a
 for stage, prof in (("HSHADER", "hs_5_0"), ("DSHADER", "ds_5_0")):
     jobs.append(("Lighting.hlsl", prof, "main", [stage, "LANDSCAPE", "TERRAIN_DEFORMATION", "VC", "MODELSPACENORMALS"]))
     jobs.append(("Lighting.hlsl", prof, "main", [stage, "LANDSCAPE", "TERRAIN_DEFORMATION", "VC"]))
+    jobs.append(("Water.hlsl", prof, "main", [stage, "WATER", "FOG", "WATER_WAVES", "SPECULAR", "NUM_SPECULAR_LIGHTS=0", "REFLECTIONS", "REFRACTIONS", "DEPTH"]))
+    jobs.append(("Water.hlsl", prof, "main", [stage, "WATER", "FOG", "WATER_WAVES", "SPECULAR", "NUM_SPECULAR_LIGHTS=4", "REFLECTIONS", "REFRACTIONS", "DEPTH"]))  # 0.6.6: lit specular water with refractions (MPosition)
+    jobs.append(("Water.hlsl", prof, "main", [stage, "WATER", "FOG", "WATER_WAVES", "UNDERWATER", "REFRACTIONS", "DEPTH"]))
+    jobs.append(("Water.hlsl", prof, "main", [stage, "WATER", "FOG", "WATER_WAVES", "STENCIL"]))
+    jobs.append(("Water.hlsl", prof, "main", [stage, "WATER", "FOG", "WATER_WAVES", "SIMPLE", "REFRACTIONS", "DEPTH"]))
 CALL = re.compile(r'L"Data\\\\Shaders\\\\([^"]+\.hlsl)"\s*,\s*(\{(?:[^{}]|\{[^{}]*\})*\}|[\w:.\->]+)\s*,\s*"(\w\w_5_0)"(?:\s*,\s*"(\w+)")?')
 DEF = re.compile(r'\{\s*"(\w+)"\s*,\s*([^{}]*?)\s*\}')
 STAGE = {"ps": "PSHADER", "vs": "VSHADER", "hs": "HULLSHADER", "ds": "DOMAINSHADER", "cs": "COMPUTESHADER"}  # BuildStandaloneCompileKey

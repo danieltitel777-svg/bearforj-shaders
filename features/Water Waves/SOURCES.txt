@@ -1,0 +1,8 @@
+Gerstner displacement is written for this mod from the public deep-water equations
+(Fournier and Reeves). Nine wavelengths, gravity 687, and the 0.6 / 1.5 / 2.6
+direction spreads follow the same layout described for open water research.
+No ENB, WaveWorks, or other shader source was copied.
+The far water flattens between 4000 and 7000 units. Pixel normals keep a wider
+fade, 6000 to 12000, so the shading does not pop when the mesh becomes flat.
+Shore damp uses a 64 by 64 land-height grid (224-unit cells) shared with the
+CPU. It does not read the depth buffer, so the contact band does not flicker.
