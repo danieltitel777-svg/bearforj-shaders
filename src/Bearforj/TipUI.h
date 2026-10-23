@@ -16,11 +16,23 @@ namespace BFUI
 	/** @brief Shows the tooltip for the last item if hovered. */
 	void Tip(const char* a_label);
 
+// Integer slider bounds are passed through on purpose (0, 1 means 0.f, 1.f).
+// MSVC treats that conversion as an error under /WX.
+#if defined(_MSC_VER)
+#define BFUI_WARN_PUSH _Pragma("warning(push)") _Pragma("warning(disable : 4244)")
+#define BFUI_WARN_POP _Pragma("warning(pop)")
+#else
+#define BFUI_WARN_PUSH
+#define BFUI_WARN_POP
+#endif
+
 #define BFUI_WRAP(NAME)                                                     \
 	template <class... A>                                                   \
 	inline auto NAME(const char* a_label, A&&... a)                         \
 	{                                                                       \
+		BFUI_WARN_PUSH                                                      \
 		auto r = ImGui::NAME(a_label, std::forward<A>(a)...);               \
+		BFUI_WARN_POP                                                       \
 		Tip(a_label);                                                       \
 		return r;                                                           \
 	}
@@ -39,4 +51,6 @@ namespace BFUI
 	BFUI_WRAP(RadioButton)
 	BFUI_WRAP(SliderScalar)
 #undef BFUI_WRAP
+#undef BFUI_WARN_PUSH
+#undef BFUI_WARN_POP
 }
