@@ -974,8 +974,22 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 	float3 normals3 = Normals03Tex.SampleBias(Normals03Sampler, input.TexCoord2.xy, SharedData::MipBias).xyz * 2.0 - 1.0;
 #				endif
 
+	// One extra sample of a map that is already bound. A rotated prime scale
+	// breaks the repeat. Past about 40 m the wavefront is fully faded, so the fetch is skipped.
+	float2 detailUv = input.TexCoord1.zw;
+#				if defined(WATER_PARALLAX)
+	detailUv += parallaxOffset.xy * normalScalesRcp.y;
+#				endif
+	float2 detailRot = float2(detailUv.x * 0.8192 - detailUv.y * 0.5736, detailUv.x * 0.5736 + detailUv.y * 0.8192) * 2.41;
+	float detailFade = saturate(1.0 - length(input.WPosition.xy) / 2800.0);
+	float3 detailNormal = 0.0.xxx;
+	[branch]
+	if (detailFade > 0.001) {
+		detailNormal = Normals02Tex.SampleBias(Normals02Sampler, detailRot, SharedData::MipBias).xyz * 2.0 - 1.0;
+		detailNormal.xy *= 0.45 * detailFade;
+	}
 	float3 blendedNormal = normalize(float3(0, 0, 1) + normalsAmplitude.x * normals1 +
-									 normalsAmplitude.y * normals2 + normalsAmplitude.z * normals3);
+									 normalsAmplitude.y * normals2 + normalsAmplitude.z * normals3 + detailNormal);
 #				if defined(UNDERWATER)
 	float3 finalNormal = blendedNormal;
 #				else
@@ -1177,6 +1191,14 @@ struct DiffuseOutput
 	float3 refractedViewDirection;
 };
 
+// Shore band plus the wave crest. No extra pass.
+float3 ApplyWaterFoam(float3 color, float4 distanceMul, float crestFoam, float3 normal)
+{
+	float shore = saturate(1.0 - distanceMul.w * 5.0) * saturate(normal.z);
+	float foam = saturate(max(shore * 0.5, crestFoam));
+	return lerp(color, float3(0.78, 0.82, 0.84), foam);
+}
+
 DiffuseOutput GetWaterDiffuseColor(PS_INPUT input, float3 normal, float3 viewDirection, inout float4 distanceMul, float refractionsDepthFactor, float fresnel, uint eyeIndex, float3 viewPosition, float depth)
 {
 #			if defined(REFRACTIONS)
@@ -1261,20 +1283,38 @@ DiffuseOutput GetWaterDiffuseColor(PS_INPUT input, float3 normal, float3 viewDir
 #				endif
 
 	float3 refractionDiffuseColor;
-
+	float3 shallowColor = ShallowColor.xyz;
+	float3 deepColor = DeepColor.xyz;
+	// The weather colour stays the source. Normalising only stops an orange shallow.
 	if (SharedData::enbSettings.EnableWater) {
-		float3 shallowColor = ShallowColor.xyz;
 		float maxValue = max(shallowColor.x, max(shallowColor.y, shallowColor.z));
 		if (maxValue > 0.0)
 			shallowColor /= maxValue;
 		else
 			shallowColor = 1.0;
-
-		shallowColor = lerp(shallowColor.xyz * refractionColor, ShallowColor.xyz, lerp(SharedData::enbSettings.WaterMuddiness, 1.0, refractionMul));
-		refractionDiffuseColor = lerp(Color::Water(shallowColor.xyz), Color::Water(DeepColor.xyz), distanceMul.y);
-	} else {
-		refractionDiffuseColor = lerp(Color::Water(ShallowColor.xyz), Color::Water(DeepColor.xyz), distanceMul.y);
 	}
+	float rainMurk = 0.0;
+#				if defined(WETNESS_EFFECTS)
+	rainMurk = saturate(SharedData::wetnessEffectsSettings.Raining);
+#				endif
+	float storm = saturate(max(rainMurk, smoothstep(0.45, 1.05, SharedData::WindFieldTransitionData.z)));
+	// Turquoise only where the weather colour is already blue. A green swamp stays green.
+	float shallowLuma = dot(shallowColor, float3(0.30, 0.59, 0.11));
+	float3 turquoise = float3(shallowLuma * 0.42, shallowLuma * 0.95, shallowLuma * 0.72);
+	float blueBias = saturate((shallowColor.z - max(shallowColor.x, shallowColor.y)) / max(shallowLuma, 0.02));
+	shallowColor = lerp(shallowColor, turquoise, blueBias * 0.6 * (1.0 - storm));
+	float deepLuma = dot(deepColor, float3(0.30, 0.59, 0.11));
+	float3 murk = deepLuma.xxx * 0.42;
+	deepColor = lerp(deepColor, murk, storm * 0.7);
+	shallowColor = lerp(shallowColor, murk, storm * 0.4);
+	// Shallows stay clear. Opacity follows the water column, and rain or a storm clouds it.
+	float depthOpacity = smoothstep(0.02, 0.42, distanceMul.y);
+	depthOpacity = lerp(depthOpacity, saturate(depthOpacity + 0.4), storm);
+	refractionMul = saturate(max(refractionMul * 0.25, depthOpacity));
+	float3 tint = lerp(shallowColor, deepColor, distanceMul.y);
+	if (SharedData::enbSettings.EnableWater)
+		tint = lerp(shallowColor * refractionColor, tint, lerp(SharedData::enbSettings.WaterMuddiness, 1.0, refractionMul));
+	refractionDiffuseColor = Color::Water(tint);
 
 	DiffuseOutput output;
 	output.refractionColor = refractionColor;
@@ -1620,7 +1660,7 @@ PS_OUTPUT main(PS_INPUT input)
 #					if defined(VC)
 	float specularFraction = lerp(1, fresnel * surfaceMul, distanceBlendFactor);
 	float3 finalColorPreFog = lerp(diffuseColor, specularColor, specularFraction) + sunColor * sunMul;
-	finalColorPreFog = lerp(finalColorPreFog, float3(0.78, 0.82, 0.84), waterData.crestFoam);
+	finalColorPreFog = ApplyWaterFoam(finalColorPreFog, distanceMul, waterData.crestFoam, normal);
 
 #						if defined(PHYSICAL_SKY)
 	if (SharedData::physSkyData.enabled) {
@@ -1679,12 +1719,10 @@ PS_OUTPUT main(PS_INPUT input)
 		float reflectionWeight = specularFraction * surfaceMul;
 		waterOpacity = max(lerp(diffuseOutput.refractionMul, 1.0, reflectionWeight), 1e-3);
 		finalColorPreFog = (diffuseOutput.refractionDiffuseColor * (diffuseOutput.refractionMul * (1.0 - reflectionWeight)) + specularColor * reflectionWeight + sunColor * (sunMul * surfaceMul)) / waterOpacity;
-		float shoreFoam = saturate(1.0 - distanceMul.w * 5.0) * saturate(normal.z);
-		finalColorPreFog = lerp(finalColorPreFog, float3(0.62, 0.66, 0.68), shoreFoam * 0.35);
 	} else {
 		finalColorPreFog = lerp(diffuseOutput.refractionDiffuseColor, specularColor, specularFraction) + sunColor * depthControl.w;
 	}
-	finalColorPreFog = lerp(finalColorPreFog, float3(0.78, 0.82, 0.84), waterData.crestFoam);
+	finalColorPreFog = ApplyWaterFoam(finalColorPreFog, distanceMul, waterData.crestFoam, normal);
 
 #						if defined(PHYSICAL_SKY)
 	if (SharedData::physSkyData.enabled) {
