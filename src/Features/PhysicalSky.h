@@ -32,7 +32,7 @@ struct PhysicalSky final : public Feature
 
 	// Functionality
 	inline std::string_view GetShaderDefineName() override { return "PHYSICAL_SKY"; }
-	inline bool HasShaderDefine(RE::BSShader::Type) override { return true; };
+	inline bool HasShaderDefine(RE::BSShader::Type a_type) override { return a_type == RE::BSShader::Type::Sky; }
 
 	// Settings & UI
 	void DataLoaded() override;

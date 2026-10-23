@@ -34,8 +34,11 @@ namespace TerrainDeformation
 	float DisplacementScale() { return Prints[0].A.w; }
 	float NormalStrength() { return Prints[0].B.x; }
 	bool TessellationEnabled() { return Prints[0].B.y > 0.5; }
-	// Raised ground is on: every near landscape edge tessellates, and height comes from RaiseMap.
+	// Raised ground covers the whole near field.
 	bool RaiseField() { return Prints[0].B.y > 1.5; }
+	// Raised ground only under the player, about 2.5 m, plus footprints.
+	bool FeetBubble() { return Prints[0].B.y > 1.2 && Prints[0].B.y < 1.5; }
+	static const float TD_FEET_RADIUS = 180.0;
 	float2 Origin() { return Prints[0].B.zw; }
 
 	static const float TD_RAISE_CELL = 128.0;
@@ -102,13 +105,18 @@ namespace TerrainDeformation
 		}
 		float legacy = -dip + rim * (dip > 1e-3 ? 0.25 : 1.0);
 		float height = legacy;
-		if (RaiseField()) {
+		if (RaiseField() || FeetBubble()) {
 			float2 layer = RaiseAt(a_positionWS.xy);
-			if (layer.x > 0.5) {
+			float mask = RaiseFade(a_positionWS.xy);
+			if (FeetBubble()) {
+				float dist = length(a_positionWS.xy - FrameBuffer::CameraPosAdjust[0].xy);
+				mask = 1.0 - smoothstep(TD_FEET_RADIUS * 0.55, TD_FEET_RADIUS, dist);
+			}
+			if (layer.x > 0.5 && mask > 1e-3) {
 				float foot = saturate(dip * 0.5);
 				float sunk = lerp(layer.x, layer.x * (1.0 - saturate(layer.y)), foot);
 				float raised = sunk + rim * 0.35;
-				height = lerp(legacy, raised, RaiseFade(a_positionWS.xy));
+				height = lerp(legacy, raised, mask);
 			}
 		}
 		return float2(height, dark);
@@ -121,7 +129,7 @@ namespace TerrainDeformation
 	float3 Apply(float3 a_positionRel, float3 a_positionWS, float3 a_normal, out float a_shade)
 	{
 		a_shade = 1.0;
-		if (Count() == 0 && !RaiseField())
+		if (Count() == 0 && !RaiseField() && !FeetBubble())
 			return a_normal;
 		float2 hd = Height(a_positionWS);
 		a_shade = 1.0 - hd.y;

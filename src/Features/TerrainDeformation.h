@@ -71,6 +71,8 @@ struct TerrainDeformation : Feature
 		float MudRaise = 18.0f;
 		float SandRaise = 10.0f;
 		float SinkFraction = 0.65f;  // how much of the layer a foot presses down
+		// Off: the raised layer stands only under the player (about 2.5 m) and in footprints.
+		bool RaiseFullField = false;
 	} settings;
 
 	struct GPUPrint

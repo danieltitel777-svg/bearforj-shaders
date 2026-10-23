@@ -87,6 +87,7 @@ decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChainUpscali
  * get the same experience as a fresh RX 9000 install. Leaves the user's own choice alone on
  * RX 9000 (already eligible pre-migration) and on Unsupported adapters, where the version is
  * deliberately left unstamped so the migration re-runs once a supported adapter is detected.
+ * RX 6000 is eligible but stays off: that path is experimental and is not in the shipped SDK.
  */
 void ApplyLegacyFsr4RuntimeSelectionMigration(Upscaling::Settings& a_settings, FidelityFX::Fsr4AdapterSupport a_adapterSupport)
 {
@@ -857,13 +858,18 @@ void Upscaling::DrawUpscalingSettings()
 			BFUI::SliderFloat(T(TKEY("sharpness"), "Sharpness"), &settings.sharpnessFSR, 0.0f, 1.0f, "%.1f");
 			// Hidden entirely on ineligible GPUs so it can't be toggled somewhere it silently no-ops.
 			if (fidelityFX.IsRuntimeFsr4AutoEligible()) {
-				BFUI::Checkbox(T(TKEY("fsr4_runtime_enable"), "Use Runtime FSR4"), &settings.fsr4RuntimeEnable);
+				const bool fsr4Experimental = fidelityFX.GetFsr4AdapterSupport() == FidelityFX::Fsr4AdapterSupport::RadeonRx6000;
+				BFUI::Checkbox(
+					fsr4Experimental ?
+						T(TKEY("fsr4_runtime_enable_experimental"), "Use Runtime FSR4 (experimental)") :
+						T(TKEY("fsr4_runtime_enable"), "Use Runtime FSR4"),
+					&settings.fsr4RuntimeEnable);
 				if (settings.fsr4RuntimeEnable) {
 					ImGui::TextDisabled("%s: %s", T(TKEY("fsr4_active_path"), "Active path"), fidelityFX.GetDisplayedFsrPathLabel().c_str());
 					if (fidelityFX.IsRuntimeFsr4FailureLatched())
-						Util::Text::Warning("%s", T(TKEY("fsr4_failed_fallback"), "Runtime FSR4 failed this session -- using FSR3 fallback."));
+						Util::Text::Warning("%s", T(TKEY("fsr4_failed_fallback"), "Runtime FSR4 failed this session -- using FSR 3.1."));
 					else if (fidelityFX.IsRuntimeUpscalerFailureLatched())
-						Util::Text::Warning("%s", T(TKEY("fsr4_runtime_failed_fallback"), "Runtime upscaler DLL failed this session -- using host FSR3 SDK."));
+						Util::Text::Warning("%s", T(TKEY("fsr4_runtime_failed_fallback"), "Runtime upscaler DLL failed this session -- using host FSR 3.1."));
 				}
 			}
 		} else if (upscaleMethod == UpscaleMethod::kDLSS) {

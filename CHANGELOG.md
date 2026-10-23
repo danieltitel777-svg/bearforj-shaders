@@ -1,5 +1,21 @@
 # Bearforj Shaders changelog
 
+## 0.6.7
+
+### English
+
+- Runtime FSR4 can be turned on for Radeon RX 6000 (Navi 21, 22, 23 and 24, including the RX 6950 XT). The switch is marked experimental. RX 7000 and RX 9000 keep the existing switch. RX 6000 is not turned on by itself.
+- AMD announced the INT8 FSR Upscaling 4.1 model for RX 6000 in Adrenalin 26.10.1 on 2026-10-20. The public FidelityFX SDK is still v2.3.0 (`60f4ea8`, 2026-06-24). That release documents RX 7000 and RX 9000 only, so the shipped signed DLLs were not replaced.
+- If the runtime provider does not start, that session uses FSR 3.1.
+- Ryzen integrated graphics and other series stay hidden. A bare "RDNA 2" name is not treated as an RX 6000 card.
+
+### Русский
+
+- Runtime FSR4 можно включить на Radeon RX 6000 (Navi 21, 22, 23 и 24, включая RX 6950 XT). Переключатель помечен как эксперимент. На RX 7000 и RX 9000 остаётся прежний пункт. На RX 6000 он сам не включается.
+- AMD объявила INT8-модель FSR Upscaling 4.1 для RX 6000 в Adrenalin 26.10.1 от 2026-10-20. Публичный FidelityFX SDK по-прежнему v2.3.0 (`60f4ea8`, 2026-06-24). В том выпуске описаны только RX 7000 и RX 9000, поэтому подписанные DLL в пакете не менялись.
+- Если провайдер не создаётся, эта сессия использует FSR 3.1.
+- Встроенная графика Ryzen и другие серии скрыты. Одно имя «RDNA 2» не считается картой RX 6000.
+
 ## 0.6.6
 
 ### English

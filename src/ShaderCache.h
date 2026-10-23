@@ -896,9 +896,10 @@ namespace SIE
 
 		// Reserve fewer threads on low-core systems to avoid overly slow startup compilation.
 		// Management and file watcher run on dedicated jthreads, not pool slots.
-		// Background (in-game): half of P-cores only, to avoid starving the render thread.
+		// Background (in-game): one or two threads so the first launch compiles without stuttering.
+		static constexpr int32_t kMaxBackgroundCompilationThreads = 2;
 		int32_t compilationThreadCount = GetDefaultCompilationThreadCount();
-		int32_t backgroundCompilationThreadCount = std::max(static_cast<int32_t>(Util::GetPerformanceCoreCount()) / 2, 1);
+		int32_t backgroundCompilationThreadCount = kMaxBackgroundCompilationThreads;
 		BS::thread_pool<> compilationPool{ static_cast<std::size_t>(compilationThreadCount) };
 		std::jthread managementJthread;  // dedicated thread for ManageCompilationSet (not in pool)
 		/** @brief Updates compilation mode and wakes the dispatcher to recheck its capacity. */

@@ -58,7 +58,7 @@ struct Menu {
 BINDING_TYPE;
 BINDINGS;
 MENU_OVERLAY
-namespace FidelityFX { enum class Fsr4AdapterSupport { Unsupported, RadeonRx7000, RadeonRx9000 }; }
+namespace FidelityFX { enum class Fsr4AdapterSupport { Unsupported, RadeonRx6000, RadeonRx7000, RadeonRx9000 }; }
 using uint = unsigned;
 #include NR_CONTEXT_PATH
 struct Upscaling {
@@ -210,6 +210,7 @@ std::string read(const std::string& path) {
 }
 int main() {
     for (const auto adapter : {FidelityFX::Fsr4AdapterSupport::Unsupported,
+            FidelityFX::Fsr4AdapterSupport::RadeonRx6000,
             FidelityFX::Fsr4AdapterSupport::RadeonRx7000, FidelityFX::Fsr4AdapterSupport::RadeonRx9000}) {
         for (const unsigned schema : {0u, Upscaling::kFsr4RuntimeSelectionSchemaVersion}) {
             for (const bool enabled : {false, true}) {

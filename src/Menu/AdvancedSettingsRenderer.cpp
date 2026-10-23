@@ -288,7 +288,7 @@ void AdvancedSettingsRenderer::RenderShaderThreading()
 	// otherwise leave compilationThreadCount above maxThreads, which would
 	// render the slider in an out-of-range state.
 	shaderCache->compilationThreadCount = std::clamp(shaderCache->compilationThreadCount, 1, maxThreads);
-	shaderCache->backgroundCompilationThreadCount = std::clamp(shaderCache->backgroundCompilationThreadCount, 1, maxThreads);
+	shaderCache->backgroundCompilationThreadCount = std::clamp(shaderCache->backgroundCompilationThreadCount, 1, SIE::ShaderCache::kMaxBackgroundCompilationThreads);
 
 	BFUI::SliderInt(T("menu.advanced.compiler_threads", "Compiler Threads"), &shaderCache->compilationThreadCount, 1, maxThreads, "%d", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -297,12 +297,12 @@ void AdvancedSettingsRenderer::RenderShaderThreading()
 							  "Defaults to all logical cores minus one for OS headroom (E-cores included). "
 							  "Higher values finish compilation faster but may make the system less responsive."));
 	}
-	BFUI::SliderInt(T("menu.advanced.background_compiler_threads", "Background Compiler Threads"), &shaderCache->backgroundCompilationThreadCount, 1, maxThreads, "%d", ImGuiSliderFlags_AlwaysClamp);
+	BFUI::SliderInt(T("menu.advanced.background_compiler_threads", "Background Compiler Threads"), &shaderCache->backgroundCompilationThreadCount, 1, SIE::ShaderCache::kMaxBackgroundCompilationThreads, "%d", ImGuiSliderFlags_AlwaysClamp);
 	if (auto _tt = Util::HoverTooltipWrapper()) {
 		ImGui::Text("%s", T("menu.advanced.background_compiler_threads_tooltip",
 							  "Number of threads used to compile shaders during gameplay. "
-							  "Defaults to half of performance cores to avoid impacting the render thread. "
-							  "Higher values finish compilation faster but may cause stuttering."));
+							  "One or two threads keep the first launch short without stuttering the frame. "
+							  "Startup compilation still uses the compiler thread count above."));
 	}
 
 	// Persisted in Menu::Settings (not ShaderCache); applied to backgroundCompilation at boot in Menu::Load.

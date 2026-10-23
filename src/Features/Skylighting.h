@@ -70,7 +70,7 @@ public:
 		float MaxZenith = 3.1415926f / 2.f;  // 90 deg
 		float MinDiffuseVisibility = 0.1f;
 		float MinSpecularVisibility = 0.1f;
-		uint ProbeGridQuality = 2;
+		uint ProbeGridQuality = 1;
 		float ProbeArrayWorldSizeCells = kMinProbeFieldSizeCells;
 		bool EnableIncrementalProbeUpdates = false;
 		uint StableSliceCount = 16;
@@ -211,7 +211,7 @@ private:
 	static std::array<uint, 3> GetProbeArrayDims(uint quality);
 	void CreateProbeResources(const std::array<uint, 3>& dimensions);
 	void ApplyProbeGrid();
-	uint activeProbeGridQuality = 2;
+	uint activeProbeGridQuality = 1;
 	uint32_t* GetRasterCullMode() const;
 	void BeginInteriorOcclusionGeometry();
 	void EndInteriorOcclusionGeometry();

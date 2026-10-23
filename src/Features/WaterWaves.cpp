@@ -18,6 +18,27 @@
 
 using namespace WaterWaveMath;
 
+namespace
+{
+	// One hull per vertex layout. Light count, refraction, and the flags that
+	// do not change VS_OUTPUT share that hull. Flowmap and LOD are not tessellated.
+	uint32_t CanonicalTessDescriptor(uint32_t a_descriptor)
+	{
+		using Flag = SIE::ShaderCache::WaterShaderFlags;
+		constexpr uint32_t kDrop =
+			static_cast<uint32_t>(Flag::Reflections) |
+			static_cast<uint32_t>(Flag::Refractions) |
+			static_cast<uint32_t>(Flag::Depth) |
+			static_cast<uint32_t>(Flag::Interior) |
+			static_cast<uint32_t>(Flag::Cubemap);
+		uint32_t desc = a_descriptor & ~kDrop;
+		const uint32_t technique = (desc >> 11) & 0xF;
+		if (technique < 8)
+			desc &= ~(0xFu << 11);
+		return desc;
+	}
+}
+
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	WaterWaves::Settings,
 	Enabled,
@@ -210,7 +231,7 @@ void WaterWaves::ApplyShared(float& a_displacedHeight, float& a_cameraBelow, flo
 	if (!tessCB)
 		return;
 	const float data[4] = {
-		std::clamp(settings.MaxTessFactor, 1.0f, 16.0f),
+		std::clamp(settings.MaxTessFactor, 1.0f, 8.0f),
 		std::max(settings.TessRange, 1.0f),
 		params.enabled ? 1.0f : 0.0f,
 		0.0f
@@ -424,6 +445,7 @@ void WaterWaves::OnRestore()
 
 void WaterWaves::QueueTessCompile(RE::BSShader* a_shader, uint32_t a_descriptor)
 {
+	a_descriptor = CanonicalTessDescriptor(a_descriptor);
 	auto& slot = tessShaders[a_descriptor];
 	if (slot)
 		return;
@@ -470,6 +492,7 @@ void WaterWaves::CompileWorker(std::stop_token a_stop)
 
 WaterWaves::TessShaders* WaterWaves::GetTessShaders(RE::BSShader* a_shader, uint32_t a_descriptor)
 {
+	a_descriptor = CanonicalTessDescriptor(a_descriptor);
 	std::lock_guard lock(tessLock);
 	auto it = tessShaders.find(a_descriptor);
 	if (it == tessShaders.end() || !it->second) {
@@ -498,7 +521,7 @@ void WaterWaves::DrawSettings()
 		ImGui::Text("%s", T(TKEY("shore_tt"), "How deep the water must be before the waves reach full height. The last 4 units at the beach stay flat, so the edge does not flicker."));
 	BFUI::SliderFloat(T(TKEY("sea_scale"), "Sea Scale"), &settings.SeaScale, 0.0f, 2.0f, "%.2f");
 	BFUI::SliderFloat(T(TKEY("interior_scale"), "Interior Scale"), &settings.InteriorScale, 0.0f, 1.0f, "%.2f");
-	BFUI::SliderFloat(T(TKEY("max_tess"), "Tessellation"), &settings.MaxTessFactor, 1.0f, 16.0f, "%.0f");
+	BFUI::SliderFloat(T(TKEY("max_tess"), "Tessellation"), &settings.MaxTessFactor, 1.0f, 8.0f, "%.0f");
 	BFUI::SliderFloat(T(TKEY("tess_range"), "Tessellation Range"), &settings.TessRange, 256.0f, 4096.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::Text("%s", T(TKEY("tess_tt"), "Extra triangles near the camera. At factor 1 the surface matches the untessellated mesh. Rivers and waterfalls are not moved."));

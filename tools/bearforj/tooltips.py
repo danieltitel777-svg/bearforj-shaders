@@ -22,6 +22,8 @@ EXACT={
 "Ward shatter and ripple":("A hit on a raised ward bursts shards in the spell's color and a ring on the ground. A shield block does not.","Удар в поднятый оберег даёт осколки цвета заклинания и кольцо на земле. Блок щитом — нет."),
 "Pollen and insects":("Actors, creatures, wind, spells and shouts push pollen and insects.","Актёры, существа, ветер, заклинания и крики толкают пыльцу и насекомых."),
 "Floor stains":("Actors, creatures, wind, spells and shouts can lift floor stains.","Актёры, существа, ветер, заклинания и крики могут поднять пятна с пола."),
+"Use Runtime FSR4":("ML upscaling on Radeon RX 7000 and RX 9000. If the runtime provider does not start, this session uses FSR 3.1.","ML-апскейл на Radeon RX 7000 и RX 9000. Если провайдер не запускается, эта сессия переходит на FSR 3.1."),
+"Use Runtime FSR4 (experimental)":("Experimental on Radeon RX 6000 (Navi 21, 22, 23 and 24, including the RX 6950 XT). Needs Adrenalin 26.10.1 or newer. The shipped FSR SDK is still 2.3.0 and only documents RX 7000 and RX 9000. If the provider does not start, this session uses FSR 3.1.","Эксперимент на Radeon RX 6000 (Navi 21, 22, 23 и 24, включая RX 6950 XT). Нужен Adrenalin 26.10.1 или новее. В пакет входит FSR SDK 2.3.0, он описывает только RX 7000 и RX 9000. Если провайдер не создаётся, эта сессия переходит на FSR 3.1."),
 }
 def what(label):
     if label in EXACT: return EXACT[label]

@@ -144,9 +144,8 @@ struct VS_OUTPUT
 #		if defined(FLOWMAP)
 	nointerpolation float2 TexCoord4: TEXCOORD4;
 #		endif
-#		if NUM_SPECULAR_LIGHTS == 0 || defined(REFRACTIONS)
+	// Always present so one hull matches every light count and refraction on or off.
 	float4 MPosition: TEXCOORD5;
-#		endif
 #	endif
 
 #	if defined(SIMPLE)
@@ -221,6 +220,23 @@ cbuffer PerGeometry : register(b2)
 
 #	endif  // VS / HS / DS cbuffers
 
+#if defined(WATER_WAVES) && (defined(VSHADER) || defined(DSHADER))
+float3 WaterWaveModelDelta(float3 waveOff, uint eyeIndex)
+{
+	// World maps model directions to camera-relative world. SM5 has no inverse().
+	float3x3 R = (float3x3)World[eyeIndex];
+	float3 col0 = float3(R[0].x, R[1].x, R[2].x);
+	float3 col1 = float3(R[0].y, R[1].y, R[2].y);
+	float3 col2 = float3(R[0].z, R[1].z, R[2].z);
+	float det = dot(col0, cross(col1, col2));
+	float invDet = abs(det) > 1e-8 ? rcp(det) : 0.0;
+	float3 row0 = cross(col1, col2) * invDet;
+	float3 row1 = cross(col2, col0) * invDet;
+	float3 row2 = cross(col0, col1) * invDet;
+	return float3(dot(row0, waveOff), dot(row1, waveOff), dot(row2, waveOff));
+}
+#endif
+
 #	ifdef VSHADER
 
 VS_OUTPUT main(VS_INPUT input)
@@ -267,9 +283,7 @@ VS_OUTPUT main(VS_INPUT input)
 
 	vsout.TexCoord1.xyzw = NormalsScroll0 + posAdjust;
 #			else
-#				if !defined(SPECULAR) || (NUM_SPECULAR_LIGHTS == 0) || defined(REFRACTIONS)
 	vsout.MPosition.xyzw = inputPosition.xyzw;
-#				endif
 
 	float2 posAdjust = worldPos.xy + QPosAdjust[eyeIndex].xy;
 
@@ -367,6 +381,9 @@ VS_OUTPUT main(VS_INPUT input)
 #				if !defined(LOD) && !defined(FLOWMAP)
 	vsout.TexCoord2.z = waveView.w;
 #				endif
+#				if !defined(LOD)
+	vsout.MPosition.xyz += WaterWaveModelDelta(waveOff, eyeIndex);
+#				endif
 #			endif
 #		endif
 
@@ -400,7 +417,7 @@ float WaveEdge(float3 a_a, float3 a_b)
 	if (dist >= range || WaveTess.z < 0.5)
 		return 1.0;
 	float t = saturate(1.0 - dist / range);
-	return clamp(lerp(1.0, WaveTess.x, t * t), 1.0, 16.0);
+	return clamp(lerp(1.0, WaveTess.x, t * t), 1.0, 8.0);
 }
 
 #	if defined(HSHADER)
@@ -419,7 +436,7 @@ WavePatch WavePatchConstants(InputPatch<VS_OUTPUT, 3> patch)
 [outputtopology("triangle_cw")]
 [outputcontrolpoints(3)]
 [patchconstantfunc("WavePatchConstants")]
-[maxtessfactor(16.0)]
+[maxtessfactor(8.0)]
 VS_OUTPUT main(InputPatch<VS_OUTPUT, 3> patch, uint id: SV_OutputControlPointID)
 {
 	return patch[id];
@@ -453,9 +470,7 @@ VS_OUTPUT main(WavePatch pc, float3 bary: SV_DomainLocation, const OutputPatch<V
 #				if defined(FLOWMAP)
 	WAVE_LERP(TexCoord4);
 #				endif
-#				if NUM_SPECULAR_LIGHTS == 0 || defined(REFRACTIONS)
 	WAVE_LERP(MPosition);
-#				endif
 #			endif
 #			if defined(SIMPLE)
 	WAVE_LERP(MPosition);
@@ -469,6 +484,10 @@ VS_OUTPUT main(WavePatch pc, float3 bary: SV_DomainLocation, const OutputPatch<V
 	float3 plane = patch[0].WaveBase.xyz * bary.x + patch[1].WaveBase.xyz * bary.y + patch[2].WaveBase.xyz * bary.z;
 	float3 waveOff = WaterWaves::Offset(plane, 0, false);
 	float3 displaced = plane + waveOff;
+#		if !defined(STENCIL)
+	// Control points already carry their own crest. Replace that with the crest at this sample.
+	o.MPosition.xyz += WaterWaveModelDelta(waveOff - (o.WPosition.xyz - plane), 0);
+#		endif
 	bool reverseProjection = FrameBuffer::IsReverseProjection(0);
 	float4 waveView = mul(FrameBuffer::CameraViewProj[0], float4(displaced, 1.0));
 	float waveHeightMult = min((1.0 / 10000.0) * max(FrameBuffer::ToStandardClipZ(waveView, reverseProjection) - 70000, 0), 1);

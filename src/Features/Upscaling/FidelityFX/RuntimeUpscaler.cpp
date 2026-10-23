@@ -2,6 +2,7 @@
 // into its own file per the LightLimitFix/*.cpp convention -- these are FidelityFX methods.
 
 #include "../FidelityFX.h"
+#include "Fsr4AdapterClassify.h"
 
 #include <algorithm>
 #include <array>
@@ -142,70 +143,18 @@ namespace
 
 	FidelityFX::Fsr4AdapterSupport ClassifyFsr4AdapterSupport(const DXGI_ADAPTER_DESC& a_desc)
 	{
-		if (a_desc.VendorId != kAmdVendorId)
-			return FidelityFX::Fsr4AdapterSupport::Unsupported;
-
 		std::wstring wideDescription(a_desc.Description);
 		const std::string description = ToUpperAscii(stl::utf16_to_utf8(wideDescription).value_or(""));
-
-		// Pre-RDNA "HD"-branded GCN cards (e.g. "Radeon HD 7970") fall in the same 7000-7999
-		// numeric range as RX 7000 without being FSR 4.1.1-capable; reject them before the scan.
-		if (description.find("RADEON HD") != std::string::npos)
+		switch (BearforjFsr4::ClassifyUpper(a_desc.VendorId, description)) {
+		case BearforjFsr4::Support::Rx6000:
+			return FidelityFX::Fsr4AdapterSupport::RadeonRx6000;
+		case BearforjFsr4::Support::Rx7000:
+			return FidelityFX::Fsr4AdapterSupport::RadeonRx7000;
+		case BearforjFsr4::Support::Rx9000:
+			return FidelityFX::Fsr4AdapterSupport::RadeonRx9000;
+		default:
 			return FidelityFX::Fsr4AdapterSupport::Unsupported;
-
-		// Only accept explicit discrete RDNA3 dies here, never a bare "RDNA 3"/"RDNA3" marker --
-		// that also matches RDNA3 integrated GPUs, which FSR 4.1.1 does not support.
-		if (description.find("NAVI31") != std::string::npos ||
-			description.find("NAVI 31") != std::string::npos ||
-			description.find("NAVI32") != std::string::npos ||
-			description.find("NAVI 32") != std::string::npos ||
-			description.find("NAVI33") != std::string::npos ||
-			description.find("NAVI 33") != std::string::npos) {
-			return FidelityFX::Fsr4AdapterSupport::RadeonRx7000;
 		}
-
-		if (description.find("RDNA4") != std::string::npos ||
-			description.find("RDNA 4") != std::string::npos ||
-			description.find("NAVI4") != std::string::npos ||
-			description.find("NAVI 4") != std::string::npos) {
-			return FidelityFX::Fsr4AdapterSupport::RadeonRx9000;
-		}
-
-		size_t searchPosition = 0;
-		while (searchPosition < description.length()) {
-			while (searchPosition < description.length() && !std::isdigit(static_cast<unsigned char>(description[searchPosition])))
-				searchPosition++;
-
-			const size_t modelStart = searchPosition;
-			while (searchPosition < description.length() && std::isdigit(static_cast<unsigned char>(description[searchPosition])))
-				searchPosition++;
-
-			if (searchPosition > modelStart) {
-				const std::string modelText = description.substr(modelStart, searchPosition - modelStart);
-				char* parseEnd = nullptr;
-				const unsigned long modelNumber = std::strtoul(modelText.c_str(), &parseEnd, 10);
-				if (parseEnd != modelText.c_str()) {
-					if (modelNumber >= 7000ul && modelNumber < 8000ul)
-						return FidelityFX::Fsr4AdapterSupport::RadeonRx7000;
-					if (modelNumber >= 9000ul && modelNumber < 10000ul)
-						return FidelityFX::Fsr4AdapterSupport::RadeonRx9000;
-				}
-			}
-		}
-
-		// Keep fallbacks for abbreviated naming variants that don't include full numeric model text.
-		if (description.find("RX 70") != std::string::npos ||
-			description.find("RX70") != std::string::npos ||
-			description.find("RADEON 70") != std::string::npos) {
-			return FidelityFX::Fsr4AdapterSupport::RadeonRx7000;
-		}
-		if (description.find("RX 90") != std::string::npos ||
-			description.find("RX90") != std::string::npos ||
-			description.find("RADEON 90") != std::string::npos) {
-			return FidelityFX::Fsr4AdapterSupport::RadeonRx9000;
-		}
-
-		return FidelityFX::Fsr4AdapterSupport::Unsupported;
 	}
 
 	std::string UpscalerVersionToString(uint32_t a_version)
@@ -607,7 +556,7 @@ void FidelityFX::LatchRuntimeFsr4Failure()
 	if (runtimeFsr4FailureLatched)
 		return;
 
-	logger::warn("[FidelityFX] Runtime FSR4 failed this session; falling back to the runtime FSR3 provider");
+	logger::warn("[FidelityFX] Runtime FSR4 failed this session; falling back to FSR 3.1");
 	runtimeFsr4FailureLatched = true;
 }
 
