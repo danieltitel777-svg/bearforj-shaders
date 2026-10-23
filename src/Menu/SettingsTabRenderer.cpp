@@ -374,7 +374,7 @@ void SettingsTabRenderer::RenderKeybindingsTab(
 			"Change##OverlayToggle");
 
 		Util::InputComboWidget(
-			T("menu.settings.cs_editor_toggle_key", "OS Editor Toggle Key:"),
+			T("menu.settings.cs_editor_toggle_key", "BF Editor Toggle Key:"),
 			settings.CSEditorToggleKey,
 			state.settingCSEditorToggleKey,
 			"Change##CSEditorToggle");

@@ -21,21 +21,79 @@ STOP = "fomod/stop"
 PRESET = "preset/default"
 
 
-def weather_plugin_names(library=LIBRARY):
-    names = []
-    seen = set()
+# Darker Nights is an addon for Vanilla CS, not a second weather.
+ADDON_OF = {
+    "weather_vanilla_cs_darker": "weather_vanilla_cs",
+}
+
+
+def weather_profiles(library=LIBRARY):
+    """One gate profile per weather file. Alternate filenames of the same file stay together.
+
+    A profile with an empty plugin list (vanilla, no esp) cannot be detected and is omitted.
+    An addon listed in ADDON_OF is merged into its parent so both plugins still count as one weather.
+    """
+    raw = []
     for path in sorted(library.glob("weather_*.json")):
         data = json.loads(path.read_text(encoding="utf-8"))
+        plugins = []
         for name in data.get("plugins") or []:
-            if name and name not in seen:
-                seen.add(name)
-                names.append(name)
+            if name and name not in plugins:
+                plugins.append(name)
+        raw.append({
+            "id": data.get("id") or path.stem,
+            "name": data.get("name") or path.stem,
+            "plugins": plugins,
+        })
+    by_id = {item["id"]: item for item in raw}
+    for addon, parent in ADDON_OF.items():
+        if addon not in by_id or parent not in by_id:
+            continue
+        for name in by_id[addon]["plugins"]:
+            if name not in by_id[parent]["plugins"]:
+                by_id[parent]["plugins"].append(name)
+        del by_id[addon]
+    profiles = [item for item in raw if item["id"] in by_id and item["plugins"]]
+    seen = {}
+    for profile in profiles:
+        for name in profile["plugins"]:
+            other = seen.get(name)
+            if other and other != profile["id"]:
+                raise SystemExit(f"{name} is listed by both {other} and {profile['id']}")
+            seen[name] = profile["id"]
+    return profiles
+
+
+def weather_plugin_names(library=LIBRARY):
+    names = []
+    for profile in weather_profiles(library):
+        names.extend(profile["plugins"])
     return names
 
 
 def _file_deps(names, state="Active", operator="Or"):
     inner = "".join(f'<fileDependency file="{escape(name)}" state="{state}"/>' for name in names)
     return f'<dependencies operator="{operator}">{inner}</dependencies>'
+
+
+def _not_active(names):
+    """Every named file is missing or disabled. Active fails the group."""
+    parts = []
+    for name in names:
+        parts.append(
+            '<dependencies operator="Or">'
+            f'<fileDependency file="{escape(name)}" state="Missing"/>'
+            f'<fileDependency file="{escape(name)}" state="Inactive"/>'
+            "</dependencies>"
+        )
+    return f'<dependencies operator="And">{"".join(parts)}</dependencies>'
+
+
+def _exactly_one_weather(profiles, index):
+    """This profile has one active plugin, and every other profile has none."""
+    chosen = _file_deps(profiles[index]["plugins"], state="Active", operator="Or")
+    others = "".join(_not_active(profile["plugins"]) for i, profile in enumerate(profiles) if i != index)
+    return f'<dependencies operator="And">{chosen}{others}</dependencies>'
 
 
 def _typed(default, patterns):
@@ -67,13 +125,20 @@ def _plugin(name, description, flag, value, type_xml, folder=None):
     )
 
 
+def _as_patterns(dependencies):
+    if isinstance(dependencies, (list, tuple)):
+        return list(dependencies)
+    return [dependencies]
+
+
 def _stop_found(group, stop_name, found_name, description, flag, dependencies, stop_folder=STOP):
+    patterns = _as_patterns(dependencies)
     stop = _plugin(
         stop_name,
         description,
         flag,
         "no",
-        _typed("Required", [_pattern(dependencies, "NotUsable")]),
+        _typed("Required", [_pattern(item, "NotUsable") for item in patterns]),
         stop_folder,
     )
     found = _plugin(
@@ -81,7 +146,7 @@ def _stop_found(group, stop_name, found_name, description, flag, dependencies, s
         description,
         flag,
         "yes",
-        _typed("NotUsable", [_pattern(dependencies, "Required")]),
+        _typed("NotUsable", [_pattern(item, "Required") for item in patterns]),
     )
     return (
         f'<group name="{escape(group)}" type="SelectExactlyOne">'
@@ -89,14 +154,23 @@ def _stop_found(group, stop_name, found_name, description, flag, dependencies, s
     )
 
 
-def module_xml(weather_files, core_source=None, stop_source=STOP, preset_source=PRESET):
+def module_xml(weather_files=None, core_source=None, stop_source=STOP, preset_source=PRESET, profiles=None):
+    if profiles is None:
+        profiles = [{"id": name, "name": name, "plugins": [name]} for name in (weather_files or [])]
+    if not profiles:
+        raise SystemExit("FOMOD needs at least one weather profile")
     true_light = _file_deps(["True Light.esp", "TrueLight.esp"])
     placer = _file_deps(["SKSE/Plugins/po3_LightPlacer.dll"], operator="And")
-    weather = _file_deps(weather_files)
+    weather_patterns = [_exactly_one_weather(profiles, index) for index in range(len(profiles))]
     windows = _file_deps(["Window Shadows Ultimate Supplement.esp"], operator="And")
     embers = _file_deps(["Embers XD.esp"], operator="And")
-    helios_files = _file_deps(["Helios.esp", "Helios.esl", "Helios.esm"])
+    helios_names = ["Helios.esp", "Helios.esl", "Helios.esm"]
+    helios_files = _file_deps(helios_names)
+    helios_absent = _not_active(helios_names)
     game_17 = "<dependencies><gameDependency version=\"1.7.0\"/></dependencies>"
+    game_161170 = "<dependencies><gameDependency version=\"1.6.1170\"/></dependencies>"
+    helios_window_missing = f'<dependencies operator="And">{game_161170}{helios_absent}</dependencies>'
+    helios_window_found = f'<dependencies operator="And">{game_161170}{helios_files}</dependencies>'
     lux_files = ["Lux.esp", "Lux - Master plugin.esm", "Lux CS.esp", "Lux Orbis.esp", "Lux Via.esp"]
 
     light = """RU: Красивый путь ждёт True Light 3.6.5 (Bottle, ведёт SkrubbySkrubInAShrub).
@@ -105,20 +179,23 @@ https://www.nexusmods.com/skyrimspecialedition/mods/135488
 Нужны ещё Light Placer 5.0.0, CS Light, Luma Utility, ATLM и powerofthree's Tweaks.
 Имена файлов Tweaks, Luma, ATLM, XEMI и MMSF на открытых страницах не напечатаны, поэтому здесь их нет.
 Отмените установщик, поставьте моды, запустите снова.
+У fileDependency нет атрибута версии: номера 3.6.5, 5.0.0, 1.4.6 и 3.3.0 в XML не проверяются, только имя файла.
 EN: The beauty path needs True Light 3.6.5. Lux does not count and stays off.
 Also install Light Placer 5.0.0, CS Light, Luma Utility, ATLM and powerofthree's Tweaks.
-Cancel, install the mods, run this installer again."""
+Cancel, install the mods, run this installer again.
+XML fileDependency has no version attribute, so 3.6.5, Light Placer 5.0.0, Window Shadows Ultimate 1.4.6 and Embers XD 3.3.0 are named here and are not numeric checks. The file name is all the schema can test."""
     placer_text = """RU: Нужен Light Placer 5.0.0, powerofthree.
 https://www.nexusmods.com/skyrimspecialedition/mods/127557
 Файл: SKSE/Plugins/po3_LightPlacer.dll и его требование powerofthree's Tweaks.
 EN: Install Light Placer 5.0.0 and powerofthree's Tweaks, then run this again."""
-    weather_text = """RU: Нужна ровно одна погода под Community Shaders. Две сразу ставить не надо.
-Установщик видит, что активен хотя бы один плагин из профилей Bearforj. Два активных файла он отличить не может.
-Профиль Prism не добавлен: имя его плагина неизвестно.
-Подойдут NAT, Cathedral, Azurite, Obsidian, Vanilla CS, Vespro, Astralite, Faithful, Mythical Ages, Nirn Whispers, Real Weathers.
-EN: Install one Community Shaders weather. The check passes when any listed plugin is active.
-It cannot tell that two weather mods are active together. Do not install two.
-No Prism profile: the plugin filename is not known."""
+    weather_text = """RU: Нужна ровно одна погода из профилей Bearforj. Две сразу — стоп.
+Несколько имён одного мода (NAT.esp и NAT.CS.esp) считаются одной погодой.
+Darker Nights для Vanilla CS — дополнение той же погоды, не вторая.
+Ваниль без своего esp установщик не видит. Prism не добавлен: имя плагина неизвестно.
+EN: Exactly one Bearforj weather profile may be active. Two profiles stop the install.
+Alternate filenames of one mod count as that one weather.
+Darker Nights for Vanilla CS is the same weather, not a second one.
+Vanilla with no plugin file cannot be detected. No Prism profile: the plugin filename is unknown."""
     windows_text = """RU: Нужен Window Shadows Ultimate 1.4.6, CarbonDice и Dlizzio.
 https://www.nexusmods.com/skyrimspecialedition/mods/150494
 Проверяем файл из журнала 1.2: Window Shadows Ultimate Supplement.esp.
@@ -130,10 +207,12 @@ https://www.nexusmods.com/skyrimspecialedition/mods/37085
 В его установщике: стиль пламени Community Shaders и None (CS/OS) для чужих ламп.
 Свои лампы Light Placer из Embers XD не включать.
 EN: Install Embers XD 3.3.0. Embers HD does not pass this check."""
-    helios_text = """RU: На 1.6.1170 нужен Helios 1.01, isoprovophlex, плюс Luma 1.7, MMSF 1.1 и XEMI.
+    helios_text = """RU: Helios нужен, когда версия игры не ниже 1.6.1170 и ниже 1.7.0.
+Ниже 1.6.1170 и на 1.7.0 шаг пропускается. Номер 1.01 самого Helios XML не читает.
 https://www.nexusmods.com/skyrimspecialedition/mods/181533
-Luma 2.0 с Helios 1.01 ломает дом. На Skyrim 1.7 этот шаг пропускается: Helios 2.0 ещё нет, 1.01 не ставить.
-EN: On 1.6.1170 install Helios 1.01 with Luma 1.7 and MMSF 1.1. On 1.7 this step is skipped."""
+Luma 2.0 с Helios 1.01 ломает дом. На 1.7 Helios 2.0 ещё нет, 1.01 не ставить.
+EN: Helios is required when the game is at least 1.6.1170 and below 1.7.0.
+Below 1.6.1170, and on 1.7.0, this step is skipped. The XML cannot read Helios 1.01."""
     lux_off = """RU: По умолчанию. Lux не требуется и не ставится.
 EN: Default. Lux is not required and is not installed."""
     lux_on = """RU: Не рекомендуем. Если True Light уже активен, этот пункт выбрать нельзя.
@@ -151,16 +230,25 @@ EN: Installs the 0.6.7 picture preset. The nine fVolumetricLighting keys are app
     groups = [
         _stop_found("Свет / Light replacer", "Стоп: нет True Light / Stop: True Light missing", "True Light найден / True Light found", light, "gate_light", true_light, stop_source),
         _stop_found("Light Placer", "Стоп: нет Light Placer / Stop: Light Placer missing", "Light Placer найден / Light Placer found", placer_text, "gate_placer", placer, stop_source),
-        _stop_found("Погода / Weather", "Стоп: нет CS-погоды / Stop: no CS weather", "Погода найдена / Weather found", weather_text, "gate_weather", weather, stop_source),
+        _stop_found(
+            "Погода / Weather",
+            "Стоп: нет ровно одной погоды / Stop: not exactly one weather",
+            "Ровно одна погода / Exactly one weather",
+            weather_text,
+            "gate_weather",
+            weather_patterns,
+            stop_source,
+        ),
         _stop_found("Окна / Windows", "Стоп: нет Window Shadows Ultimate", "Window Shadows Ultimate найден", windows_text, "gate_wsu", windows, stop_source),
         _stop_found("Огонь / Fire", "Стоп: нет Embers XD", "Embers XD найден", embers_text, "gate_embers", embers, stop_source),
     ]
+    # gameDependency is a minimum. 1.7 matches 1.6.1170 as well, so the 1.7 pattern is first.
     helios_stop = _plugin(
-        "Стоп: нет Helios на 1.6 / Stop: Helios missing on 1.6",
+        "Стоп: нет Helios на 1.6.1170 / Stop: Helios missing on 1.6.1170",
         helios_text,
         "gate_helios",
         "no",
-        _typed("Required", [_pattern(game_17, "NotUsable"), _pattern(helios_files, "NotUsable")]),
+        _typed("NotUsable", [_pattern(game_17, "NotUsable"), _pattern(helios_window_missing, "Required")]),
         stop_source,
     )
     helios_found = _plugin(
@@ -168,14 +256,14 @@ EN: Installs the 0.6.7 picture preset. The nine fVolumetricLighting keys are app
         helios_text,
         "gate_helios",
         "yes",
-        _typed("NotUsable", [_pattern(game_17, "NotUsable"), _pattern(helios_files, "Required")]),
+        _typed("NotUsable", [_pattern(game_17, "NotUsable"), _pattern(helios_window_found, "Required")]),
     )
     helios_skip = _plugin(
-        "Skyrim 1.7: Helios пропущен / Skyrim 1.7: Helios skipped",
+        "Helios не нужен на этой версии игры / Helios not required on this game",
         helios_text,
         "gate_helios",
         "yes",
-        _typed("NotUsable", [_pattern(game_17, "Required")]),
+        _typed("Required", [_pattern(game_17, "Required"), _pattern(game_161170, "NotUsable")]),
     )
     groups.append(
         '<group name="Helios" type="SelectExactlyOne"><plugins>'
@@ -261,12 +349,14 @@ def write_checked_in(root=ROOT):
     stop.mkdir(exist_ok=True)
     (stop / "Bearforj_FOMOD_STOP.txt").write_text(
         "Bearforj Shaders\n\n"
-        "RU: Красивый путь не установлен. Нужны True Light 3.6.5, Light Placer 5.0.0, одна CS-погода,\n"
-        "Window Shadows Ultimate 1.4.6, Embers XD 3.3.0 и, только на Skyrim 1.6.1170, Helios 1.01.\n"
+        "RU: Красивый путь не установлен. Нужны ровно одна погода, True Light, Light Placer 5.0.0,\n"
+        "Window Shadows Ultimate, Embers XD и Helios, когда игра от 1.6.1170 и ниже 1.7.0.\n"
+        "Номера версий модов XML не проверяет: у fileDependency нет атрибута версии.\n"
         "Lux не требуется. Профиль Prism не добавлен: имя плагина неизвестно.\n"
         "Поставьте моды и запустите установщик снова. Этот файл — единственное, что ставится без проверки.\n\n"
-        "EN: The beauty path was not installed. It needs True Light 3.6.5, Light Placer 5.0.0, one CS weather,\n"
-        "Window Shadows Ultimate 1.4.6, Embers XD 3.3.0, and Helios 1.01 only on Skyrim 1.6.1170.\n"
+        "EN: The beauty path was not installed. It needs exactly one weather, True Light, Light Placer,\n"
+        "Window Shadows Ultimate, Embers XD, and Helios when the game is at least 1.6.1170 and below 1.7.0.\n"
+        "Mod version numbers are not checked: fileDependency has no version attribute.\n"
         "Lux is not required. No Prism profile was added because the plugin filename is unknown.\n"
         "Install the mods and run the installer again. This file is the only thing installed when a check fails.\n",
         encoding="utf-8",
@@ -285,4 +375,8 @@ def validate(xml):
 if __name__ == "__main__":
     text = write_checked_in()
     validate(text)
-    print(f"schema valid, {len(weather_plugin_names())} weather plugin names, Prism not included")
+    profiles = weather_profiles()
+    print(
+        f"schema valid, {len(profiles)} weather profiles, {len(weather_plugin_names())} plugin names, "
+        "exactly one profile, Prism not included, mod versions not readable by fileDependency"
+    )

@@ -6,7 +6,10 @@ import json, os, shutil, glob, sys, re, zipfile, hashlib
 from xml.sax.saxutils import escape as E, quoteattr as QA
 stage, dll, version, stamp = sys.argv[1:5]      # stage = unpacked previous package root (has '00 Core', '20 Presets', 'fomod/images')
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-OUTDIR = f"/workspace/bearforj/dist07/{version}_{stamp}"
+OUTDIR = os.environ.get("BEARFORJ_OUTDIR")
+if not OUTDIR:
+    legacy = f"/workspace/bearforj/dist07/{version}_{stamp}"
+    OUTDIR = legacy if os.path.isdir("/workspace/bearforj") else os.path.join(SRC, "dist", f"{version}_{stamp}")
 ROOT = f"/tmp/bf_pkg_{version}"
 if os.path.exists(ROOT): shutil.rmtree(ROOT)
 shutil.copytree(stage, ROOT)
@@ -73,7 +76,8 @@ profiles = [json.load(open(f, encoding="utf-8")) for f in sorted(glob.glob(lib +
 for p in profiles:
     d = f"{ROOT}/10 Profiles/{p['id']}/SKSE/Plugins/CommunityShaders/Bearforj/Profiles/Selected"; os.makedirs(d)
     shutil.copy2(f"{lib}/{p['id']}.json", d)
-packs = json.load(open("/workspace/bearforj/tools_bf/packs.json"))
+# packs.json used to drive the old SelectAny weather page. The gate installer
+# does not read it. A missing path must not stop the zip.
 
 def deps(files, op="Or"):
     return f'<dependencies operator="{op}">' + "".join(f'<fileDependency file={QA(f)} state="Active"/>' for f in files) + "</dependencies>"
@@ -88,7 +92,7 @@ def opt(name, desc, image, files, td):
 def folder(src): return f'<folder source={QA(src)} destination="" priority="0"/>'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate_fomod
-weather_plugins = gate_fomod.weather_plugin_names(__import__("pathlib").Path(lib))
+weather_profiles = gate_fomod.weather_profiles(__import__("pathlib").Path(lib))
 # The core is not a requiredInstallFile. It is installed only on the picture-preset
 # step, and that step stays hidden until every dependency gate is yes. A failed
 # check installs fomod/stop and nothing else. No shader cache is offered.
@@ -102,7 +106,7 @@ os.makedirs(preset_dir, exist_ok=True)
 repo_preset = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "preset", "default", "SettingsDefault.json")
 if os.path.isfile(repo_preset):
     shutil.copy2(repo_preset, os.path.join(preset_dir, "SettingsDefault.json"))
-xml = gate_fomod.module_xml(weather_plugins, core_source="00 Core")
+xml = gate_fomod.module_xml(profiles=weather_profiles, core_source="00 Core")
 xml = xml.replace("<moduleName>Bearforj Shaders</moduleName>", f"<moduleName>Bearforj Shaders {version}</moduleName>", 1)
 open(f"{ROOT}/fomod/ModuleConfig.xml", "w", encoding="utf-8").write(xml)
 open(f"{ROOT}/fomod/info.xml", "w", encoding="utf-16").write(f'''<?xml version="1.0" encoding="UTF-16"?>

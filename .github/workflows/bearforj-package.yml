@@ -1,0 +1,161 @@
+name: Bearforj 0.6.7 package
+
+# Windows DLL plus the FOMOD zip. No shader cache is built or packed.
+# Shipping ALL stays on Visual Studio 18 2026. This job uses PR-VS2022
+# because GitHub-hosted windows-2022 has Visual Studio 17 2022.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/bearforj-0.6.7-78ba
+
+# One package at a time. A newer push cancels the older Windows build.
+concurrency:
+  group: bearforj-067-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install check dependencies
+        # pyfomod still imports distutils. setuptools 84 puts that module back on 3.12.
+        run: pip install --upgrade lxml pyyaml pyfomod setuptools
+
+      - name: FOMOD schema
+        run: python tools/bearforj/gate_fomod.py
+
+      - name: Feature INIs
+        run: python tools/bearforj/check_feature_inis.py .
+
+      - name: Shader slot audit
+        run: python tools/bearforj/slot_check.py .
+
+      - name: English matches source
+        run: python tools/extract-i18n.py --check
+
+      - name: No orphan translation keys
+        run: python tools/extract-i18n.py --orphans
+
+      # sort-i18n.py --check would rewrite ru.json onto en.json key order.
+      # Those files were already in a different order, so the sort is about
+      # 15,000 lines and changes no string. The checks above are the parity.
+
+      - name: Russian placeholder parity
+        run: python tools/bearforj/check_i18n_placeholders.py
+
+      - name: Package builder tests
+        working-directory: tests
+        run: python -m unittest test_build_fomod_package.py
+
+  package:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - name: Enable Git long paths
+        run: git config --system core.longpaths true
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CMake 4.2
+        uses: lukka/get-cmake@v4.3.3
+        with:
+          cmakeVersion: "~4.2.0"
+          useCloudCache: false
+
+      - name: Setup MSVC x64
+        uses: TheMrMilchmann/setup-msvc-dev@v4.0.0
+        with:
+          arch: x64
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          $commit = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          $vcpkg = Join-Path $env:GITHUB_WORKSPACE "vcpkg"
+          if (-not (Test-Path $vcpkg)) {
+            git clone https://github.com/microsoft/vcpkg.git $vcpkg
+          }
+          Push-Location $vcpkg
+          git fetch origin $commit
+          git checkout $commit
+          $ok = $false
+          for ($attempt = 1; $attempt -le 3 -and -not $ok; $attempt++) {
+            if ($attempt -gt 1) { Start-Sleep -Seconds 20 }
+            & .\bootstrap-vcpkg.bat -disableMetrics
+            $ok = Test-Path .\vcpkg.exe
+          }
+          if (-not $ok) { throw "vcpkg.exe missing after bootstrap" }
+          Pop-Location
+          "VCPKG_ROOT=$vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Configure
+        run: cmake --preset PR-VS2022
+
+      - name: Build CommunityShaders.dll
+        run: cmake --build --preset PR-VS2022 --config Release
+
+      - name: Assemble zip
+        shell: pwsh
+        run: |
+          pip install lxml pyyaml
+          $dll = Get-ChildItem -Path build/PR-VS2022 -Recurse -Filter CommunityShaders.dll |
+            Where-Object { $_.FullName -match '\\Release\\' } |
+            Select-Object -First 1
+          if (-not $dll) { throw "CommunityShaders.dll was not produced" }
+          $stage = Join-Path $env:GITHUB_WORKSPACE "stage"
+          New-Item -ItemType Directory -Force -Path (Join-Path $stage "00 Core/SKSE/Plugins") | Out-Null
+          python tools/bearforj/assemble_pkg.py $stage $dll.FullName 0.6.7 ci
+          $zip = Get-ChildItem -Path dist -Recurse -Filter Bearforj_Shaders_0.6.7.zip | Select-Object -First 1
+          if (-not $zip) { throw "zip was not produced" }
+          Write-Host "ZIP $($zip.FullName) $($zip.Length) bytes"
+
+      - name: Upload zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bearforj_Shaders_0.6.7
+          path: dist/**/Bearforj_Shaders_0.6.7.zip
+          if-no-files-found: error
+
+      - name: Compile shaders with fxc
+        shell: pwsh
+        run: |
+          $fxc = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter fxc.exe |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $fxc) { throw "Windows SDK fxc.exe was not found" }
+          $merged = Join-Path $env:GITHUB_WORKSPACE "shader-merge"
+          New-Item -ItemType Directory -Force -Path $merged | Out-Null
+          Copy-Item -Path package/Shaders/* -Destination $merged -Recurse -Force
+          Get-ChildItem features -Directory | ForEach-Object {
+            $shaders = Join-Path $_.FullName "Shaders"
+            if (Test-Path $shaders) {
+              Copy-Item -Path (Join-Path $shaders "*") -Destination $merged -Recurse -Force
+            }
+          }
+          $env:FXC = $fxc.FullName
+          python tools/bearforj/fxc_all.py $merged fxc_all.log
+
+      - name: Upload fxc log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fxc-log
+          path: fxc_all.log
+          if-no-files-found: warn

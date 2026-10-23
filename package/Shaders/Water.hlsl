@@ -1446,8 +1446,12 @@ void ApplyCrestFoam(inout float3 color, inout float opacity, PS_INPUT input, flo
 	float n = WaterWaves::FoamNoise(absXZ, SharedData::Timer);
 	float reach = lerp(28.0, 52.0, max(storm, murk));
 	float contact = saturate(1.0 - vertical / max(reach, 1.0));
-	float shore = saturate(contact * 1.7 - 0.28) * lerp(0.55, 1.0, n);
-	float objectFoam = saturate(contact * saturate(grad * 0.08) * 2.4) * lerp(0.65, 1.0, n);
+	// Release-branch ring: foam where the water column goes to zero, so a post or a body
+	// gets a band even when the depth gradient is gentle. It fades out past the mid field.
+	float distFade = saturate(1.0 - max(length(input.WPosition.xy) - 2800.0, 0.0) / 2800.0);
+	float ring = (1.0 - smoothstep(4.0, 36.0, vertical)) * distFade;
+	float shore = saturate(contact * 1.7 - 0.28) * lerp(0.55, 1.0, n) * distFade;
+	float objectFoam = saturate(max(ring, contact * saturate(grad * 0.08) * 2.4)) * lerp(0.65, 1.0, n);
 	float crest = 0.0;
 #if !defined(FLOWMAP)
 	crest = saturate((0.62 - input.WaveShape.z) * lerp(2.0, 6.5, storm)) * saturate(storm * 1.35);

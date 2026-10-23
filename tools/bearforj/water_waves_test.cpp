@@ -86,6 +86,9 @@ int main()
 	Expect(calm.length < breeze.length && breeze.length < storm.length, "wavelength grows with the wind");
 	Expect(std::fabs(breeze.amplitude - 0.72f) < 1.0e-4f && std::fabs(breeze.storm - 0.08f) < 1.0e-4f, "the two weather segments meet at the breeze anchor");
 	Expect(std::fabs(pastStorm.amplitude - storm.amplitude) < 1.0e-4f && std::fabs(pastStorm.storm - 1.0f) < 1.0e-4f, "wind past the storm anchor stays on the storm");
+	const WaveResponse stepA = WaveResponseAt(0.70f);
+	const WaveResponse stepB = WaveResponseAt(0.72f);
+	Expect(std::fabs(stepA.amplitude - stepB.amplitude) < 0.08f && std::fabs(stepA.length - stepB.length) < 0.08f, "a small wind step does not pop the swell");
 	Expect(disabled.jacobian == 1.0f && river.jacobian == 1.0f, "disabled and flowmap water keep a flat jacobian");
 
 	Params flat = sea;

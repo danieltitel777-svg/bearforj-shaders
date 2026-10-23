@@ -996,7 +996,7 @@ void TerrainDeformation::DrawSettings()
 		ImGui::Text("%s", T(TKEY("raise_full_tt"), "Off: snow, mud and sand stand only under your feet and in footprints. On: the raised layer covers the whole tessellation range."));
 	BFUI::SliderFloat(T(TKEY("snow_raise"), "Snow Height"), &settings.SnowRaise, 0.0f, 120.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::Text("%s", T(TKEY("snow_raise_tt"), "How far snow stands above the ground, in game units. It fades out at the tessellation range so the far ground stays flat."));
+		ImGui::Text("%s", T(TKEY("snow_raise_tt"), "How far snow stands above the ground, in game units. Under the player it covers about 2.5 metres. The whole near field is only raised when that option is on."));
 	BFUI::SliderFloat(T(TKEY("mud_raise"), "Mud Height"), &settings.MudRaise, 0.0f, 60.0f, "%.0f");
 	BFUI::SliderFloat(T(TKEY("sand_raise"), "Sand Height"), &settings.SandRaise, 0.0f, 40.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())

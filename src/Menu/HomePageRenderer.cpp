@@ -718,13 +718,13 @@ void HomePageRenderer::RenderFirstTimeSetupDialog()
 	{
 		auto& csEditorKey = menu->GetSettings().CSEditorToggleKey;
 		if (csEditorKey.empty()) {
-			const char* warnText = T("menu.setup.cs_editor_unbound", "OS Editor hotkey unbound - chosen key uses Shift");
+			const char* warnText = T("menu.setup.cs_editor_unbound", "BF Editor hotkey unbound - chosen key uses Shift");
 			centerText(warnText);
 			Util::Text::Warning("%s", warnText);
 		} else {
 			std::string infoStr = I18n::GetSingleton()->Format("menu.setup.cs_editor_will_be",
 				{ { "key", Util::Input::KeyIdToString(csEditorKey) } },
-				"OS Editor hotkey will be: {key}");
+				"BF Editor hotkey will be: {key}");
 			centerText(infoStr.c_str());
 			ImGui::TextDisabled("%s", infoStr.c_str());
 		}
