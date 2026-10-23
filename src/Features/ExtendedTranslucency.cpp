@@ -112,7 +112,7 @@ void ExtendedTranslucency::DrawSettings()
 			ImGui::Text("%s", T(TKEY("skinned_mesh_only_tooltip"), "Control if this effect should only apply to skinned mesh. Check this option if you are seeing undesired effects on random objects."));
 		}
 
-		BFUI::SliderFloat(T(TKEY("transparency_increase"), "Transparency Increase"), &settings.AlphaReduction, 0, 1.f);
+		BFUI::SliderFloat(T(TKEY("transparency_increase"), "Transparency Increase"), &settings.AlphaReduction, 0.0f, 1.0f);
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("transparency_increase_tooltip"), "Translucent material will make the material more opaque on average, which could be different from the intent. Reduce the alpha to counter this effect and increase the dynamic range of the output."));
 		}
