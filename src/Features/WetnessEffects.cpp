@@ -1,4 +1,6 @@
 #include "WetnessEffects.h"
+
+#include "CharacterRainSurfaces.h"
 #include "CSEditor.h"
 #include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
 #include "I18n/I18n.h"
@@ -43,7 +45,28 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	WallRainWetness,
 	WallRainDarkening,
 	EnableWallRain,
-	WallRainTrailLength)
+	WallRainTrailLength,
+	EnableCharacterRainSpots,
+	CharacterSpotDensity,
+	CharacterSpotRadius,
+	CharacterSpotStrength,
+	CharacterSpotRoughness,
+	CharacterSpotNormalStrength,
+	CharacterSpotDebug,
+	CharacterCoatIntensity,
+	CharacterWetSheen,
+	CharacterRainActivityMultiplier,
+	CharacterDryTime,
+	EnableWeaponRainDrops,
+	EnableSkinnedRainStreaks,
+	EnableArmorClothingDryingDrops,
+	EnableEnvironmentVerticalDrops,
+	CharacterSpotLifetime,
+	CharacterSpotInterval,
+	CharacterDropPause,
+	EnvironmentDropDryTime,
+	EnvironmentVerticalSlopeStart,
+	EnvironmentVerticalSlopeFull)
 
 static void SanitizeWallRainSettings(WetnessEffects::Settings& settings)
 {
@@ -60,6 +83,30 @@ static void SanitizeWallRainSettings(WetnessEffects::Settings& settings)
 	settings.WallRainNormalStrength = clamp(settings.WallRainNormalStrength, defaults.WallRainNormalStrength, 0.0f, 4.0f);
 	settings.WallRainWetness = clamp(settings.WallRainWetness, defaults.WallRainWetness, 0.0f, 2.0f);
 	settings.WallRainDarkening = clamp(settings.WallRainDarkening, defaults.WallRainDarkening, 0.0f, 1.5f);
+
+	settings.EnableCharacterRainSpots = settings.EnableCharacterRainSpots != 0;
+	settings.EnableWeaponRainDrops = settings.EnableWeaponRainDrops != 0;
+	settings.EnableSkinnedRainStreaks = settings.EnableSkinnedRainStreaks != 0;
+	settings.EnableArmorClothingDryingDrops = settings.EnableArmorClothingDryingDrops != 0;
+	settings.EnableEnvironmentVerticalDrops = settings.EnableEnvironmentVerticalDrops != 0;
+	settings.CharacterSpotDensity = clamp(settings.CharacterSpotDensity, defaults.CharacterSpotDensity, 0.0f, 1.0f);
+	settings.CharacterSpotRadius = clamp(settings.CharacterSpotRadius, defaults.CharacterSpotRadius, 0.2f, 3.0f);
+	settings.CharacterSpotStrength = clamp(settings.CharacterSpotStrength, defaults.CharacterSpotStrength, 0.0f, 1.0f);
+	settings.CharacterSpotRoughness = clamp(settings.CharacterSpotRoughness, defaults.CharacterSpotRoughness, 0.08f, 0.6f);
+	settings.CharacterSpotNormalStrength = clamp(settings.CharacterSpotNormalStrength, defaults.CharacterSpotNormalStrength, 0.0f, 1.0f);
+	settings.CharacterCoatIntensity = clamp(settings.CharacterCoatIntensity, defaults.CharacterCoatIntensity, 0.0f, 8.0f);
+	settings.CharacterWetSheen = clamp(settings.CharacterWetSheen, defaults.CharacterWetSheen, 0.0f, 1.0f);
+	settings.CharacterRainActivityMultiplier = clamp(settings.CharacterRainActivityMultiplier, defaults.CharacterRainActivityMultiplier, 0.25f, 8.0f);
+	// Jiaye WetFadeTime slider is 0..50. Keep the same range; the shader clamps away from zero.
+	settings.CharacterDryTime = clamp(settings.CharacterDryTime, defaults.CharacterDryTime, 0.05f, 50.0f);
+	settings.CharacterSpotLifetime = clamp(settings.CharacterSpotLifetime, defaults.CharacterSpotLifetime, 0.2f, 20.0f);
+	settings.CharacterSpotInterval = clamp(settings.CharacterSpotInterval, defaults.CharacterSpotInterval, 0.2f, 20.0f);
+	settings.CharacterDropPause = clamp(settings.CharacterDropPause, defaults.CharacterDropPause, 0.0f, 1.0f);
+	settings.EnvironmentDropDryTime = clamp(settings.EnvironmentDropDryTime, defaults.EnvironmentDropDryTime, 0.05f, 50.0f);
+	settings.EnvironmentVerticalSlopeStart = clamp(settings.EnvironmentVerticalSlopeStart, defaults.EnvironmentVerticalSlopeStart, 0.0f, 0.95f);
+	settings.EnvironmentVerticalSlopeFull = clamp(settings.EnvironmentVerticalSlopeFull, defaults.EnvironmentVerticalSlopeFull, 0.05f, 1.0f);
+	if (settings.EnvironmentVerticalSlopeFull < settings.EnvironmentVerticalSlopeStart)
+		settings.EnvironmentVerticalSlopeFull = settings.EnvironmentVerticalSlopeStart;
 }
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
@@ -410,12 +457,98 @@ void WetnessEffects::PostPostLoad()
 {
 	splashesOfStormsLoaded = static_cast<bool>(GetModuleHandle(L"po3_SplashesOfStorms.dll"));
 	if (splashesOfStormsLoaded) {
-		logger::info("[{}] Splashes of Storms detected, compatibility enabled", GetName());
-		return;
+		logger::info("[{}] Splashes of Storms detected, ripple hooks skipped", GetName());
+	} else {
+		// Only hook ripples if SoS is not loaded. Character classification still runs.
+		Ripples::Install();
+	}
+	CharacterRainSurfaces::Install();
+}
+
+void WetnessEffects::DataLoaded()
+{
+	CharacterRainSurfaces::RegisterEvents();
+}
+
+void WetnessEffects::GameLoaded()
+{
+	CharacterRainSurfaces::QueueLoadedActors();
+}
+
+void WetnessEffects::DrawBearforjWetnessSettings()
+{
+	if (ImGui::TreeNodeEx(T(TKEY("character_rain"), "Character Wetness"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		bool characterDrops = settings.EnableCharacterRainSpots != 0;
+		if (ImGui::Checkbox(T(TKEY("character_rain_enabled"), "Character rain drops"), &characterDrops))
+			settings.EnableCharacterRainSpots = characterDrops;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("character_rain_enabled_tooltip"),
+				"Open Shaders drops on every actor: skin, armor, clothes and hair. Off keeps Jiaye's wetness without those drops. Sweat thresholds stay on the Advanced Skin page."));
+		}
+
+		bool skinnedStreaks = settings.EnableSkinnedRainStreaks != 0;
+		if (ImGui::Checkbox(T(TKEY("skinned_streaks"), "Streaks on skinned models"), &skinnedStreaks))
+			settings.EnableSkinnedRainStreaks = skinnedStreaks;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("skinned_streaks_tooltip"),
+				"Rain streaks on bodies, armor and clothes. Off is Jiaye's skinned-model behavior, where those streaks do not run."));
+		}
+
+		bool armorDrying = settings.EnableArmorClothingDryingDrops != 0;
+		if (ImGui::Checkbox(T(TKEY("armor_drying_drops"), "Armor and clothing dry into drops"), &armorDrying))
+			settings.EnableArmorClothingDryingDrops = armorDrying;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("armor_drying_drops_tooltip"),
+				"Jiaye breaks a drying coat into drops on skin. On extends that to armor and clothes. Hair keeps drops either way."));
+		}
+
+		auto characterDisabled = Util::DisableGuard(!settings.EnableCharacterRainSpots);
+		ImGui::SliderFloat(T(TKEY("character_dry_time"), "Character dry time"), &settings.CharacterDryTime, 0.05f, 50.0f, "%.2f sec");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("character_dry_time_tooltip"), "Seconds for character drops to dry. Default 10, Jiaye's WetFadeTime."));
+		ImGui::SliderFloat(T(TKEY("character_spot_lifetime"), "Drop lifetime"), &settings.CharacterSpotLifetime, 0.2f, 20.0f, "%.2f sec");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("character_spot_lifetime_tooltip"), "How long one character drop or streak cycle lasts. Default 3 seconds, from Open Shaders."));
+		ImGui::SliderFloat(T(TKEY("character_spot_interval"), "Drop interval"), &settings.CharacterSpotInterval, 0.2f, 20.0f, "%.2f sec");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("character_spot_interval_tooltip"), "Time between new drops in a spot. Default 4 seconds, from Open Shaders."));
+		ImGui::SliderFloat(T(TKEY("character_drop_pause"), "Streak pause"), &settings.CharacterDropPause, 0.0f, 1.0f, "%.2f");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("character_drop_pause_tooltip"), "Fraction of a streak cycle spent waiting before the drop runs. Default 0.35, from Open Shaders."));
+		ImGui::SliderFloat(T(TKEY("character_rain_activity"), "Drop activity"), &settings.CharacterRainActivityMultiplier, 0.25f, 8.0f, "%.2fx");
+		ImGui::SliderFloat(T(TKEY("character_spot_density"), "Drop density"), &settings.CharacterSpotDensity, 0.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("character_spot_radius"), "Drop size"), &settings.CharacterSpotRadius, 0.2f, 3.0f, "%.2f units");
+		ImGui::SliderFloat(T(TKEY("character_spot_strength"), "Drop and trail strength"), &settings.CharacterSpotStrength, 0.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("character_coat_intensity"), "Droplet highlight"), &settings.CharacterCoatIntensity, 0.0f, 8.0f, "%.2fx");
+		ImGui::SliderFloat(T(TKEY("character_wet_sheen"), "Surface wet sheen"), &settings.CharacterWetSheen, 0.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("character_spot_roughness"), "Water roughness"), &settings.CharacterSpotRoughness, 0.08f, 0.6f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("character_spot_normal"), "Droplet normal strength"), &settings.CharacterSpotNormalStrength, 0.0f, 1.0f, "%.2f");
+		bool weaponDrops = settings.EnableWeaponRainDrops != 0;
+		if (ImGui::Checkbox(T(TKEY("weapon_rain_drops"), "Drops on held weapons"), &weaponDrops))
+			settings.EnableWeaponRainDrops = weaponDrops;
+		ImGui::TreePop();
 	}
 
-	// Only hook if SoS is not loaded
-	Ripples::Install();
+	if (ImGui::TreeNodeEx(T(TKEY("environment_drops"), "Environment Wetness Drops"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		bool verticalDrops = settings.EnableEnvironmentVerticalDrops != 0;
+		if (ImGui::Checkbox(T(TKEY("environment_vertical_drops"), "Vertical surface drops"), &verticalDrops))
+			settings.EnableEnvironmentVerticalDrops = verticalDrops;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("environment_vertical_drops_tooltip"),
+				"Drops only on vertical surfaces, flowing down. They start from rain openness and slope. Horizontal surfaces stay with ordinary wetness. Off restores surface rain flow from CS #2912, including beads on level ground."));
+		}
+		auto environmentDisabled = Util::DisableGuard(!settings.EnableEnvironmentVerticalDrops);
+		ImGui::SliderFloat(T(TKEY("environment_drop_dry_time"), "Environment drop dry time"), &settings.EnvironmentDropDryTime, 0.05f, 50.0f, "%.2f sec");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("environment_drop_dry_time_tooltip"), "Seconds vertical drops take to dry after rain. Default 10, Jiaye's WetFadeTime. Weather transition speed in Advanced still fades the wet film."));
+		ImGui::SliderFloat(T(TKEY("environment_slope_start"), "Slope where drops start"), &settings.EnvironmentVerticalSlopeStart, 0.0f, 0.95f, "%.2f");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("environment_slope_start_tooltip"), "Surface tilt, from flat to vertical, where drops begin. Default 0.15."));
+		ImGui::SliderFloat(T(TKEY("environment_slope_full"), "Slope where drops are full"), &settings.EnvironmentVerticalSlopeFull, 0.05f, 1.0f, "%.2f");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("environment_slope_full_tooltip"), "Tilt where vertical drops reach full strength. Default 0.75."));
+		ImGui::TreePop();
+	}
 }
 
 void WetnessEffects::DrawSettings()
@@ -633,6 +766,8 @@ void WetnessEffects::DrawSettings()
 
 		ImGui::TreePop();
 	}
+
+	DrawBearforjWetnessSettings();
 
 	ImGui::Spacing();
 	ImGui::Spacing();
@@ -1014,12 +1149,56 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 	data.settings.RaindropGridSize = 1.0f / settings.RaindropGridSize;
 	data.settings.RaindropInterval = 1.0f / settings.RaindropInterval;
 	data.settings.RippleLifetime = settings.RaindropInterval / settings.RippleLifetime;
+	AdvanceRetainedWetness(data);
 
 	return data;
 }
 
+void WetnessEffects::AdvanceRetainedWetness(PerFrame& a_data) const
+{
+	constexpr float kMaxDeltaSeconds = 0.25f;
+	const std::uint32_t frame = globals::state ? globals::state->frameCount : 0u;
+	const bool advance = frame != retainedWetnessFrame;
+	if (advance)
+		retainedWetnessFrame = frame;
+
+	const bool paused = globals::game::ui && globals::game::ui->GameIsPaused();
+	const float deltaSeconds = (!advance || paused) ? 0.0f : std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, kMaxDeltaSeconds);
+
+	auto approach = [](float target, float retained, float deltaSeconds, float dryTime) {
+		if (target >= retained)
+			return target;
+		const float dryRate = 1.0f / std::max(dryTime, 0.05f);
+		return std::max(target, retained - deltaSeconds * dryRate);
+	};
+
+	if (!settings.EnableWetnessEffects || !settings.EnableCharacterRainSpots) {
+		if (advance)
+			characterSurfaceWetness = 0.0f;
+	} else if (advance) {
+		const float weatherIntensity = std::sqrt(std::clamp(a_data.Wetness, 0.0f, 1.0f));
+		characterSurfaceWetness = approach(weatherIntensity, characterSurfaceWetness, deltaSeconds, settings.CharacterDryTime);
+	}
+
+	if (!settings.EnableWetnessEffects || !settings.EnableEnvironmentVerticalDrops) {
+		if (advance)
+			environmentSurfaceWetness = 0.0f;
+	} else if (advance) {
+		const float target = std::max(a_data.Wetness, a_data.Raining);
+		environmentSurfaceWetness = approach(target, environmentSurfaceWetness, deltaSeconds, settings.EnvironmentDropDryTime);
+	}
+
+	a_data.CharacterImpactIntensity = settings.EnableWetnessEffects && settings.EnableCharacterRainSpots ?
+	                                      std::sqrt(std::clamp(a_data.Wetness, 0.0f, 1.0f)) :
+	                                      0.0f;
+	a_data.CharacterRetainedWetness = settings.EnableWetnessEffects && settings.EnableCharacterRainSpots ? characterSurfaceWetness : 0.0f;
+	a_data.EnvironmentRetainedWetness = settings.EnableWetnessEffects && settings.EnableEnvironmentVerticalDrops ? environmentSurfaceWetness : 0.0f;
+	a_data.CharacterStatePad = 0.0f;
+}
+
 void WetnessEffects::Prepass()
 {
+	CharacterRainSurfaces::RefreshPendingActors();
 	static auto renderer = globals::game::renderer;
 	static auto& precipOcclusionTexture = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kPRECIPITATION_OCCLUSION_MAP];
 
@@ -1053,6 +1232,9 @@ void WetnessEffects::SaveSettings(json& o_json)
 void WetnessEffects::RestoreDefaultSettings()
 {
 	settings = {};
+	characterSurfaceWetness = 0.0f;
+	environmentSurfaceWetness = 0.0f;
+	retainedWetnessFrame = 0xffffffffu;
 	climatePreset = defaultPreset;
 
 	// Apply the default climate preset to ensure settings reflect the preset values

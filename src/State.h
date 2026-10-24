@@ -297,6 +297,9 @@ public:
 		NoSkyScattering = 1 << 9,  ///< Cloud layer drawn without Effects11 cloud scattering
 		IsAurora = 1 << 10,
 		IsMoon = 1 << 11,
+		// High bits stay clear of the sequential flags above. Matches Permutation.hlsli.
+		IsHeldWeapon = 1u << 29,
+		IsCharacterRainSurface = 1u << 30,
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */

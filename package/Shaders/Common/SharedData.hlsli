@@ -149,6 +149,36 @@ namespace SharedData
 		float WallRainDarkening;
 		bool EnableWallRain;
 		float WallRainTrailLength;
+
+		uint EnableCharacterRainSpots;
+		float CharacterSpotDensity;
+		float CharacterSpotRadius;
+		float CharacterSpotStrength;
+		float CharacterSpotRoughness;
+		float CharacterSpotNormalStrength;
+		uint CharacterSpotDebug;
+		float CharacterCoatIntensity;
+		float CharacterWetSheen;
+		float CharacterRainActivityMultiplier;
+		float CharacterDryTime;
+		uint EnableWeaponRainDrops;
+		uint EnableSkinnedRainStreaks;
+		uint EnableArmorClothingDryingDrops;
+		uint EnableEnvironmentVerticalDrops;
+		float CharacterSpotLifetime;
+		float CharacterSpotInterval;
+		float CharacterDropPause;
+		float EnvironmentDropDryTime;
+		float EnvironmentVerticalSlopeStart;
+		float EnvironmentVerticalSlopeFull;
+		float BearforjWetnessPad0;
+		float BearforjWetnessPad1;
+		float BearforjWetnessPad2;
+
+		float CharacterImpactIntensity;
+		float CharacterRetainedWetness;
+		float EnvironmentRetainedWetness;
+		float CharacterStatePad;
 	};
 
 	struct SkylightingSettings

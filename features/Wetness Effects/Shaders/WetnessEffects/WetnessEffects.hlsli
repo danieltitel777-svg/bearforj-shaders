@@ -529,7 +529,11 @@ namespace WetnessEffects
 			float3 weights = smoothstep(0.35, 0.75, abs(rainNormal));
 			weights *= weights;
 			weights /= weights.x + weights.y + weights.z;
-			float rainAmount = max(SharedData::wetnessEffectsSettings.Raining, 0.0) * 1.5;
+			float rainDriver = max(SharedData::wetnessEffectsSettings.Raining, 0.0);
+			// After rain, retained wetness keeps vertical drops until EnvironmentDropDryTime elapses.
+			if (SharedData::wetnessEffectsSettings.EnableEnvironmentVerticalDrops != 0)
+				rainDriver = max(rainDriver, SharedData::wetnessEffectsSettings.EnvironmentRetainedWetness);
+			float rainAmount = rainDriver * 1.5;
 			float4 flow = 0.0;
 			[loop] for (int axis = 0; axis < 3; axis++)
 			{
@@ -562,7 +566,10 @@ namespace WetnessEffects
 			SharedData::wetnessEffectsSettings.WallRainDensity <= 0.0)
 			return 0.0;
 
-		float rainAmount = smoothstep(0.0, 0.15, SharedData::wetnessEffectsSettings.Raining);
+		float rainDriver = SharedData::wetnessEffectsSettings.Raining;
+		if (SharedData::wetnessEffectsSettings.EnableEnvironmentVerticalDrops != 0)
+			rainDriver = max(rainDriver, SharedData::wetnessEffectsSettings.EnvironmentRetainedWetness);
+		float rainAmount = smoothstep(0.0, 0.15, rainDriver);
 		return rainAmount * saturate(wetnessOcclusion * 2.0) * nearFactor;
 	}
 
@@ -715,6 +722,17 @@ namespace WetnessEffects
 			float flowRange = max(SharedData::wetnessEffectsSettings.RaindropFxRange, 1.0);
 			float flowDistanceFade = 1.0 - smoothstep(flowRange * 0.7, flowRange, length(worldPosition));
 			float rainFlowBlend = GetWallRainFlowBlend(wetnessOcclusion, nearFactor) * flowDistanceFade * beadCoverage * rainExposure;
+			// CS #2912 lets beads rest on level surfaces. The environment toggle keeps drops
+			// on verticals only. Openness is the upward skylight (the height map from above)
+			// times a facing check, so sheltered and downward faces stay dry of drops.
+			// Horizontal surfaces still take the ordinary rain and puddle wetness above.
+			if (SharedData::wetnessEffectsSettings.EnableEnvironmentVerticalDrops != 0) {
+				float slopeStart = SharedData::wetnessEffectsSettings.EnvironmentVerticalSlopeStart;
+				float slopeFull = max(SharedData::wetnessEffectsSettings.EnvironmentVerticalSlopeFull, slopeStart + 1e-3);
+				float slopeAmount = smoothstep(slopeStart, slopeFull, length(vertexNormal.xy));
+				float openFromAbove = saturate(wetnessOcclusion * 2.0) * smoothstep(-0.35, 0.05, vertexNormal.z);
+				rainFlowBlend *= slopeAmount * openFromAbove;
+			}
 			[branch] if (rainFlowBlend > 0.0 && worldPosition.z > waterHeight)
 			{
 				WallRainState flow = GetWallRainState(rainPosition, normalize(vertexNormal), positionDx, positionDy, rainPositionDx, rainPositionDy, attachToModel);

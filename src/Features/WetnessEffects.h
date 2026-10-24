@@ -2,6 +2,8 @@
 
 #include "Buffer.h"
 
+#include <cstdint>
+
 /** @brief Adds dynamic weather-driven wetness, puddle formation, shore wetness, and raindrop effects. */
 struct WetnessEffects : Feature
 {
@@ -70,6 +72,33 @@ public:
 		float WallRainDarkening = 0.65f;
 		uint EnableWallRain = true;
 		float WallRainTrailLength = 1.0f;
+
+		// Open Shaders CharacterRainSpots. Defaults are that source's values,
+		// except dry time, which is Jiaye Skin.h WetFadeTime (10 seconds).
+		uint EnableCharacterRainSpots = true;
+		float CharacterSpotDensity = 1.0f;
+		float CharacterSpotRadius = 0.75f;
+		float CharacterSpotStrength = 1.0f;
+		float CharacterSpotRoughness = 0.1f;
+		float CharacterSpotNormalStrength = 0.75f;
+		uint CharacterSpotDebug = 0u;
+		float CharacterCoatIntensity = 5.0f;
+		float CharacterWetSheen = 0.55f;
+		float CharacterRainActivityMultiplier = 2.5f;
+		float CharacterDryTime = 10.0f;
+		uint EnableWeaponRainDrops = true;
+		uint EnableSkinnedRainStreaks = true;
+		uint EnableArmorClothingDryingDrops = true;
+		uint EnableEnvironmentVerticalDrops = true;
+		float CharacterSpotLifetime = 3.0f;
+		float CharacterSpotInterval = 4.0f;
+		float CharacterDropPause = 0.35f;
+		float EnvironmentDropDryTime = 10.0f;
+		float EnvironmentVerticalSlopeStart = 0.15f;
+		float EnvironmentVerticalSlopeFull = 0.75f;
+		float BearforjWetnessPad0 = 0.0f;
+		float BearforjWetnessPad1 = 0.0f;
+		float BearforjWetnessPad2 = 0.0f;
 	};
 
 	struct alignas(16) PerFrame
@@ -80,11 +109,15 @@ public:
 		float Wetness;
 		float PuddleWetness;
 		Settings settings;
+		float CharacterImpactIntensity;
+		float CharacterRetainedWetness;
+		float EnvironmentRetainedWetness;
+		float CharacterStatePad;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
-	static_assert(sizeof(Settings) == 144);
+	static_assert(sizeof(Settings) == 240);
 	static_assert(offsetof(PerFrame, settings) == 80);
-	static_assert(sizeof(PerFrame) == 224);
+	static_assert(sizeof(PerFrame) == 336);
 
 	struct DebugSettings
 	{
@@ -130,6 +163,13 @@ public:
 	virtual void Prepass() override;
 	/** @brief Detects Splashes of Storms mod presence for compatibility handling. */
 	virtual void PostPostLoad() override;
+	virtual void DataLoaded() override;
+	virtual void GameLoaded() override;
+
+	bool ShouldClassifyCharacterRainSurfaces() const
+	{
+		return settings.EnableWetnessEffects && settings.EnableCharacterRainSpots;
+	}
 
 	/** @brief Draws the ImGui settings panel for wetness effects configuration. */
 	virtual void DrawSettings() override;
@@ -187,9 +227,14 @@ public:
 
 private:
 	void DrawWeatherAnalysis() const;
+	void DrawBearforjWetnessSettings();
+	void AdvanceRetainedWetness(PerFrame& a_data) const;
 
 	size_t rainTimer = 0;  // milliseconds; size_t for precision
 	bool splashesOfStormsLoaded = false;
+	mutable float characterSurfaceWetness = 0.0f;
+	mutable float environmentSurfaceWetness = 0.0f;
+	mutable std::uint32_t retainedWetnessFrame = 0xffffffffu;
 
 	// Weather wetness calculation result for debug display
 	struct WeatherWetnessResult
