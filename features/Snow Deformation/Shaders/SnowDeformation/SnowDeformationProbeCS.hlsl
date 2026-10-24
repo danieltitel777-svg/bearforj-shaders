@@ -1,6 +1,6 @@
 #include "SnowDeformation/UpdateParams.hlsli"
 
-Texture2D<float> Field : register(t0);
+Texture2D<float2> Field : register(t0);
 SamplerState FieldSampler : register(s0);
 RWBuffer<float> Depths : register(u0);
 
@@ -9,7 +9,7 @@ float FieldAt(float2 windowPosition)
 	float2 texel = windowPosition / Control.z + float2(OriginCell.xy & (FIELD_TEXELS - 1)) + 0.5;
 	float2 fromCentre = abs(windowPosition - Probe.x);
 	float fade = 1.0 - saturate((max(fromCentre.x, fromCentre.y) - Probe.y) * Probe.z);
-	return Field.SampleLevel(FieldSampler, texel / FIELD_TEXELS, 0) * fade;
+	return Field.SampleLevel(FieldSampler, texel / FIELD_TEXELS, 0).x * fade;
 }
 
 [numthreads(64, 1, 1)] void main(uint3 dispatchID : SV_DispatchThreadID) {

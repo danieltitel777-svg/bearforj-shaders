@@ -22,12 +22,19 @@ cbuffer DrawParams : register(b0)
 	int4 SlotParams1;
 	float4 BlanketWindow;
 	float4 DetailParams;
+	float4 GroundParams;
 };
 
-Texture2D<float> Field : register(t0);
+cbuffer GroundLayers : register(b1)
+{
+	float4 GroundLayer0;
+	float4 GroundLayer1;
+};
+
+Texture2D<float2> Field : register(t0);
 Texture2D<float> Activity : register(t1);
 Texture2D<float> Blanket : register(t2);
-Texture2D<float> Field1 : register(t3);
+Texture2D<float2> Field1 : register(t3);
 Texture2D<float> Activity1 : register(t4);
 SamplerState FieldSampler : register(s0);
 
@@ -56,13 +63,13 @@ float WindowFade1(float2 windowPosition1)
 	return FadeParams1.w > 0.5 ? 1.0 - saturate((max(fromCentre.x, fromCentre.y) - FadeParams1.y) * FadeParams1.z) : 0.0;
 }
 
-float SampleField(float2 windowPosition)
+float2 SampleField2(float2 windowPosition)
 {
 	float fade0 = WindowFade(windowPosition);
 	precise float2 windowPosition1 = windowPosition + WindowOffset1.xy;
 	float fade1 = WindowFade1(windowPosition1);
-	float fine = 0.0;
-	float coarse = 0.0;
+	float2 fine = 0.0;
+	float2 coarse = 0.0;
 	[branch] if (fade0 > 0.0)
 	{
 		precise float2 texel = windowPosition * FieldParams.x + FieldParams.yz + 0.5;
@@ -74,6 +81,20 @@ float SampleField(float2 windowPosition)
 		coarse = Field1.SampleLevel(FieldSampler, texel * FieldParams.w, 0) * fade1;
 	}
 	return lerp(coarse, fine, fade0);
+}
+
+float SampleField(float2 windowPosition)
+{
+	return SampleField2(windowPosition).x;
+}
+
+float DisplacedSurface(float2 windowPosition, float groundScale)
+{
+	float2 field = SampleField2(windowPosition);
+	float snow = SnowSurface(BlanketAt(windowPosition), field.x);
+	[branch] if (GroundParams.x > 0.5 && groundScale != 0.0)
+		snow += field.y * groundScale;
+	return snow;
 }
 
 float GradientStep(float2 windowPosition)

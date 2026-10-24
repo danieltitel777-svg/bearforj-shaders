@@ -6,8 +6,10 @@
 #include "Globals.h"
 #include "ShaderCache.h"
 #include "State.h"
+#include "TruePBR/BSLightingShaderMaterialPBRLandscape.h"
 #include "Utils/ActorUtils.h"
 #include "Utils/D3D.h"
+#include "Utils/FileSystem.h"
 #include "Utils/Game.h"
 #include "Utils/UI.h"
 #include "Utils/VersionedRelocation.h"
@@ -15,6 +17,7 @@
 #include "RE/B/bhkPickData.h"
 
 #include <bit>
+#include <fstream>
 
 #define I18N_KEY_PREFIX "feature.snow_deformation."
 
@@ -29,7 +32,12 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	BlanketHeight,
 	Depth,
 	Lifetime,
-	TrianglePixels)
+	TrianglePixels,
+	GroundDeformation,
+	SoftGroundDepth,
+	RoadDepth,
+	SoftGroundTextures,
+	RoadTextures)
 
 namespace
 {
@@ -117,6 +125,90 @@ namespace
 	constexpr int32_t kFlagClear = 2;
 	constexpr int32_t kFlagSeed = 4;
 
+	struct GroundTextureDefaults
+	{
+		std::vector<std::string> soft;
+		std::vector<std::string> roads;
+	};
+
+	// File names verified from the STEP terrain normal-map list, the Skyrim LOD atlas, and the
+	// main-road names road01fallforest01 / road01reach01. GroundTextures.json is the packaged copy.
+	GroundTextureDefaults HardcodedGroundTextures()
+	{
+		return {
+			{ "dirt01.dds", "dirt02.dds", "dirtpath01.dds", "dirtsnowpath01.dds", "fallforestdirt01.dds",
+				"frozenmarshdirtslopes01.dds", "reachdirt01.dds", "volcanictundradirt01.dds", "volcanictundradirt02.dds",
+				"dirtcliffs01.dds", "rivermud.dds", "riverbededge.dds", "coastbeach01.dds", "coastbeach02.dds" },
+			{ "road01.dds", "road01fallforest01.dds", "road01reach01.dds", "road01snow01.dds" }
+		};
+	}
+
+	std::string CanonicalGroundFile(std::string_view a_path)
+	{
+		std::string canonical(a_path);
+		for (auto& character : canonical)
+			character = character == '\\' ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+		if (canonical.starts_with("data/"))
+			canonical.erase(0, 5);
+		if (canonical.starts_with("textures/"))
+			canonical.erase(0, 9);
+		const auto separator = canonical.rfind('/');
+		if (separator != std::string::npos)
+			canonical.erase(0, separator + 1);
+		if (canonical.ends_with("_n.dds") || canonical.ends_with("_rmaos.dds") || canonical.ends_with("_p.dds"))
+			return {};
+		return canonical;
+	}
+
+	std::vector<std::string> TextureNamesFromJson(const json& a_node)
+	{
+		std::vector<std::string> names;
+		if (!a_node.is_array())
+			return names;
+		for (const auto& entry : a_node) {
+			if (!entry.is_string())
+				continue;
+			auto name = entry.get<std::string>();
+			if (!name.empty())
+				names.push_back(std::move(name));
+		}
+		return names;
+	}
+
+	GroundTextureDefaults ReadGroundTextureFile()
+	{
+		auto fallback = HardcodedGroundTextures();
+		try {
+			// Deployed with the feature shaders, not under Shaders/Features (that directory is the ini).
+			const auto path = Util::PathHelpers::GetShadersPath() / "SnowDeformation" / "GroundTextures.json";
+			std::ifstream in(path);
+			if (!in.is_open()) {
+				logger::info("[SnowDeformation] Ground texture list {} is not deployed; using the built-in names", path.string());
+				return fallback;
+			}
+			const json data = json::parse(in);
+			if (data.contains("softGround")) {
+				auto parsed = TextureNamesFromJson(data["softGround"]);
+				if (!parsed.empty())
+					fallback.soft = std::move(parsed);
+			}
+			if (data.contains("roads")) {
+				auto parsed = TextureNamesFromJson(data["roads"]);
+				if (!parsed.empty())
+					fallback.roads = std::move(parsed);
+			}
+		} catch (const std::exception& exception) {
+			logger::warn("[SnowDeformation] Ground texture list could not be read: {}", exception.what());
+		}
+		return fallback;
+	}
+
+	RE::TESLandTexture* DefaultLandTexture()
+	{
+		static const auto address = REL::Relocation<RE::TESLandTexture**>(RELOCATION_ID(514783, 400936));
+		return *address;
+	}
+
 	struct alignas(16) UpdateParams
 	{
 		float4 Control;
@@ -134,6 +226,8 @@ namespace
 		float4 StampMotion[SnowDeformation::kMaxStamps];
 		float4 StampSurface[SnowDeformation::kMaxStamps];
 		float4 StampBounds[SnowDeformation::kMaxStamps];
+		float4 GroundControl;
+		float4 StampGround[SnowDeformation::kMaxStamps];
 	};
 	STATIC_ASSERT_ALIGNAS_16(UpdateParams);
 
@@ -158,9 +252,17 @@ namespace
 		int32_t SlotParams1[4];
 		float4 BlanketWindow;
 		float4 DetailParams;
+		float4 GroundParams;
 	};
 	STATIC_ASSERT_ALIGNAS_16(DrawParams);
-	static_assert(sizeof(DrawParams) == 19 * 16);
+	static_assert(sizeof(DrawParams) == 20 * 16);
+
+	struct alignas(16) GroundLayers
+	{
+		float4 Layer0;
+		float4 Layer1;
+	};
+	static_assert(sizeof(GroundLayers) == 32);
 
 	struct TileEntry
 	{
@@ -647,7 +749,8 @@ void SnowDeformation::SetupResources()
 		desc.Height = kTexels;
 		desc.MipLevels = 1;
 		desc.ArraySize = 1;
-		desc.Format = DXGI_FORMAT_R32_FLOAT;
+		// R is the Bottled snow displacement. G is the unscaled ground press, written only while ground deformation is on.
+		desc.Format = DXGI_FORMAT_R32G32_FLOAT;
 		desc.SampleDesc.Count = 1;
 		desc.Usage = D3D11_USAGE_DEFAULT;
 		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
@@ -662,9 +765,12 @@ void SnowDeformation::SetupResources()
 		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
 
 		D3D11_TEXTURE2D_DESC activityDesc = desc;
+		activityDesc.Format = DXGI_FORMAT_R32_FLOAT;
 		activityDesc.Width = kSlots;
 		activityDesc.Height = kSlots;
 		activityDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		D3D11_SHADER_RESOURCE_VIEW_DESC activitySrv = srvDesc;
+		activitySrv.Format = DXGI_FORMAT_R32_FLOAT;
 
 		for (uint32_t i = 0; i < kLevels; ++i) {
 			auto& level = levels[i];
@@ -676,7 +782,7 @@ void SnowDeformation::SetupResources()
 			level.texture->CreateSRV(srvDesc);
 			level.texture->CreateUAV(uavDesc);
 			level.activityTexture = new Texture2D(activityDesc, i == 0 ? "SnowDeformation::Activity" : "SnowDeformation::ActivityCoarse");
-			level.activityTexture->CreateSRV(srvDesc);
+			level.activityTexture->CreateSRV(activitySrv);
 		}
 
 		beforeTexture = new Texture2D(desc, "SnowDeformation::FieldBefore");
@@ -750,6 +856,7 @@ void SnowDeformation::SetupResources()
 
 	updateConstants = eastl::make_unique<ConstantBuffer>(ConstantBufferDesc<UpdateParams>(), "SnowDeformation::UpdateParams");
 	drawConstants = eastl::make_unique<ConstantBuffer>(ConstantBufferDesc<DrawParams>(), "SnowDeformation::DrawParams");
+	groundLayers = eastl::make_unique<ConstantBuffer>(ConstantBufferDesc<GroundLayers>(), "SnowDeformation::GroundLayers");
 
 	D3D11_SAMPLER_DESC samplerDesc{};
 	samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -840,6 +947,144 @@ bool SnowDeformation::IsSnowCoverActive() const
 {
 	const auto& snowCover = globals::features::snowCover;
 	return settings.UseSnowCover && snowCover.loaded && snowCover.wsettings.EnableSnowCover && snowCover.views[6];
+}
+
+void SnowDeformation::EnsureGroundDefaults()
+{
+	if (groundListFromUser)
+		return;
+	if (!settings.SoftGroundTextures.empty() || !settings.RoadTextures.empty())
+		return;
+	auto defaults = ReadGroundTextureFile();
+	settings.SoftGroundTextures = std::move(defaults.soft);
+	settings.RoadTextures = std::move(defaults.roads);
+	RebuildGroundLookup();
+}
+
+void SnowDeformation::RebuildGroundLookup()
+{
+	groundLookup.clear();
+	const float snowDepth = std::max(settings.Depth, 1.0f);
+	const float soft = std::clamp(settings.SoftGroundDepth, 0.0f, 20.0f) / snowDepth;
+	const float road = std::clamp(settings.RoadDepth, 0.0f, 20.0f) / snowDepth;
+	auto add = [&](const std::vector<std::string>& a_names, float a_scale) {
+		for (const auto& name : a_names) {
+			auto key = CanonicalGroundFile(name);
+			if (!key.empty() && a_scale > 0.0f)
+				groundLookup[std::move(key)] = a_scale;
+		}
+	};
+	add(settings.SoftGroundTextures, soft);
+	add(settings.RoadTextures, road);
+}
+
+float SnowDeformation::GroundScaleForPath(std::string_view a_path) const
+{
+	const auto key = CanonicalGroundFile(a_path);
+	if (key.empty())
+		return 0.0f;
+	const auto it = groundLookup.find(key);
+	return it == groundLookup.end() ? 0.0f : it->second;
+}
+
+float SnowDeformation::GroundCoverScale(const RE::NiPoint3& a_position) const
+{
+	if (!settings.GroundDeformation || groundLookup.empty())
+		return 0.0f;
+
+	auto consider = [this](RE::TESLandTexture* a_texture) {
+		if (!a_texture)
+			return 0.0f;
+		float best = 0.0f;
+		auto considerSet = [&](RE::BGSTextureSet* a_set) {
+			if (!a_set)
+				return;
+			const char* path = a_set->GetTexturePath(RE::BSTextureSet::Texture::kDiffuse);
+			if (!path || *path == '\0')
+				return;
+			best = std::max(best, GroundScaleForPath(path));
+		};
+		considerSet(a_texture->textureSet);
+		if (a_texture->textureSet)
+			considerSet(Util::GetSeasonalSwap(a_texture->textureSet));
+		return best;
+	};
+
+	auto tes = globals::game::tes;
+	if (!tes)
+		return 0.0f;
+
+	// Quad index matches LandscapeSeams: cell grid is 4096, each cell holds four 2048 quads,
+	// quad = (localY half << 1) | localX half. EXTERIOR_DATA::worldX is not read anywhere in this
+	// tree, so the corner is cellX * 4096, the same grid Util::WorldToCell uses.
+	if (auto* cell = tes->GetCell(a_position); cell && cell->IsExteriorCell()) {
+		if (auto* coordinates = cell->GetCoordinates()) {
+			if (auto* land = cell->GetLand(); land && land->loadedData) {
+				const auto& data = *land->loadedData;
+				const float localX = a_position.x - static_cast<float>(coordinates->cellX) * 4096.0f;
+				const float localY = a_position.y - static_cast<float>(coordinates->cellY) * 4096.0f;
+				const int quadX = std::clamp(static_cast<int>(std::floor(localX / 2048.0f)), 0, 1);
+				const int quadY = std::clamp(static_cast<int>(std::floor(localY / 2048.0f)), 0, 1);
+				const uint32_t quad = static_cast<uint32_t>(quadY * 2 + quadX);
+
+				auto* base = data.defQuadTextures[quad];
+				if (!base || base->formID == 0)
+					base = DefaultLandTexture();
+				float best = consider(base);
+				constexpr uint32_t kOverlayLayers = 5;
+				constexpr uint32_t kQuadVertices = 289;
+				for (uint32_t layer = 0; layer < kOverlayLayers; ++layer) {
+					bool used = false;
+					for (uint32_t vertex = 0; vertex < kQuadVertices; ++vertex) {
+						if (data.percents[quad][vertex][layer] != 0) {
+							used = true;
+							break;
+						}
+					}
+					if (!used)
+						continue;
+					auto* layerTexture = data.quadTextures[quad][layer];
+					if (!layerTexture || layerTexture->formID == 0)
+						layerTexture = DefaultLandTexture();
+					best = std::max(best, consider(layerTexture));
+				}
+				return best;
+			}
+		}
+	}
+
+	return consider(tes->GetLandTexture(a_position));
+}
+
+void SnowDeformation::SetDrawLayerScales(RE::BSShaderMaterial* a_material)
+{
+	drawLayerScale.fill(0.0f);
+	drawDepthScale = 0.0f;
+	if (!settings.GroundDeformation || !a_material || groundLookup.empty())
+		return;
+
+	std::array<RE::NiSourceTexture*, 6> textures{};
+	auto* pbr = static_cast<BSLightingShaderMaterialPBRLandscape*>(a_material);
+	if (BSLightingShaderMaterialPBRLandscape::All.find(pbr) != BSLightingShaderMaterialPBRLandscape::All.end()) {
+		for (uint32_t i = 0; i < textures.size(); ++i)
+			textures[i] = pbr->landscapeBaseColorTextures[i].get();
+	} else {
+		const auto feature = a_material->GetFeature();
+		if (feature != RE::BSShaderMaterial::Feature::kMultiTexLand && feature != RE::BSShaderMaterial::Feature::kMultiTexLandLODBlend)
+			return;
+		auto* landscape = static_cast<RE::BSLightingShaderMaterialLandscape*>(a_material);
+		textures[0] = landscape->diffuseTexture.get();
+		for (uint32_t i = 0; i < 5; ++i)
+			textures[i + 1] = landscape->landscapeDiffuseTexture[i].get();
+	}
+
+	float listed = 0.0f;
+	for (uint32_t i = 0; i < textures.size(); ++i) {
+		const char* path = textures[i] ? textures[i]->name.c_str() : nullptr;
+		drawLayerScale[i] = path && *path ? GroundScaleForPath(path) : 0.0f;
+		listed = std::max(listed, drawLayerScale[i]);
+	}
+	drawDepthScale = drawLayerScale[0] > 0.0f ? drawLayerScale[0] : listed;
 }
 
 void SnowDeformation::ClearLevel(Level& a_level)
@@ -1744,11 +1989,18 @@ void SnowDeformation::UpdateLevel(uint32_t a_index, const RE::NiPoint3& a_positi
 		return std::abs(a_tileX - a_centreX) <= kWindowTiles && std::abs(a_tileY - a_centreY) <= kWindowTiles;
 	};
 
+	// Ground prints do not refill while it snows. While the toggle is on, keep a tile alive for the
+	// slower of the two decays so snowfall does not clear the ground channel early. Snow height
+	// still decays with a_decay (Control.x), including the snowfall refill.
+	const float groundKeep = std::pow(0.1f, 1.0f / std::clamp(settings.Lifetime, 10.0f, 1800.0f));
+	const float groundDecay = a_deltaTime > 0.0f ? std::pow(groundKeep, a_deltaTime) : 1.0f;
+	const float slotDecay = settings.GroundDeformation ? std::max(a_decay, groundDecay) : a_decay;
+
 	for (uint32_t i = 0; i < level.slots.size(); ++i) {
 		auto& slot = level.slots[i];
 		if (!slot.active)
 			continue;
-		slot.bound *= a_decay;
+		slot.bound *= slotDecay;
 		if (!inWindow(slot.tileX, slot.tileY, tileX, tileY) || slot.bound < kActiveEpsilon) {
 			setEntry(i, kFlagClear);
 			slot.active = false;
@@ -1798,13 +2050,16 @@ void SnowDeformation::UpdateLevel(uint32_t a_index, const RE::NiPoint3& a_positi
 		const float highX = localX + std::max(0.0f, -stamp.motionX) + reach;
 		const float highY = localY + std::max(0.0f, -stamp.motionY) + reach;
 		const bool wade = stamp.kind == kKindWade;
-		const float stampCarve = wade ? std::max(carve - stamp.clearance, 0.0f) : carve;
+		const bool groundStamp = stamp.ground > 0.0f;
+		const float material = groundStamp ? stamp.ground : snow;
+		const float stampCarve = wade ? std::max(carve - stamp.clearance, 0.0f) : (groundStamp ? 0.0f : carve);
 		const float stampBound = stamp.kind == kKindMelt ? std::max(-stamp.rim, 2.0f * kActiveEpsilon) :
-		                                                   std::max(stamp.depth * (1.0f + kChurn) * snow + stampCarve, stamp.rim * (1.0f + kRimNoise) * snow);
+		                                                   std::max(stamp.depth * (1.0f + kChurn) * material + stampCarve, stamp.rim * (1.0f + kRimNoise) * material);
 
 		updateParams.Stamps[i] = { localX, localY, stamp.radius, stamp.depth };
 		updateParams.StampShape[i] = { stamp.forwardX, stamp.forwardY, stamp.halfWidth, stamp.rim };
-		updateParams.StampMotion[i] = { stamp.motionX, stamp.motionY, stamp.vanillaSnow, carve };
+		updateParams.StampMotion[i] = { stamp.motionX, stamp.motionY, stamp.vanillaSnow, groundStamp ? 0.0f : carve };
+		updateParams.StampGround[i] = { stamp.ground, 0.0f, 0.0f, 0.0f };
 		updateParams.StampSurface[i] = { stamp.landZ, stamp.normalZ, stamp.kind == kKindMelt ? 1.0f : 0.0f, wade ? 1.0f + stamp.clearance : 0.0f };
 		updateParams.StampBounds[i] = { lowX, lowY, highX, highY };
 
@@ -1839,6 +2094,7 @@ void SnowDeformation::UpdateLevel(uint32_t a_index, const RE::NiPoint3& a_positi
 		const double coarseOriginY = coarse ? static_cast<double>(coarse->windowTileY) * coarse->tileSize : 0.0;
 
 		updateParams.Control = { a_decay, static_cast<float>(frameStampCount), level.cellSize, kShoulder };
+		updateParams.GroundControl = { settings.GroundDeformation ? 1.0f : 0.0f, groundDecay, 0.0f, 0.0f };
 		updateParams.Shape = { kRimWidth, kRimNoise, kChurn, kReposeSlope };
 		updateParams.Options = { a_gateSnowCover ? 1.0f : 0.0f, a_skylightingReady ? 1.0f : 0.0f, seeding ? 1.0f : 0.0f, kReposeRate };
 		updateParams.EyeOffset = { static_cast<float>(originX - snapshotEye.x), static_cast<float>(originY - snapshotEye.y), -snapshotEye.z, 0.0f };
@@ -2009,14 +2265,22 @@ void SnowDeformation::UpdateField()
 		const float reach = std::max(stamp.radius, stamp.halfWidth) * (1.0f + 2.0f * kRimWidth) + 2.0f * kCellSize * kCoarseScale;
 		const float snow = std::max(stamp.vanillaSnow, snowCover ? SnowCoverUpperBound(stamp, reach) : 0.0f);
 		const float wade = stamp.kind == kKindWade ? blanketHeight - stamp.clearance : 0.0f;
-		if (snow * std::max({ stamp.depth, stamp.rim, wade }) < kActiveEpsilon) {
+		const float snowAmount = snow * std::max({ stamp.depth, stamp.rim, wade });
+		float groundScale = 0.0f;
+		if (settings.GroundDeformation && snowAmount < kActiveEpsilon && stamp.kind != kKindMelt && stamp.kind != kKindWade)
+			groundScale = GroundCoverScale({ static_cast<float>(stamp.x), static_cast<float>(stamp.y), stamp.landZ });
+		if (snowAmount < kActiveEpsilon && groundScale <= 0.0f) {
 			offSnow.emplace_back(stamp.owner, 0.0f);
 			continue;
 		}
-		frameStamps[kept++] = stamp;
+		auto keptStamp = stamp;
+		keptStamp.ground = groundScale;
+		frameStamps[kept++] = keptStamp;
 		stampSnow.push_back(snow);
 		stampReach.push_back(reach);
 		probeOwners.push_back(stamp.owner);
+		if (groundScale > 0.0f)
+			++debug.groundStamps;
 		if (stamp.kind == kKindWade)
 			wadeEmitters.push_back({ static_cast<float>(stamp.x), static_cast<float>(stamp.y), stamp.landZ, stamp.clearance, stamp.radius, stamp.halfWidth,
 				stamp.forwardX, stamp.forwardY, stamp.motionX, stamp.motionY, stamp.owner, stamp.trail });
@@ -2375,6 +2639,8 @@ bool SnowDeformation::PrepareCamera(DrawKind a_kind, bool a_clamped)
 	key.serial = fieldSerial;
 	key.clamped = a_clamped;
 	key.shadow = a_kind == DrawKind::Shadow;
+	key.ground = settings.GroundDeformation;
+	key.groundDecal = settings.GroundDeformation ? std::clamp(settings.SoftGroundDepth, 0.0f, 20.0f) / std::max(settings.Depth, 1.0f) : 0.0f;
 	key.valid = true;
 
 	const auto m = [&](int a_row, int a_column) { return static_cast<double>(key.viewProj[a_row * 4 + a_column]); };
@@ -2396,7 +2662,8 @@ bool SnowDeformation::PrepareCamera(DrawKind a_kind, bool a_clamped)
 		}
 	}
 
-	if (boundCamera.valid && boundCamera.serial == key.serial && boundCamera.clamped == key.clamped && boundCamera.shadow == key.shadow && boundCamera.posAdjust.x == key.posAdjust.x &&
+	if (boundCamera.valid && boundCamera.serial == key.serial && boundCamera.clamped == key.clamped && boundCamera.shadow == key.shadow && boundCamera.ground == key.ground &&
+		boundCamera.groundDecal == key.groundDecal && boundCamera.posAdjust.x == key.posAdjust.x &&
 		boundCamera.posAdjust.y == key.posAdjust.y &&
 		boundCamera.posAdjust.z == key.posAdjust.z && std::memcmp(boundCamera.viewProj.data(), key.viewProj.data(), sizeof(key.viewProj)) == 0)
 		return true;
@@ -2434,6 +2701,7 @@ bool SnowDeformation::PrepareCamera(DrawKind a_kind, bool a_clamped)
 	const float spacingScale = a_kind == DrawKind::Shadow ? 2.0f : 1.0f;
 	params.TessParams = { kMaxTessellation, 1.0f / (kMinSpacing * spacingScale), 1.0f / kDetailDistance, kMinNormalZ };
 	params.DetailParams = { mainPixelScale, 1.0f / (std::clamp(settings.TrianglePixels, 2.0f, 32.0f) * spacingScale), 1.0f / kAmplitudePixels, 0.0f };
+	params.GroundParams = { key.ground ? 1.0f : 0.0f, key.groundDecal, 0.0f, 0.0f };
 	const bool blanket = blanketActive;
 	params.RangeParams = { maxBound, maxBound + (blanket ? blanketHeight : 0.0f), a_clamped ? 1.0f : 0.0f, 1.0f / kBoundDepth };
 	const double blanketPeriod = static_cast<double>(kBlanketTexels);
@@ -2544,6 +2812,7 @@ void SnowDeformation::BeginLandscapeDraw(RE::BSRenderPass* a_pass, DrawKind a_ki
 		}
 	}
 
+	SetDrawLayerScales(a_pass->shaderProperty->GetBaseMaterial());
 	activeKind = a_kind;
 	activeGeometry = a_pass->geometry;
 	activeHS = a_kind == DrawKind::Lighting ? lightingHS.get() : depthHS.get();
@@ -2583,6 +2852,8 @@ bool SnowDeformation::BeginDecalDraw(RE::BSRenderPass* a_pass)
 	allowedShaders[allowedShaderCount++] = vertexShader;
 	activeHS = shaders->hs.get();
 	activeDS = shaders->ds.get();
+	drawLayerScale.fill(0.0f);
+	drawDepthScale = 0.0f;
 	debug.decalDraws++;
 	return true;
 }
@@ -2689,6 +2960,16 @@ void SnowDeformation::ApplyDrawState()
 	context->HSSetShaderResources(0, 5, hullResources);
 	context->HSSetSamplers(0, 1, &sampler);
 	context->DSSetConstantBuffers(0, 1, &constants);
+	if (groundLayers) {
+		GroundLayers layers{};
+		if (settings.GroundDeformation) {
+			layers.Layer0 = { drawLayerScale[0], drawLayerScale[1], drawLayerScale[2], drawLayerScale[3] };
+			layers.Layer1 = { drawLayerScale[4], drawLayerScale[5], drawDepthScale, 0.0f };
+		}
+		groundLayers->Update(layers);
+		ID3D11Buffer* groundCB = groundLayers->CB();
+		context->DSSetConstantBuffers(1, 1, &groundCB);
+	}
 	context->DSSetShaderResources(0, 5, domainResources);
 	context->DSSetSamplers(0, 1, &sampler);
 	context->HSSetShader(activeHS, nullptr, 0);
@@ -2719,6 +3000,7 @@ void SnowDeformation::EndLandscapeDraw()
 	context->DSSetShaderResources(0, 5, nullViews);
 	context->HSSetConstantBuffers(0, 1, nullBuffers);
 	context->DSSetConstantBuffers(0, 1, nullBuffers);
+	context->DSSetConstantBuffers(1, 1, nullBuffers);
 	context->HSSetSamplers(0, 1, &nullSampler);
 	context->DSSetSamplers(0, 1, &nullSampler);
 	context->IASetPrimitiveTopology(globals::game::shadowState->GetRuntimeData().topology);
@@ -2730,6 +3012,8 @@ void SnowDeformation::UpdateFieldOnce()
 		return;
 	fieldUpdated = true;
 	++frameIndex;
+	EnsureGroundDefaults();
+	RebuildGroundLookup();
 	UpdateField();
 }
 
@@ -2958,6 +3242,7 @@ void SnowDeformation::DataLoaded()
 		source->AddEventSink<RE::TESSpellCastEvent>(&spellCastSink);
 		source->AddEventSink<RE::TESEquipEvent>(&equipSink);
 	}
+	EnsureGroundDefaults();
 }
 
 void SnowDeformation::DrawSettings()
@@ -2999,8 +3284,56 @@ void SnowDeformation::DrawSettings()
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::TextWrapped("%s", T(TKEY("triangle_size_tooltip"), "On-screen size of the triangles generated over prints, in pixels. Lower is sharper and costs more."));
 
+	if (ImGui::Checkbox(T(TKEY("ground_deformation"), "Press Mud, Dirt, Sand and Roads"), &settings.GroundDeformation))
+		RebuildGroundLookup();
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextWrapped("%s", T(TKEY("ground_deformation_tooltip"), "Off keeps the original snow prints. On also presses listed mud, dirt and sand, shallower than snow, and listed main roads only slightly. Match is by texture file name, so a same-path retexture still matches. Snow on top of those textures stays on the snow path."));
+	if (ImGui::SliderFloat(T(TKEY("soft_ground_depth"), "Mud, Dirt and Sand Depth"), &settings.SoftGroundDepth, 0.0f, 20.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+		RebuildGroundLookup();
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextWrapped("%s", T(TKEY("soft_ground_depth_tooltip"), "Print depth on the mud, dirt and sand list, in game units. Snow print depth is the slider above."));
+	if (ImGui::SliderFloat(T(TKEY("road_depth"), "Main Road Depth"), &settings.RoadDepth, 0.0f, 20.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+		RebuildGroundLookup();
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::TextWrapped("%s", T(TKEY("road_depth_tooltip"), "Print depth on the main-road list, in game units. A file name on both lists uses this road depth."));
+
+	auto editNames = [&](const char* a_id, const char* a_label, std::vector<std::string>& a_names, char* a_buffer) {
+		if (!ImGui::TreeNode(a_id, "%s", a_label))
+			return;
+		int remove = -1;
+		for (int i = 0; i < static_cast<int>(a_names.size()); ++i) {
+			ImGui::PushID(i);
+			ImGui::TextUnformatted(a_names[i].c_str());
+			ImGui::SameLine();
+			if (ImGui::SmallButton(T(TKEY("ground_remove"), "Remove")))
+				remove = i;
+			ImGui::PopID();
+		}
+		if (remove >= 0) {
+			a_names.erase(a_names.begin() + remove);
+			groundListFromUser = true;
+			RebuildGroundLookup();
+		}
+		ImGui::PushID(a_id);
+		ImGui::InputText("##add", a_buffer, 260);
+		ImGui::SameLine();
+		if (ImGui::Button(T(TKEY("ground_add"), "Add")) && a_buffer[0] != '\0') {
+			a_names.emplace_back(a_buffer);
+			a_buffer[0] = '\0';
+			groundListFromUser = true;
+			RebuildGroundLookup();
+		}
+		ImGui::PopID();
+		ImGui::TreePop();
+	};
+	static char softAdd[260] = {};
+	static char roadAdd[260] = {};
+	editNames("##soft_ground_textures", T(TKEY("soft_ground_textures"), "Mud, Dirt and Sand Textures"), settings.SoftGroundTextures, softAdd);
+	editNames("##road_textures", T(TKEY("road_textures"), "Main Road Textures"), settings.RoadTextures, roadAdd);
+
 	if (ImGui::TreeNodeEx(T(TKEY("debug"), "Debug"))) {
 		ImGui::Text("%s: %u", T(TKEY("debug_stamps"), "Stamps last frame"), debugShown.stamps);
+		ImGui::Text("%s: %u", T(TKEY("debug_ground_stamps"), "Ground stamps last frame"), debugShown.groundStamps);
 		ImGui::Text("%s: %u / %u", T(TKEY("debug_tiles"), "Active / updated tiles"), debugShown.activeTiles, debugShown.dispatchedTiles);
 		ImGui::Text("%s: %u / %u / %u / %u", T(TKEY("debug_draws"), "Displaced draws (depth / lighting / shadow / decal)"), debugShown.depthDraws, debugShown.lightingDraws, debugShown.shadowDraws, debugShown.decalDraws);
 		ImGui::Text("%s: %u / %u", T(TKEY("debug_rejects"), "Draws skipped (layout / camera)"), debugShown.layoutRejects, debugShown.skippedDraws);
@@ -3019,7 +3352,17 @@ void SnowDeformation::DrawSettings()
 
 void SnowDeformation::LoadSettings(json& o_json)
 {
+	const bool userSoft = o_json.is_object() && o_json.contains("SoftGroundTextures");
+	const bool userRoads = o_json.is_object() && o_json.contains("RoadTextures");
 	settings = o_json;
+	groundListFromUser = userSoft || userRoads;
+	if (!userSoft || !userRoads) {
+		auto file = ReadGroundTextureFile();
+		if (!userSoft)
+			settings.SoftGroundTextures = std::move(file.soft);
+		if (!userRoads)
+			settings.RoadTextures = std::move(file.roads);
+	}
 	const Settings defaults{};
 	auto sanitize = [](float& a_value, float a_default, float a_min, float a_max) {
 		a_value = std::clamp(std::isfinite(a_value) ? a_value : a_default, a_min, a_max);
@@ -3028,6 +3371,9 @@ void SnowDeformation::LoadSettings(json& o_json)
 	sanitize(settings.Depth, defaults.Depth, 1.0f, 20.0f);
 	sanitize(settings.Lifetime, defaults.Lifetime, 10.0f, 1800.0f);
 	sanitize(settings.TrianglePixels, defaults.TrianglePixels, 2.0f, 32.0f);
+	sanitize(settings.SoftGroundDepth, defaults.SoftGroundDepth, 0.0f, 20.0f);
+	sanitize(settings.RoadDepth, defaults.RoadDepth, 0.0f, 20.0f);
+	RebuildGroundLookup();
 }
 
 void SnowDeformation::SaveSettings(json& o_json)
@@ -3038,6 +3384,11 @@ void SnowDeformation::SaveSettings(json& o_json)
 void SnowDeformation::RestoreDefaultSettings()
 {
 	settings = {};
+	auto file = ReadGroundTextureFile();
+	settings.SoftGroundTextures = std::move(file.soft);
+	settings.RoadTextures = std::move(file.roads);
+	groundListFromUser = false;
+	RebuildGroundLookup();
 }
 
 #undef I18N_KEY_PREFIX
