@@ -59,6 +59,10 @@ struct FurShells;
 struct LandscapeSeams;
 struct SnowDeformation;
 struct WaterWaves;
+struct ScreenSpacePhysicalParticlesFeature;
+struct PhysicalBlood;
+struct PhysicalLeaves;
+struct PhysicalWorldParticles;
 struct SceneManager;
 
 class State;
@@ -170,6 +174,10 @@ namespace globals
 		extern LandscapeSeams landscapeSeams;
 		extern SnowDeformation snowDeformation;
 		extern WaterWaves waterWaves;
+		extern ScreenSpacePhysicalParticlesFeature screenSpacePhysicalParticles;
+		extern PhysicalBlood physicalBlood;
+		extern PhysicalLeaves physicalLeaves;
+		extern PhysicalWorldParticles physicalWorldParticles;
 		extern SceneManager sceneManager;
 
 	}

@@ -60,6 +60,10 @@
 #include "Features/WaterEffects.h"
 #include "Features/ReverseZ.h"
 #include "Features/WaterWaves.h"
+#include "Features/ScreenSpacePhysicalParticles/ScreenSpacePhysicalParticles.h"
+#include "Features/ScreenSpacePhysicalParticles/PhysicalBlood/PhysicalBlood.h"
+#include "Features/ScreenSpacePhysicalParticles/PhysicalLeaves/PhysicalLeaves.h"
+#include "Features/ScreenSpacePhysicalParticles/PhysicalWorld/PhysicalWorldParticles.h"
 #include "Features/WetnessEffects.h"
 #include "Menu.h"
 #include "ShaderCache.h"
@@ -137,6 +141,10 @@ namespace globals
 		LandscapeSeams landscapeSeams{};
 		SnowDeformation snowDeformation{};
 		WaterWaves waterWaves{};
+		ScreenSpacePhysicalParticlesFeature screenSpacePhysicalParticles{};
+		PhysicalBlood physicalBlood{};
+		PhysicalLeaves physicalLeaves{};
+		PhysicalWorldParticles physicalWorldParticles{};
 		SceneManager sceneManager{};
 
 		namespace llf

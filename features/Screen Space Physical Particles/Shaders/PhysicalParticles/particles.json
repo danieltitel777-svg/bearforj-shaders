@@ -1,0 +1,343 @@
+{
+  "folder": "Data\\Shaders\\PhysicalParticles\\",
+  "format": "DXT5",
+  "alpha": "straight",
+  "size": 2048,
+  "notes": "36 source images packed into three 2048x2048 DXT5 straight-alpha atlases. Cell 0 is the top-left; cells increase left to right, then top to bottom. leaves_atlas.dds is a 4x4 grid of 512 cells: leaf_oak_01..04, leaf_birch_01..04, leaf_aspen_01..04, leaf_maple_01..04. sparks_atlas.dds is a 2x2 grid of 1024 cells: spark_01..04. small_atlas.dds is a 4x4 grid of 512 cells: fluff_01, fluff_02, spore_01, spore_cluster_01, firefly_01, firefly_glow_01, moth_frame_01..04, needles_pine_hjaal_01..04, dandelion_01, dandelion_02. The atlas DDS files are added at integration. Leaves are neutral color; the leaf shader multiplies by regionTints from the current worldspace and location. neutral is white. Pine trees use the needle cells and are not region-tinted. moth_frame_01..04 is a flipbook. spark_01..04 are tinted to the spell color.",
+  "atlases": {
+    "leaves": {
+      "path": "Data\\Shaders\\PhysicalParticles\\leaves_atlas.dds",
+      "grid": 4
+    },
+    "sparks": {
+      "path": "Data\\Shaders\\PhysicalParticles\\sparks_atlas.dds",
+      "grid": 2
+    },
+    "small": {
+      "path": "Data\\Shaders\\PhysicalParticles\\small_atlas.dds",
+      "grid": 4
+    }
+  },
+  "regionTints": {
+    "falkreath_rift": [
+      0.55,
+      0.78,
+      0.36
+    ],
+    "whiterun_tundra": [
+      0.9,
+      0.78,
+      0.46
+    ],
+    "reach": [
+      0.62,
+      0.66,
+      0.45
+    ],
+    "solstheim": [
+      0.7,
+      0.66,
+      0.6
+    ],
+    "pine_hjaal": [
+      0.4,
+      0.58,
+      0.48
+    ],
+    "neutral": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "leaves": [
+    {
+      "id": "leaf_oak_01",
+      "atlas": "leaves",
+      "cell": 0,
+      "tint": true,
+      "species": "oak",
+      "frame": "01"
+    },
+    {
+      "id": "leaf_oak_02",
+      "atlas": "leaves",
+      "cell": 1,
+      "tint": true,
+      "species": "oak",
+      "frame": "02"
+    },
+    {
+      "id": "leaf_oak_03",
+      "atlas": "leaves",
+      "cell": 2,
+      "tint": true,
+      "species": "oak",
+      "frame": "03"
+    },
+    {
+      "id": "leaf_oak_04",
+      "atlas": "leaves",
+      "cell": 3,
+      "tint": true,
+      "species": "oak",
+      "frame": "04"
+    },
+    {
+      "id": "leaf_birch_01",
+      "atlas": "leaves",
+      "cell": 4,
+      "tint": true,
+      "species": "birch",
+      "frame": "01"
+    },
+    {
+      "id": "leaf_birch_02",
+      "atlas": "leaves",
+      "cell": 5,
+      "tint": true,
+      "species": "birch",
+      "frame": "02"
+    },
+    {
+      "id": "leaf_birch_03",
+      "atlas": "leaves",
+      "cell": 6,
+      "tint": true,
+      "species": "birch",
+      "frame": "03"
+    },
+    {
+      "id": "leaf_birch_04",
+      "atlas": "leaves",
+      "cell": 7,
+      "tint": true,
+      "species": "birch",
+      "frame": "04"
+    },
+    {
+      "id": "leaf_aspen_01",
+      "atlas": "leaves",
+      "cell": 8,
+      "tint": true,
+      "species": "aspen",
+      "frame": "01"
+    },
+    {
+      "id": "leaf_aspen_02",
+      "atlas": "leaves",
+      "cell": 9,
+      "tint": true,
+      "species": "aspen",
+      "frame": "02"
+    },
+    {
+      "id": "leaf_aspen_03",
+      "atlas": "leaves",
+      "cell": 10,
+      "tint": true,
+      "species": "aspen",
+      "frame": "03"
+    },
+    {
+      "id": "leaf_aspen_04",
+      "atlas": "leaves",
+      "cell": 11,
+      "tint": true,
+      "species": "aspen",
+      "frame": "04"
+    },
+    {
+      "id": "leaf_maple_01",
+      "atlas": "leaves",
+      "cell": 12,
+      "tint": true,
+      "species": "maple",
+      "frame": "01"
+    },
+    {
+      "id": "leaf_maple_02",
+      "atlas": "leaves",
+      "cell": 13,
+      "tint": true,
+      "species": "maple",
+      "frame": "02"
+    },
+    {
+      "id": "leaf_maple_03",
+      "atlas": "leaves",
+      "cell": 14,
+      "tint": true,
+      "species": "maple",
+      "frame": "03"
+    },
+    {
+      "id": "leaf_maple_04",
+      "atlas": "leaves",
+      "cell": 15,
+      "tint": true,
+      "species": "maple",
+      "frame": "04"
+    },
+    {
+      "id": "needles_pine_hjaal_01",
+      "atlas": "small",
+      "cell": 10,
+      "tint": false,
+      "species": "pine",
+      "region": "pine_hjaal",
+      "frame": "01"
+    },
+    {
+      "id": "needles_pine_hjaal_02",
+      "atlas": "small",
+      "cell": 11,
+      "tint": false,
+      "species": "pine",
+      "region": "pine_hjaal",
+      "frame": "02"
+    },
+    {
+      "id": "needles_pine_hjaal_03",
+      "atlas": "small",
+      "cell": 12,
+      "tint": false,
+      "species": "pine",
+      "region": "pine_hjaal",
+      "frame": "03"
+    },
+    {
+      "id": "needles_pine_hjaal_04",
+      "atlas": "small",
+      "cell": 13,
+      "tint": false,
+      "species": "pine",
+      "region": "pine_hjaal",
+      "frame": "04"
+    }
+  ],
+  "sparks": [
+    {
+      "id": "spark_01",
+      "atlas": "sparks",
+      "cell": 0,
+      "tint": true,
+      "frame": "01"
+    },
+    {
+      "id": "spark_02",
+      "atlas": "sparks",
+      "cell": 1,
+      "tint": true,
+      "frame": "02"
+    },
+    {
+      "id": "spark_03",
+      "atlas": "sparks",
+      "cell": 2,
+      "tint": true,
+      "frame": "03"
+    },
+    {
+      "id": "spark_04",
+      "atlas": "sparks",
+      "cell": 3,
+      "tint": true,
+      "frame": "04"
+    }
+  ],
+  "fluff": [
+    {
+      "id": "fluff_01",
+      "atlas": "small",
+      "cell": 0,
+      "tint": true,
+      "frame": "01"
+    },
+    {
+      "id": "fluff_02",
+      "atlas": "small",
+      "cell": 1,
+      "tint": true,
+      "frame": "02"
+    }
+  ],
+  "dandelions": [
+    {
+      "id": "dandelion_01",
+      "atlas": "small",
+      "cell": 14,
+      "tint": true,
+      "frame": "01"
+    },
+    {
+      "id": "dandelion_02",
+      "atlas": "small",
+      "cell": 15,
+      "tint": true,
+      "frame": "02"
+    }
+  ],
+  "spores": [
+    {
+      "id": "spore_01",
+      "atlas": "small",
+      "cell": 2,
+      "tint": true,
+      "frame": "01"
+    },
+    {
+      "id": "spore_cluster_01",
+      "atlas": "small",
+      "cell": 3,
+      "tint": true,
+      "frame": "01"
+    }
+  ],
+  "fireflies": [
+    {
+      "id": "firefly_01",
+      "atlas": "small",
+      "cell": 4,
+      "tint": true,
+      "frame": "01"
+    },
+    {
+      "id": "firefly_glow_01",
+      "atlas": "small",
+      "cell": 5,
+      "tint": true,
+      "frame": "01"
+    }
+  ],
+  "moths": [
+    {
+      "id": "moth_frame_01",
+      "atlas": "small",
+      "cell": 6,
+      "tint": true,
+      "frame": "01"
+    },
+    {
+      "id": "moth_frame_02",
+      "atlas": "small",
+      "cell": 7,
+      "tint": true,
+      "frame": "02"
+    },
+    {
+      "id": "moth_frame_03",
+      "atlas": "small",
+      "cell": 8,
+      "tint": true,
+      "frame": "03"
+    },
+    {
+      "id": "moth_frame_04",
+      "atlas": "small",
+      "cell": 9,
+      "tint": true,
+      "frame": "04"
+    }
+  ]
+}

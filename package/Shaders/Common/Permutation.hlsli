@@ -91,6 +91,9 @@ namespace Permutation
 		static const uint NightEyeActor = (1 << 18);
 		static const uint NightEyeEnemy = (1 << 19);
 		static const uint NightEyeAlly = (1 << 20);
+		// High bits stay clear of the sequential flags above.
+		static const uint IsHeldWeapon = (1 << 29);
+		static const uint IsCharacterRainSurface = (1 << 30);
 	}
 
 	namespace ExtraFeatureFlags

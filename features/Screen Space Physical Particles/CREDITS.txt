@@ -1,0 +1,12 @@
+Screen-space physical particles are adapted from D7ry's Community Shaders branch
+dev/dtry/sspp at commit c9663e0222f97748fd530fef1abd09fd9affd767.
+https://github.com/D7ry/skyrim-community-shaders
+
+Bearforj keeps that blood and leaf simulation and adds tree-only leaves, magic
+sparks, grass fluff, dandelions, glowing mushroom spores, fireflies, and moths.
+The 36 source images are packed into three 2048 DXT5 straight-alpha atlases:
+leaves_atlas.dds, sparks_atlas.dds, and small_atlas.dds, under
+Data\Shaders\PhysicalParticles\. Each source PNG is 2048 square. Cells are 512
+(leaves and small) or 1024 (sparks), so the packer integer-box downscales them.
+Mips are built per cell. Cell layout and region tints are in particles.json.
+The generator is tools/bearforj/build_particle_atlases.py.

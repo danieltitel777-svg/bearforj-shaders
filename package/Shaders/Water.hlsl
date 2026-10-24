@@ -606,6 +606,10 @@ Texture2D<float4> FlowMapNormalsTex : register(t9);
 Texture2D<float4> SSRReflectionTex : register(t10);
 Texture2D<float4> RawSSRReflectionTex : register(t11);
 
+#if defined(PHYSICAL_BLOOD)
+#	include "PhysicalBlood/WaterBlood.hlsli"
+#endif
+
 cbuffer PerTechnique : register(b0)
 {
 	float4 VPOSOffset : packoffset(c0);  // inverse main render target width and height in xy, 0 in zw
@@ -1852,6 +1856,16 @@ PS_OUTPUT main(PS_INPUT input)
 		finalColor += ShoreWaves::SprayDroplets(swWorldPos.xy, SharedData::Timer, sprayMask);
 	}
 #			endif
+#		if defined(PHYSICAL_BLOOD)
+	[branch]
+	if (HasPhysicalBloodWaterDensity()) {
+		float rawWaterBloodDensity = max(GetPhysicalBloodWaterDensity(input.WPosition.xyz), 0.0f);
+		if (rawWaterBloodDensity > 0.0f) {
+			float waterBloodDensity = saturate(1.0f - exp(-rawWaterBloodDensity * 1.35f));
+			finalColor = lerp(finalColor, float3(0.16f, 0.002f, 0.004f), waterBloodDensity * 0.82f);
+		}
+	}
+#		endif
 	psout.Lighting = float4(finalColor, isSpecular);
 #		endif
 

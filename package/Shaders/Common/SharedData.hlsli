@@ -175,6 +175,42 @@ namespace SharedData
 		float RippleRadius;
 		float RippleBreadth;
 		float RippleLifetimeRcp;
+
+		uint EnableCharacterRainSpots;
+		float CharacterSpotDensity;
+		float CharacterSpotRadius;
+		float CharacterSpotStrength;
+		float CharacterSpotRoughness;
+		float CharacterSpotNormalStrength;
+		uint CharacterSpotDebug;
+		float CharacterCoatIntensity;
+		uint EnableWetHair;
+		float CharacterRainActivityMultiplier;
+		float CharacterDryTime;
+		uint EnableWeaponRainDrops;
+		uint EnableSkinnedRainStreaks;
+		uint EnableArmorClothingDryingDrops;
+		uint EnableEnvironmentVerticalDrops;
+		float CharacterSpotLifetime;
+		float CharacterSpotInterval;
+		float CharacterDropPause;
+		float EnvironmentDropDryTime;
+		float EnvironmentVerticalSlopeStart;
+		float EnvironmentVerticalSlopeFull;
+		float BearforjWetnessPad0;
+		float BearforjWetnessPad1;
+		float BearforjWetnessPad2;
+
+		// Bearforj volumetric puddles. Appended after character rain so earlier fields keep their offsets.
+		uint EnableVolumetricPuddles;
+		float VolumetricPuddleDepth;
+		float VolumetricPuddleEdgeDarkening;
+		float VolumetricPuddleDistortion;
+
+		float CharacterImpactIntensity;
+		float CharacterRetainedWetness;
+		float EnvironmentRetainedWetness;
+		float CharacterStatePad;
 	};
 
 	struct SkylightingSettings

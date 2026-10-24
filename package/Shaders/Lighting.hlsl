@@ -984,6 +984,15 @@ float GetSnowParameterY(float texProjTmp, float alpha)
 
 #	if defined(WETNESS_EFFECTS)
 #		include "WetnessEffects/WetnessEffects.hlsli"
+#		if !defined(EYE) && !defined(LANDSCAPE)
+#			define CHARACTER_RAIN_SURFACE
+#			include "WetnessEffects/CharacterRainSpots.hlsli"
+#		endif
+#		if defined(HAIR)
+#			include "WetnessEffects/WetHair.hlsli"
+			// t75 is free on hair. Skin wetness normal owns t75 only inside SKIN && CS_SKIN.
+			Texture2D<float> HairSSSTex : register(t75);
+#		endif
 #	endif
 
 #	if defined(TERRAIN_BLENDING)
@@ -1108,6 +1117,9 @@ bool UseSkylightingShadowVisibility()
 #	endif
 
 #	include "Common/LightingEval.hlsli"
+#	if defined(CHARACTER_RAIN_SURFACE)
+#		include "WetnessEffects/CharacterRainLighting.hlsli"
+#	endif
 
 #	if defined(NIGHT_EYE)
 #		include "NightEye/NightEye.hlsli"
@@ -1847,6 +1859,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	}
 #	endif  // CS_SKIN
 
+#	if defined(HAIR) && defined(WETNESS_EFFECTS)
+	float wetHair = 0.0;
+	float2 wetHairStrand = float2(0, 1);
+#	endif
+
 #	if defined(CS_HAIR_SHADING)
 	float3 hairTint = 0;
 
@@ -1866,6 +1883,25 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		TexBackLightSampler.GetDimensions(hairFlowDimensions.x, hairFlowDimensions.y);
 		useHairFlowMap = (sampledHairFlow.x > 0.0 || sampledHairFlow.y > 0.0) && hairFlowDimensions.x > 32 && hairFlowDimensions.y > 32;
 		sampledHairFlow = useHairFlowMap ? sampledHairFlow * 2.0f - 1.0f : float3(0.5f, 0.5f, 0.5f);
+	}
+#		if defined(WETNESS_EFFECTS)
+	if (useHairFlowMap)
+		wetHairStrand = sampledHairFlow.xy;
+#		endif
+#	endif
+
+#	if defined(HAIR) && defined(WETNESS_EFFECTS)
+	if (SharedData::wetnessEffectsSettings.EnableWetHair != 0) {
+		// Same Advanced Skin coat as skin, armor and clothes. hair_sss.dds only shapes it.
+		// A horizontal normal keeps non-skin sweat; GetWetness would otherwise zero upward faces.
+		float actorHairWet = 0.0;
+#		if defined(CS_SKIN)
+		float2 actorHair = Skin::GetWetness(input.WorldPosition.z + FrameBuffer::CameraPosAdjust.z, float3(0, 1, 0));
+		actorHairWet = saturate(actorHair.x + actorHair.y);
+#		endif
+		float hairSssMask = HairSSSTex.Sample(SampColorSampler, uv * float2(1.0, 0.5));
+		wetHair = saturate(actorHairWet * hairSssMask);
+		baseColor.xyz = WetHair::ApplyAlbedo(baseColor.xyz, TexColorSampler, SampColorSampler, uv, wetHairStrand, wetHair);
 	}
 #	endif
 
@@ -2282,6 +2318,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		}
 	}
 #	endif
+#	if defined(HAIR) && !defined(TRUE_PBR) && defined(WETNESS_EFFECTS)
+	material.Shininess *= lerp(1.0, 2.5, wetHair);
+	material.Roughness *= lerp(1.0, 0.6, wetHair);
+	material.SpecularColor *= lerp(1.0, 0.8, wetHair);
+#	endif
 
 	bool dynamicCubemap = false;
 
@@ -2614,6 +2655,70 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	rainWetness = SharedData::wetnessEffectsSettings.SkinWetness * SharedData::wetnessEffectsSettings.Wetness;
 #		endif
 
+#		if defined(CHARACTER_RAIN_SURFACE)
+	const bool characterRainSurface =
+		(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsCharacterRainSurface) != 0 &&
+		(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsEye) == 0;
+	const bool heldWeapon =
+		(Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::IsHeldWeapon) != 0;
+	float3 characterDrop = 0.0f;
+	float characterSpotMask = 0.0f;
+	float3 characterSpotSurfaceNormal = worldNormal.xyz;
+	float characterSpotRoughness = 1.0f;
+	float characterCoatIntensity = 0.0f;
+	float characterCoatMask = 0.0f;
+	float characterRainSkyVisibility = SharedData::InInterior ? 0.0f : wetnessOcclusion;
+	float characterSweat = 0.0f;
+	float characterRetainedWetness = 0.0f;
+#			if defined(CS_SKIN)
+	// Horizontal normal: non-skin GetWetness masks sweat on upward faces. Drops use the actor value.
+	float2 actorSurfaceWetness = Skin::GetWetness(input.WorldPosition.z + FrameBuffer::CameraPosAdjust.z, float3(0, 1, 0));
+	characterSweat = actorSurfaceWetness.x;
+	characterRetainedWetness = saturate(actorSurfaceWetness.y);
+#			endif
+#			if !defined(SKIN) && !defined(HAIR)
+	if (SharedData::wetnessEffectsSettings.EnableArmorClothingDryingDrops == 0)
+		characterRetainedWetness = 0.0f;
+#			endif
+	const bool evaluateCharacterDrops = characterRainSurface && inWorld && !SharedData::HideSky &&
+	                                    SharedData::wetnessEffectsSettings.EnableCharacterRainSpots != 0 &&
+	                                    max(SharedData::wetnessEffectsSettings.CharacterImpactIntensity, max(characterRetainedWetness, characterSweat)) > 0.0f &&
+	                                    (!heldWeapon || SharedData::wetnessEffectsSettings.EnableWeaponRainDrops != 0);
+	[branch] if (evaluateCharacterDrops)
+	{
+		characterDrop = CharacterRainSpots::Evaluate(input.ModelPosition.xyz,
+			input.WorldPosition.xyz, vertexNormal.xyz, characterRainSkyVisibility, heldWeapon,
+			characterRetainedWetness, characterSweat);
+	}
+	characterSpotMask = characterDrop.x;
+	float3 characterDropBaseNormal = normalize(lerp(worldNormal.xyz, vertexNormal.xyz,
+		CharacterRainSpots::CharacterNormalVertexBlend));
+	float configuredRadius = SharedData::wetnessEffectsSettings.CharacterSpotRadius *
+	                         (heldWeapon ? CharacterRainSpots::WeaponRadiusScale : 1.0f);
+	float characterDropHeight = characterDrop.y * configuredRadius * CharacterRainSpots::DropHeightScale *
+	                            SharedData::wetnessEffectsSettings.CharacterSpotNormalStrength;
+	float3 characterDropNormal = CharacterRainSpots::CalculateWorldNormalFromHeight(characterDropHeight,
+		input.WorldPosition.xyz, characterDropBaseNormal);
+	characterSpotRoughness = clamp(SharedData::wetnessEffectsSettings.CharacterSpotRoughness,
+		CharacterRainSpots::MinimumWaterRoughness, CharacterRainSpots::MaximumWaterRoughness);
+	// Held weapons keep the drops and the darkened spot. EvaluateLighting adds no extra specular.
+	characterCoatIntensity = heldWeapon ? 0.0f : SharedData::wetnessEffectsSettings.CharacterCoatIntensity;
+	characterCoatMask = characterSpotMask;
+	[branch] if (characterRainSurface && characterCoatMask > 0.0f && inWorld)
+	{
+		if (characterSpotMask > 0.0f)
+			characterSpotSurfaceNormal = characterDropNormal;
+		float spotAbsorption = CharacterRainSpots::SpotAbsorptionStrength *
+		                       saturate(max(characterDrop.z,
+								   characterDrop.x * CharacterRainSpots::CoverageAbsorptionWeight +
+									   characterDrop.y * CharacterRainSpots::HeightAbsorptionWeight));
+#			if defined(SKIN)
+		spotAbsorption *= CharacterRainSpots::SkinAbsorptionScale;
+#			endif
+		material.BaseColor *= 1.0f - spotAbsorption;
+	}
+#		endif
+
 #		if defined(CS_SKIN) && !defined(SKIN)
 	if (skinEnabled) {
 		float2 dynamicWetness = Skin::GetWetness(input.WorldPosition.z + FrameBuffer::CameraPosAdjust.z, worldNormal.xyz);
@@ -2645,6 +2750,35 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 
 	// Apply occlusion and distance factors
 	puddle *= saturate(wetnessOcclusion * 2.0) * nearFactor;
+
+	// Volumetric puddles. Enable 0, missing Skylighting, a steep slope, or no height relief
+	// leaves puddle at the original value above. Roofs stay dry because wetnessOcclusion is skylight.
+#		if defined(LANDSCAPE) && defined(EMAT) && defined(SKYLIGHTING) && !defined(SKINNED)
+	float volumetricEdge = 0.0;
+	[branch] if (SharedData::wetnessEffectsSettings.EnableVolumetricPuddles != 0 && LANDSCAPE_PARALLAX_ENABLED) {
+		float puddleRelief = ExtendedMaterials::TerrainMaxWeightedHeightScale(input, displacementParams);
+		[branch] if (puddleRelief > 0.01 && flatnessAmount > 0.0 && wetnessOcclusion >= 0.35) {
+			float puddleHeightWeights[TERRAIN_LAYER_COUNT];
+			float puddleHeight = ExtendedMaterials::GetTerrainHeight(uv, terrainMipLevel, displacementParams, 1.0, input.LandBlendWeights1, input.LandBlendWeights2.xy, sharedOffset, puddleHeightWeights);
+			float3 puddleViewTS = normalize(mul(tbnTr, viewDirection));
+			float3 puddleWorld = input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust.xyz;
+			// Weather puddle amount, not the perlin field, so the pool grows and dries as one water line.
+			float volumetricFill = saturate(SharedData::wetnessEffectsSettings.PuddleWetness) * saturate(wetnessOcclusion * 2.0) * nearFactor;
+			WetnessEffects::VolumetricPuddle puddleVolume = WetnessEffects::EvaluateVolumetricPuddle(puddleHeight, volumetricFill, puddleWorld.xy, puddleViewTS.xy);
+			if (puddleVolume.active != 0) {
+				float rainFilm = wetness * saturate(wetnessOcclusion * 2.0) * nearFactor;
+				puddle = lerp(rainFilm, max(rainFilm, puddleVolume.coverage), puddleVolume.coverage);
+				volumetricEdge = puddleVolume.edgeBand;
+				float4 puddleDrop = WetnessEffects::TexPuddleRaindrops.SampleLevel(SampColorSampler, puddleVolume.raindropUv, 0);
+				float3 puddleDropNormal = puddleDrop.rgb * 2.0 - 1.0;
+				puddleDropNormal.xy *= saturate(puddleDrop.a);
+				float3 puddleDropWorld = normalize(mul(transpose(tbnTr), float3(puddleDropNormal.xy, max(puddleDropNormal.z, 0.05))));
+				wetnessNormal = normalize(lerp(wetnessNormal, puddleDropWorld, puddleVolume.coverage * saturate(puddleDrop.a)));
+			}
+		}
+	}
+#		endif
+
 	wetnessNormal = lerp(worldNormal.xyz, wetnessNormal, saturate(puddle));
 
 	// Calculate wetness glossiness factors
@@ -2833,6 +2967,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	if defined(WETNESS_EFFECTS)
 	if (waterRoughnessSpecular < 1)
 		EvaluateWetnessLighting(wetnessNormal, dirLightContext, waterRoughnessSpecular, dirLightOutput);
+#		if defined(CHARACTER_RAIN_SURFACE)
+	if (characterCoatMask > 0.0 && characterCoatIntensity > 0.0)
+		lightsSpecularColor += CharacterRainSpots::EvaluateLighting(characterSpotSurfaceNormal, dirLightContext, characterSpotRoughness, characterCoatMask, characterCoatIntensity);
+#		endif
 #	endif
 
 	lightsDiffuseColor += dirLightOutput.diffuse;
@@ -2896,6 +3034,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		if defined(WETNESS_EFFECTS)
 		if (waterRoughnessSpecular < 1)
 			EvaluateWetnessLighting(wetnessNormal, pointLightContext, waterRoughnessSpecular, pointLightOutput);
+#			if defined(CHARACTER_RAIN_SURFACE)
+		if (characterCoatMask > 0.0 && characterCoatIntensity > 0.0)
+			lightsSpecularColor += CharacterRainSpots::EvaluateLighting(characterSpotSurfaceNormal, pointLightContext, characterSpotRoughness, characterCoatMask, characterCoatIntensity);
+#			endif
 #			endif
 		lightsDiffuseColor += pointLightOutput.diffuse;
 		lightsSpecularColor += pointLightOutput.specular;
@@ -3049,6 +3191,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		if defined(WETNESS_EFFECTS)
 		if (waterRoughnessSpecular < 1)
 			EvaluateWetnessLighting(wetnessNormal, pointLightContext, waterRoughnessSpecular, pointLightOutput);
+#			if defined(CHARACTER_RAIN_SURFACE)
+		if (characterCoatMask > 0.0 && characterCoatIntensity > 0.0)
+			lightsSpecularColor += CharacterRainSpots::EvaluateLighting(characterSpotSurfaceNormal, pointLightContext, characterSpotRoughness, characterCoatMask, characterCoatIntensity);
+#			endif
 #			endif
 
 		lightsDiffuseColor += pointLightOutput.diffuse;
@@ -3225,6 +3371,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #			endif
 	float wetnessDarkeningAmount = porosity * wetnessGlossinessAlbedo;
 	material.BaseColor = lerp(material.BaseColor, pow(abs(material.BaseColor), 1.0 + wetnessDarkeningAmount), 0.5);
+#		if defined(LANDSCAPE) && defined(EMAT) && defined(SKYLIGHTING) && !defined(SKINNED)
+	material.BaseColor *= lerp(1.0, 1.0 - SharedData::wetnessEffectsSettings.VolumetricPuddleEdgeDarkening, volumetricEdge);
+#		endif
 #		endif
 #	endif
 
@@ -3242,6 +3391,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #			endif
 #		else
 	float3 wetnessReflectance = 0.0;
+#		endif
+#		if defined(CHARACTER_RAIN_SURFACE)
+	float3 characterSpotReflectance = 0.0;
+	if (characterCoatMask > 0.0 && characterCoatIntensity > 0.0)
+		characterSpotReflectance = CharacterRainSpots::EvaluateIndirect(characterSpotSurfaceNormal, indirectContext, characterSpotRoughness, characterCoatMask, characterCoatIntensity);
 #		endif
 #	endif
 #	if defined(ENVMAP) || defined(MULTI_LAYER_PARALLAX) || defined(EYE)
@@ -3344,6 +3498,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	if (any(indirectLobeWeights.specular > 0)
 #		if defined(WETNESS_EFFECTS)
 		|| any(wetnessReflectance > 0)
+#			if defined(CHARACTER_RAIN_SURFACE)
+		|| any(characterSpotReflectance > 0)
+#			endif
 #		endif
 	)
 #		if defined(DYNAMIC_CUBEMAPS)
@@ -3352,12 +3509,20 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #				if defined(WETNESS_EFFECTS)
 	if (waterRoughnessSpecular < 1)
 		color.xyz += wetnessReflectance * DynamicCubemaps::GetDynamicCubemapSpecularIrradiance(wetnessNormal, viewDirection, waterRoughnessSpecular, skylightingSH);
+#					if defined(CHARACTER_RAIN_SURFACE)
+	if (characterCoatMask > 0.0 && characterCoatIntensity > 0.0)
+		color.xyz += characterSpotReflectance * DynamicCubemaps::GetDynamicCubemapSpecularIrradiance(characterSpotSurfaceNormal, viewDirection, characterSpotRoughness, skylightingSH);
+#					endif
 #		endif
 #		else
 		color.xyz += indirectLobeWeights.specular * DynamicCubemaps::GetDynamicCubemapSpecularIrradiance(worldNormal, viewDirection, material.Roughness);
 #				if defined(WETNESS_EFFECTS)
 	if (waterRoughnessSpecular < 1)
 		color.xyz += wetnessReflectance * DynamicCubemaps::GetDynamicCubemapSpecularIrradiance(wetnessNormal, viewDirection, waterRoughnessSpecular);
+#					if defined(CHARACTER_RAIN_SURFACE)
+	if (characterCoatMask > 0.0 && characterCoatIntensity > 0.0)
+		color.xyz += characterSpotReflectance * DynamicCubemaps::GetDynamicCubemapSpecularIrradiance(characterSpotSurfaceNormal, viewDirection, characterSpotRoughness);
+#					endif
 #		endif
 #			endif
 #		else
@@ -3567,6 +3732,13 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		screenSpaceNormal = normalize(FrameBuffer::WorldToView(wetnessNormal, false));
 		material.Roughness = waterRoughnessSpecular;
 	}
+#			if defined(CHARACTER_RAIN_SURFACE)
+	indirectLobeWeights.specular += characterSpotReflectance;
+	if (characterCoatMask > 0.0 && characterCoatIntensity > 0.0) {
+		screenSpaceNormal = normalize(FrameBuffer::WorldToView(characterSpotSurfaceNormal, false));
+		material.Roughness = characterSpotRoughness;
+	}
+#			endif
 #		endif
 
 	psout.Reflectance = float4(indirectLobeWeights.specular, psout.Diffuse.w);

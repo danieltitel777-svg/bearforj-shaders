@@ -63,6 +63,10 @@
 #include "Features/WaterEffects.h"
 #include "Features/WaterWaves.h"
 #include "Features/WetnessEffects.h"
+#include "Features/ScreenSpacePhysicalParticles/ScreenSpacePhysicalParticles.h"
+#include "Features/ScreenSpacePhysicalParticles/PhysicalBlood/PhysicalBlood.h"
+#include "Features/ScreenSpacePhysicalParticles/PhysicalLeaves/PhysicalLeaves.h"
+#include "Features/ScreenSpacePhysicalParticles/PhysicalWorld/PhysicalWorldParticles.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
 #include "Utils/Format.h"
@@ -277,7 +281,11 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::snowDeformation,
 		&globals::features::proceduralAurora,
 		&globals::features::treeLODWind,
-		&globals::features::waterWaves
+		&globals::features::waterWaves,
+		&globals::features::screenSpacePhysicalParticles,
+		&globals::features::physicalBlood,
+		&globals::features::physicalLeaves,
+		&globals::features::physicalWorldParticles
 	};
 
 	return features;

@@ -433,6 +433,8 @@ void Deferred::DeferredPasses()
 		globals::features::effects11.DrawVolumetricRays();
 		globals::features::effects11.DrawSunRays();
 	}
+
+	Feature::ForEachLoadedFeature("PostComposite", [](Feature* feature) { feature->PostComposite(); }, true);
 }
 
 void Deferred::EndDeferred()

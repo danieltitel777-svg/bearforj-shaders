@@ -366,7 +366,10 @@ public:
 		NightEyeMask = 1 << 17,
 		NightEyeActor = 1 << 18,
 		NightEyeEnemy = 1 << 19,
-		NightEyeAlly = 1 << 20
+		NightEyeAlly = 1 << 20,
+		// High bits stay clear of the sequential flags above.
+		IsHeldWeapon = 1 << 29,
+		IsCharacterRainSurface = 1 << 30
 	};
 
 	/** @brief Bitflags describing extra feature-specific properties related to terrain displacement and material models. */

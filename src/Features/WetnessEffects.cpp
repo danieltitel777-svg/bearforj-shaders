@@ -1,6 +1,10 @@
 #include "WetnessEffects.h"
+
+#include <DirectXTex.h>
+
 #include "CSEditor.h"
 #include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
+#include "CharacterRainSurfaces.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
 #include "Precipitation.h"
@@ -8,6 +12,9 @@
 #include "Skin.h"
 #include "PerformanceOverlay.h"
 #include "State.h"
+#include "Utils/D3D.h"
+
+#include <DDSTextureLoader.h>
 
 #define I18N_KEY_PREFIX "feature.wetness_effects."
 
@@ -40,7 +47,76 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	RippleStrength,
 	RippleRadius,
 	RippleBreadth,
-	RippleLifetime)
+	RippleLifetime,
+	EnableCharacterRainSpots,
+	CharacterSpotDensity,
+	CharacterSpotRadius,
+	CharacterSpotStrength,
+	CharacterSpotRoughness,
+	CharacterSpotNormalStrength,
+	CharacterSpotDebug,
+	CharacterCoatIntensity,
+	EnableWetHair,
+	CharacterRainActivityMultiplier,
+	EnableWeaponRainDrops,
+	EnableSkinnedRainStreaks,
+	EnableArmorClothingDryingDrops,
+	EnableEnvironmentVerticalDrops,
+	CharacterSpotLifetime,
+	CharacterSpotInterval,
+	CharacterDropPause,
+	EnvironmentDropDryTime,
+	EnvironmentVerticalSlopeStart,
+	EnvironmentVerticalSlopeFull,
+	EnableVolumetricPuddles,
+	VolumetricPuddleDepth,
+	VolumetricPuddleEdgeDarkening,
+	VolumetricPuddleDistortion)
+
+namespace
+{
+	winrt::com_ptr<ID3D11ShaderResourceView> hairSssSrv;
+	winrt::com_ptr<ID3D11ShaderResourceView> puddleRaindropsSrv;
+	// Lighting.hlsl HairSSSTex is HAIR-only. Landscape seams use t119. Skin wetness normal uses t75 only on SKIN.
+	constexpr std::uint32_t kHairSssShaderSlot = 75u;
+	// Shared wetness header is included for hair, skin, and landscape, so the puddle texture cannot use t75.
+	constexpr std::uint32_t kPuddleRaindropSlot = 66u;
+
+	void SanitizeBearforjWetnessSettings(WetnessEffects::Settings& settings)
+	{
+		const WetnessEffects::Settings defaults;
+		auto clamp = [](float value, float fallback, float minimum, float maximum) {
+			return std::isfinite(value) ? std::clamp(value, minimum, maximum) : fallback;
+		};
+
+		settings.EnableCharacterRainSpots = settings.EnableCharacterRainSpots != 0;
+		settings.EnableWetHair = settings.EnableWetHair != 0;
+		settings.EnableWeaponRainDrops = settings.EnableWeaponRainDrops != 0;
+		settings.EnableSkinnedRainStreaks = settings.EnableSkinnedRainStreaks != 0;
+		settings.EnableArmorClothingDryingDrops = settings.EnableArmorClothingDryingDrops != 0;
+		settings.EnableEnvironmentVerticalDrops = settings.EnableEnvironmentVerticalDrops != 0;
+		settings.CharacterSpotDensity = clamp(settings.CharacterSpotDensity, defaults.CharacterSpotDensity, 0.0f, 1.0f);
+		settings.CharacterSpotRadius = clamp(settings.CharacterSpotRadius, defaults.CharacterSpotRadius, 0.2f, 3.0f);
+		settings.CharacterSpotStrength = clamp(settings.CharacterSpotStrength, defaults.CharacterSpotStrength, 0.0f, 1.0f);
+		settings.CharacterSpotRoughness = clamp(settings.CharacterSpotRoughness, defaults.CharacterSpotRoughness, 0.08f, 0.6f);
+		settings.CharacterSpotNormalStrength = clamp(settings.CharacterSpotNormalStrength, defaults.CharacterSpotNormalStrength, 0.0f, 1.0f);
+		settings.CharacterCoatIntensity = clamp(settings.CharacterCoatIntensity, defaults.CharacterCoatIntensity, 0.0f, 8.0f);
+		settings.CharacterRainActivityMultiplier = clamp(settings.CharacterRainActivityMultiplier, defaults.CharacterRainActivityMultiplier, 0.25f, 8.0f);
+		settings.CharacterSpotLifetime = clamp(settings.CharacterSpotLifetime, defaults.CharacterSpotLifetime, 0.2f, 20.0f);
+		settings.CharacterSpotInterval = clamp(settings.CharacterSpotInterval, defaults.CharacterSpotInterval, 0.2f, 20.0f);
+		settings.CharacterDropPause = clamp(settings.CharacterDropPause, defaults.CharacterDropPause, 0.0f, 1.0f);
+		settings.EnvironmentDropDryTime = clamp(settings.EnvironmentDropDryTime, defaults.EnvironmentDropDryTime, 0.05f, 50.0f);
+		settings.EnvironmentVerticalSlopeStart = clamp(settings.EnvironmentVerticalSlopeStart, defaults.EnvironmentVerticalSlopeStart, 0.0f, 0.95f);
+		settings.EnvironmentVerticalSlopeFull = clamp(settings.EnvironmentVerticalSlopeFull, defaults.EnvironmentVerticalSlopeFull, 0.05f, 1.0f);
+		if (settings.EnvironmentVerticalSlopeFull < settings.EnvironmentVerticalSlopeStart)
+			settings.EnvironmentVerticalSlopeFull = settings.EnvironmentVerticalSlopeStart;
+
+		settings.EnableVolumetricPuddles = settings.EnableVolumetricPuddles != 0;
+		settings.VolumetricPuddleDepth = clamp(settings.VolumetricPuddleDepth, defaults.VolumetricPuddleDepth, 0.05f, 1.0f);
+		settings.VolumetricPuddleEdgeDarkening = clamp(settings.VolumetricPuddleEdgeDarkening, defaults.VolumetricPuddleEdgeDarkening, 0.0f, 1.0f);
+		settings.VolumetricPuddleDistortion = clamp(settings.VolumetricPuddleDistortion, defaults.VolumetricPuddleDistortion, 0.0f, 0.15f);
+	}
+}
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	WetnessEffects::DebugSettings,
@@ -388,6 +464,8 @@ namespace Ripples
 
 void WetnessEffects::PostPostLoad()
 {
+	CharacterRainSurfaces::Install();
+
 	splashesOfStormsLoaded = static_cast<bool>(GetModuleHandle(L"po3_SplashesOfStorms.dll"));
 	if (splashesOfStormsLoaded) {
 		logger::info("[{}] Splashes of Storms detected, compatibility enabled", GetName());
@@ -398,8 +476,100 @@ void WetnessEffects::PostPostLoad()
 	Ripples::Install();
 }
 
+void WetnessEffects::DataLoaded()
+{
+	CharacterRainSurfaces::RegisterEvents();
+}
+
+void WetnessEffects::GameLoaded()
+{
+	CharacterRainSurfaces::QueueLoadedActors();
+}
+
+void WetnessEffects::DrawBearforjWetnessSettings()
+{
+	if (ImGui::TreeNodeEx(T(TKEY("character_rain"), "Character Wetness"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		bool characterDrops = settings.EnableCharacterRainSpots != 0;
+		if (ImGui::Checkbox(T(TKEY("character_rain_enabled"), "Character rain drops"), &characterDrops))
+			settings.EnableCharacterRainSpots = characterDrops;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("character_rain_enabled_tooltip"),
+				"Open Shaders drops on every actor: skin, armor, clothes and hair. Off keeps wetness without those drops. Sweat thresholds stay on the Advanced Skin page."));
+		}
+
+		bool skinnedStreaks = settings.EnableSkinnedRainStreaks != 0;
+		if (ImGui::Checkbox(T(TKEY("skinned_streaks"), "Streaks on skinned models"), &skinnedStreaks))
+			settings.EnableSkinnedRainStreaks = skinnedStreaks;
+
+		bool armorDrying = settings.EnableArmorClothingDryingDrops != 0;
+		if (ImGui::Checkbox(T(TKEY("armor_drying_drops"), "Armor and clothing dry into drops"), &armorDrying))
+			settings.EnableArmorClothingDryingDrops = armorDrying;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("armor_drying_drops_tooltip"),
+				"Drying breaks into drops on skin. On extends that to armor and clothes. Hair keeps drops either way. One Advanced Skin fade time dries the coat."));
+		}
+		bool wetHair = settings.EnableWetHair != 0;
+		if (ImGui::Checkbox(T(TKEY("wet_hair"), "Wet hair"), &wetHair))
+			settings.EnableWetHair = wetHair;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("wet_hair_tooltip"),
+				"Wet look from the actor's Advanced Skin wetness. hair_sss.dds only shapes clumping and darkening. Drying time is Advanced Skin wetness fade time."));
+		}
+
+		auto characterDisabled = Util::DisableGuard(!settings.EnableCharacterRainSpots);
+		ImGui::SliderFloat(T(TKEY("character_spot_lifetime"), "Drop lifetime"), &settings.CharacterSpotLifetime, 0.2f, 20.0f, "%.2f sec");
+		ImGui::SliderFloat(T(TKEY("character_spot_interval"), "Drop interval"), &settings.CharacterSpotInterval, 0.2f, 20.0f, "%.2f sec");
+		ImGui::SliderFloat(T(TKEY("character_drop_pause"), "Streak pause"), &settings.CharacterDropPause, 0.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("character_rain_activity"), "Drop activity"), &settings.CharacterRainActivityMultiplier, 0.25f, 8.0f, "%.2fx");
+		ImGui::SliderFloat(T(TKEY("character_spot_density"), "Drop density"), &settings.CharacterSpotDensity, 0.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("character_spot_radius"), "Drop size"), &settings.CharacterSpotRadius, 0.2f, 3.0f, "%.2f units");
+		ImGui::SliderFloat(T(TKEY("character_spot_strength"), "Drop and trail strength"), &settings.CharacterSpotStrength, 0.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("character_coat_intensity"), "Droplet highlight"), &settings.CharacterCoatIntensity, 0.0f, 8.0f, "%.2fx");
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::Text("%s", T(TKEY("character_coat_intensity_tooltip"), "Held weapons keep the drops and the darkened spot, and this highlight stays off them."));
+		ImGui::SliderFloat(T(TKEY("character_spot_roughness"), "Water roughness"), &settings.CharacterSpotRoughness, 0.08f, 0.6f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("character_spot_normal"), "Droplet normal strength"), &settings.CharacterSpotNormalStrength, 0.0f, 1.0f, "%.2f");
+		bool weaponDrops = settings.EnableWeaponRainDrops != 0;
+		if (ImGui::Checkbox(T(TKEY("weapon_rain_drops"), "Drops on held weapons"), &weaponDrops))
+			settings.EnableWeaponRainDrops = weaponDrops;
+		ImGui::TreePop();
+	}
+
+	if (ImGui::TreeNodeEx(T(TKEY("environment_drops"), "Environment Wetness Drops"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		bool verticalDrops = settings.EnableEnvironmentVerticalDrops != 0;
+		if (ImGui::Checkbox(T(TKEY("environment_vertical_drops"), "Vertical surface drops"), &verticalDrops))
+			settings.EnableEnvironmentVerticalDrops = verticalDrops;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("environment_vertical_drops_tooltip"),
+				"Keeps a drying timer for vertical surfaces. This package does not add a separate wall-rain flow; ordinary wetness still covers those surfaces."));
+		}
+		auto environmentDisabled = Util::DisableGuard(!settings.EnableEnvironmentVerticalDrops);
+		ImGui::SliderFloat(T(TKEY("environment_drop_dry_time"), "Environment drop dry time"), &settings.EnvironmentDropDryTime, 0.05f, 50.0f, "%.2f sec");
+		ImGui::SliderFloat(T(TKEY("environment_slope_start"), "Slope where drops start"), &settings.EnvironmentVerticalSlopeStart, 0.0f, 0.95f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("environment_slope_full"), "Slope where drops are full"), &settings.EnvironmentVerticalSlopeFull, 0.05f, 1.0f, "%.2f");
+		ImGui::TreePop();
+	}
+
+	if (ImGui::TreeNodeEx(T(TKEY("volumetric_puddles"), "Volumetric Puddles"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		bool volumetric = settings.EnableVolumetricPuddles != 0;
+		if (ImGui::Checkbox(T(TKEY("volumetric_puddles_enabled"), "Volumetric puddles"), &volumetric))
+			settings.EnableVolumetricPuddles = volumetric;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("volumetric_puddles_enabled_tooltip"),
+				"Standing water follows the landscape height map. Skylighting is required, and roofs stay dry. Off keeps the original puddle math."));
+		}
+		auto volumetricDisabled = Util::DisableGuard(!settings.EnableVolumetricPuddles);
+		ImGui::SliderFloat(T(TKEY("volumetric_puddle_depth"), "Puddle depth"), &settings.VolumetricPuddleDepth, 0.05f, 1.0f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("volumetric_puddle_edge"), "Edge darkening"), &settings.VolumetricPuddleEdgeDarkening, 0.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat(T(TKEY("volumetric_puddle_distortion"), "Refraction"), &settings.VolumetricPuddleDistortion, 0.0f, 0.15f, "%.3f");
+		ImGui::TreePop();
+	}
+}
+
 void WetnessEffects::DrawSettings()
 {
+	DrawBearforjWetnessSettings();
+
 	// Climate Preset Selection - Always visible at the top
 	Util::DrawSectionHeader(T(TKEY("climate_presets"), "Climate Presets"), false, false);
 
@@ -939,14 +1109,91 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 	data.Time = rainTimer / 1000.f;
 
 	data.settings = settings;
+	SanitizeBearforjWetnessSettings(data.settings);
 	data.settings.MaxShoreWetness = settings.EnableWetnessEffects ? settings.MaxShoreWetness : 0.0f;
 	data.settings.RaindropChance *= data.Raining * data.Raining;
 	data.settings.RaindropGridSize = 1.0f / settings.RaindropGridSize;
 	data.settings.RaindropInterval = 1.0f / settings.RaindropInterval;
 	data.settings.RippleLifetime = settings.RaindropInterval / settings.RippleLifetime;
+	AdvanceRetainedWetness(data);
+	actorRainWetness = std::clamp(data.Raining, 0.0f, 1.0f);
 
 	lastPerFrame = data;
 	return data;
+}
+
+void WetnessEffects::AdvanceRetainedWetness(PerFrame& a_data) const
+{
+	constexpr float kMaxDeltaSeconds = 0.25f;
+	const std::uint32_t frame = globals::state ? globals::state->frameCount : 0u;
+	const bool advance = frame != retainedWetnessFrame;
+	if (advance)
+		retainedWetnessFrame = frame;
+
+	const bool paused = globals::game::ui && globals::game::ui->GameIsPaused();
+	const float deltaSeconds = (!advance || paused) ? 0.0f : std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, kMaxDeltaSeconds);
+
+	auto approach = [](float target, float retained, float deltaSeconds, float dryTime) {
+		if (target >= retained)
+			return target;
+		const float dryRate = 1.0f / std::max(dryTime, 0.05f);
+		return std::max(target, retained - deltaSeconds * dryRate);
+	};
+
+	if (!settings.EnableWetnessEffects || !settings.EnableEnvironmentVerticalDrops) {
+		if (advance)
+			environmentSurfaceWetness = 0.0f;
+	} else if (advance) {
+		const float target = std::max(a_data.Wetness, a_data.Raining);
+		environmentSurfaceWetness = approach(target, environmentSurfaceWetness, deltaSeconds, settings.EnvironmentDropDryTime);
+	}
+
+	a_data.CharacterImpactIntensity = settings.EnableWetnessEffects && settings.EnableCharacterRainSpots ?
+	                                      std::sqrt(std::clamp(a_data.Wetness, 0.0f, 1.0f)) :
+	                                      0.0f;
+	// Actor drying is Advanced Skin wetness, not this weather-only coat.
+	a_data.CharacterRetainedWetness = 0.0f;
+	a_data.EnvironmentRetainedWetness = settings.EnableWetnessEffects && settings.EnableEnvironmentVerticalDrops ? environmentSurfaceWetness : 0.0f;
+	a_data.CharacterStatePad = 0.0f;
+}
+
+void WetnessEffects::SetupResources()
+{
+	auto device = globals::d3d::device;
+	auto context = globals::d3d::context;
+	hairSssSrv = nullptr;
+	if (SUCCEEDED(DirectX::CreateDDSTextureFromFile(device, context, L"Data\\Shaders\\WetnessEffects\\hair_sss.dds", nullptr, hairSssSrv.put())) && hairSssSrv)
+		logger::info("[{}] Loaded hair_sss.dds", GetName());
+	else {
+		hairSssSrv = nullptr;
+		logger::error("[{}] Failed to load Data/Shaders/WetnessEffects/hair_sss.dds", GetName());
+	}
+
+	puddleRaindropsSrv = nullptr;
+	const std::filesystem::path raindropPath = L"Data\\Shaders\\WetnessEffects\\Raindrops.png";
+	DirectX::ScratchImage image;
+	if (!std::filesystem::exists(raindropPath) || FAILED(DirectX::LoadFromWICFile(raindropPath.c_str(), DirectX::WIC_FLAGS_IGNORE_SRGB, nullptr, image))) {
+		logger::warn("[{}] Raindrops.png was not loaded", GetName());
+	} else {
+		DirectX::ScratchImage mipImage;
+		DirectX::ScratchImage bc7Image;
+		if (SUCCEEDED(DirectX::GenerateMipMaps(image.GetImages(), image.GetImageCount(), image.GetMetadata(), DirectX::TEX_FILTER_DEFAULT, 0, mipImage)) &&
+			SUCCEEDED(DirectX::Compress(mipImage.GetImages(), mipImage.GetImageCount(), mipImage.GetMetadata(), DXGI_FORMAT_BC7_UNORM, DirectX::TEX_COMPRESS_BC7_QUICK, 1.0f, bc7Image))) {
+			winrt::com_ptr<ID3D11Texture2D> texture;
+			const auto& metadata = bc7Image.GetMetadata();
+			if (SUCCEEDED(DirectX::CreateTexture(device, bc7Image.GetImages(), bc7Image.GetImageCount(), metadata, reinterpret_cast<ID3D11Resource**>(texture.put())))) {
+				D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{
+					.Format = DXGI_FORMAT_BC7_UNORM,
+					.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+					.Texture2D = { .MostDetailedMip = 0, .MipLevels = static_cast<UINT>(metadata.mipLevels) }
+				};
+				if (SUCCEEDED(device->CreateShaderResourceView(texture.get(), &srvDesc, puddleRaindropsSrv.put())))
+					logger::info("[{}] Loaded Raindrops.png", GetName());
+			}
+		}
+		if (!puddleRaindropsSrv)
+			logger::warn("[{}] Failed to compress Raindrops.png", GetName());
+	}
 }
 
 bool WetnessEffects::IsDry(RE::BSRenderPass* a_pass, uint32_t a_descriptor) const
@@ -990,17 +1237,27 @@ bool WetnessEffects::IsDry(RE::BSRenderPass* a_pass, uint32_t a_descriptor) cons
 
 void WetnessEffects::Prepass()
 {
+	CharacterRainSurfaces::RefreshPendingActors();
 	static auto renderer = globals::game::renderer;
 	static auto& precipOcclusionTexture = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kPRECIPITATION_OCCLUSION_MAP];
 
 	auto context = globals::d3d::context;
 
 	context->PSSetShaderResources(70, 1, &precipOcclusionTexture.depthSRV);
+	if (hairSssSrv) {
+		ID3D11ShaderResourceView* srv = hairSssSrv.get();
+		context->PSSetShaderResources(kHairSssShaderSlot, 1, &srv);
+	}
+	if (puddleRaindropsSrv) {
+		ID3D11ShaderResourceView* srv = puddleRaindropsSrv.get();
+		context->PSSetShaderResources(kPuddleRaindropSlot, 1, &srv);
+	}
 }
 
 void WetnessEffects::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	SanitizeBearforjWetnessSettings(settings);
 
 	// Auto-detect which preset matches the loaded settings
 	DetectCurrentPreset();
@@ -1022,6 +1279,9 @@ void WetnessEffects::SaveSettings(json& o_json)
 void WetnessEffects::RestoreDefaultSettings()
 {
 	settings = {};
+	actorRainWetness = 0.0f;
+	environmentSurfaceWetness = 0.0f;
+	retainedWetnessFrame = 0xffffffffu;
 	climatePreset = defaultPreset;
 
 	// Apply the default climate preset to ensure settings reflect the preset values

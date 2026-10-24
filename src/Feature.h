@@ -263,6 +263,9 @@ public:
 	/** @brief Per-frame work executed before Prepass, earliest per-frame hook. */
 	virtual void EarlyPrepass() {}
 
+	/** @brief Per-frame work after the deferred composite, before forward rendering resumes. */
+	virtual void PostComposite() {}
+
 	/** @brief Runs immediately before the engine polls physical input devices. */
 	virtual void OnBeforeInputPoll() {}
 
