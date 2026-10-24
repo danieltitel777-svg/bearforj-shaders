@@ -45,7 +45,7 @@ struct ScreenSpacePhysicalParticlesFeature final : Feature
 		// Shared stable-slot pool capacity. The amount slider derives this from the hard limit.
 		std::int32_t particleCapacity{ 16384 };
 		// Percent of the hard particle limit. Zero still keeps the minimum pool, but spawns nothing.
-		std::int32_t particleAmount{ 70 };
+		std::int32_t particleAmount{ 100 };
 		// Per-feature live-slot limits keyed by process-stable registration keys.
 		std::unordered_map<std::string, std::uint32_t> featureParticleBudgets{};
 		// Orthographic solid capture cadence and square texture resolution.
