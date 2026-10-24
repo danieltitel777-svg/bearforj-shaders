@@ -882,6 +882,7 @@ namespace SIE
 			RE::BSShader::Type type;
 			std::uint32_t descriptor;
 			SIE::ShaderClass shaderClass;
+			std::wstring diskPath;
 
 			bool operator<(const hlslRecord& other) const
 			{

@@ -9,7 +9,7 @@
 void TreeLODWind::DrawSettings()
 {
 	ImGui::TextWrapped("%s", T(TKEY("settings_info"),
-		"This feature provides compatibility with the Windswept Tree LOD SKSE plugin (K747_LodWind.dll), which makes distant DynDOLOD billboard trees sway. Install only that DLL. Do not install Windswept's Lighting.hlsl or Utility.hlsl: this package already contains the vertex offset, and those files would replace it. The feature turns itself off when the DLL is missing or its interface is not version 1. The plugin's own settings control the sway."));
+		"Install Windswept normally and place it ABOVE Bearforj Shaders in the MO2 left pane so our Lighting.hlsl and Utility.hlsl override it; only its DLL stays active. The feature turns itself off when K747_LodWind.dll is missing or its interface is not version 1. The plugin's own settings control the sway."));
 }
 
 void TreeLODWind::PostPostLoad()

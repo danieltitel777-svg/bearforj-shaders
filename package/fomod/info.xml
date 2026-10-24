@@ -1,4 +1,4 @@
 <fomod>
     <Name>Bearforj Shaders vb 1.0</Name>
-    <Description>Tree LOD Wind needs only K747_LodWind.dll. Do not install Windswept's Lighting.hlsl or Utility.hlsl; this package already has the vertex offset and those files would replace it. The DLL is not included.</Description>
+    <Description>Install Windswept normally and place it ABOVE Bearforj Shaders in the MO2 left pane so our Lighting.hlsl and Utility.hlsl override it; only its DLL stays active. The DLL is not included.</Description>
 </fomod>

@@ -1614,7 +1614,7 @@ namespace SIE
 			}
 
 			std::wstring diskPath;
-			if (diskEntry && diskEntry->Store(shaderBlob)) {
+			if (diskEntry && diskEntry->Store(shaderBlob.get())) {
 				diskPath = diskEntry->GetPath();
 				logger::debug("Saved shader to {}", Util::WStringToString(diskPath));
 			}
@@ -2228,6 +2228,19 @@ namespace SIE
 				break;
 			}
 
+			// Delete the associated file
+			const auto& filePath = entry.diskPath;
+			const auto& filePathString = Util::WStringToString(filePath);
+			if (!filePath.empty()) {
+				std::scoped_lock lockD{ compilationSet.compilationMutex };
+				std::error_code ec;  // Use the error_code overload to avoid exceptions for non-critical errors like the file not existing.
+				if (const bool removed = std::filesystem::remove(filePath, ec); ec) {
+					logger::warn("Error while trying to delete {}: {}", filePathString, ec.message());
+				} else if (removed) {
+					logger::debug("Deleted {}", filePathString);
+				}  // If !removed and no error, the file didn't exist, which is fine.
+			}
+
 			logger::debug("Marking recompile for shader: {}", entry.key);
 		}
 
@@ -2272,7 +2285,8 @@ namespace SIE
 		auto key = SIE::SShaderCache::GetShaderString(shaderClass, shader, descriptor, true);
 		auto keyWithDescriptor = SIE::SShaderCache::GetShaderString(shaderClass, shader, descriptor, false);
 		auto status = a_blob ? ShaderCompilationTask::Status::Completed : ShaderCompilationTask::Status::Failed;
-		logger::debug("Adding {} shader to map: {}", magic_enum ::enum_name(status), keyWithDescriptor);
+		logger::debug("Adding {} shader to map: {}", magic_enum::enum_name(status), keyWithDescriptor);
+		const std::wstring savedDiskPath = diskPath;
 		{
 			std::unique_lock lockM{ mapMutex };
 			shaderMap.insert_or_assign(key, ShaderCacheResult{ a_blob, status, system_clock::now(), fromDisk, std::move(diskPath) });
@@ -2290,7 +2304,7 @@ namespace SIE
 		{
 			std::unique_lock lockH{ hlslMapMutex };
 			auto it = hlslToShaderMap.find(lowerFilePath);
-			hlslRecord newRecord{ key, shader.shaderType.get(), descriptor, shaderClass };
+			hlslRecord newRecord{ key, shader.shaderType.get(), descriptor, shaderClass, savedDiskPath };
 
 			if (it != hlslToShaderMap.end()) {
 				auto& entries = it->second;

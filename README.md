@@ -21,7 +21,7 @@ SKSE core plugin for community-driven advanced graphics modifications.
 
 ## Windswept Tree LOD
 
-Tree LOD Wind works with **only** `K747_LodWind.dll` (Windswept, Nexus 195280) installed. Do not install Windswept's `Lighting.hlsl` or `Utility.hlsl`. This package already applies the tree LOD vertex offset in its own shaders, and Windswept's copies would replace them. The feature stays off when that DLL is missing or `WindsweptTreeLOD_GetInterfaceVersion` is not 1. The DLL is not included here.
+Install Windswept normally and place it ABOVE Bearforj Shaders in the MO2 left pane so our `Lighting.hlsl` and `Utility.hlsl` override it; only its DLL stays active. The feature stays off when `K747_LodWind.dll` is missing or `WindsweptTreeLOD_GetInterfaceVersion` is not 1. The DLL is not included here.
 
 [Nexus](https://www.nexusmods.com/skyrimspecialedition/mods/86492)
 [User Wiki](https://modding.wiki/en/skyrim/developers/community-shaders)
