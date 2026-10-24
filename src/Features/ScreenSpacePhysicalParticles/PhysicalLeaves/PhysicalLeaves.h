@@ -226,7 +226,7 @@ private:
 	std::uint32_t grassScanCountdown{};
 	std::uint32_t activeRegionIndex{ 5 };
 	bool sharedConfigured{};
-	ParticleTextureSet leafTextures;
+	ScreenSpacePhysicalParticles::ParticleTextureSet leafTextures;
 	std::array<ScreenSpacePhysicalParticles::Core::EmissionProfileID, 5> canopyEmissionProfiles{
 		ScreenSpacePhysicalParticles::Core::kInvalidRoute,
 		ScreenSpacePhysicalParticles::Core::kInvalidRoute,

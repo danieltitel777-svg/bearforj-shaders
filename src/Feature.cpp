@@ -338,7 +338,7 @@ bool Feature::IsRuntimeListed() const
 #undef RUNTIME_FEATURE
 		return listed;
 	}();
-	return names.contains(GetShortName());
+	return names.contains(const_cast<Feature*>(this)->GetShortName());
 }
 
 void Feature::SetEnabled(bool value)

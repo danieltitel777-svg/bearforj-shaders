@@ -15,6 +15,7 @@
 #include "Features/RainRendering.h"
 #include "Features/ReverseZ.h"
 #include "Features/ScreenSpaceGI.h"
+#include "Features/ScreenSpaceReflections.h"
 #include "Features/Skylighting.h"
 #include "Features/SnowDeformation.h"
 #include "Features/SubsurfaceScattering.h"

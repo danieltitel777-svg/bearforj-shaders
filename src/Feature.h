@@ -121,6 +121,12 @@ protected:
 
 public:
 	virtual bool HasShaderDefine(RE::BSShader::Type) { return false; }
+	/**
+	 * Whether the feature supports VR.
+	 *
+	 * \return true if VR supported; else false
+	 */
+	virtual bool SupportsVR() { return false; }
 
 	/**
 	 * @brief Whether the feature is a CORE feature.
@@ -251,6 +257,45 @@ public:
 
 	virtual void DrawSettings() {}
 
+	/**
+	 * @brief Renders this feature's VR performance-relevant controls into the central
+	 * Performance panel. Default empty: features without VR perf knobs contribute
+	 * nothing. Overrides render controls only; the hub draws the section header.
+	 */
+	virtual void DrawPerformanceSettings() {}
+
+	/** @brief Feature-specific preset controls drawn under the hub's section header. */
+	virtual void DrawPerformancePresets() {}
+
+	/** @brief True when DrawPerformanceSettings() draws only VR-specific controls. */
+	virtual bool PerformanceSectionRequiresVR() const { return false; }
+
+	/** @brief Section label the Performance hub draws above this feature's controls. */
+	virtual std::string GetPerformanceSectionLabel() { return ""; }
+
+	/** @brief Sort key for the Performance hub (lower draws first). */
+	virtual int GetPerformanceOrder() const { return 1000; }
+
+	/** @brief Named VR performance profiles broadcast from the Performance hub. */
+	enum class PerfProfile
+	{
+		Performance,
+		Balanced,
+		Quality
+	};
+
+	/** @brief Every VR reprojection feature enables reproject except on Quality. */
+	static constexpr bool ProfileEnablesReproject(PerfProfile profile) { return profile != PerfProfile::Quality; }
+
+	/** @brief Applies a VR performance profile to this feature's settings. */
+	virtual void ApplyPerformanceProfile(PerfProfile /*profile*/) {}
+
+	/** @brief True when settings already equal what ApplyPerformanceProfile would set. */
+	virtual bool MatchesPerformanceProfile(PerfProfile /*profile*/) const { return true; }
+
+	/** @brief One-line preview of what ApplyPerformanceProfile(profile) would change. */
+	virtual std::string GetProfilePreviewText(PerfProfile /*profile*/) const { return ""; }
+
 	/** @brief Draws the UI shown when this feature failed to load. */
 	virtual void DrawUnloadedUI();
 
@@ -309,6 +354,12 @@ public:
 	virtual void SaveSettings(json&) {}
 	virtual void LoadSettings(json&) {}
 	virtual void RestoreDefaultSettings() {}
+
+	/**
+	 * @brief Live runtime diagnostics, distinct from persisted settings.
+	 * @return An empty object by default.
+	 */
+	virtual json GetDiagnostics() { return json::object(); }
 
 	/**
 	 * @brief Toggles the "disabled at boot" state for this feature.
