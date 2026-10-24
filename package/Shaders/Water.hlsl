@@ -1696,15 +1696,9 @@ PS_OUTPUT main(PS_INPUT input)
 		float3 cdN = normalize(float3(normal.xy + (inWorld ? cdRun.slope : 0.0), normal.z));
 		normal = all(isfinite(cdN)) ? cdN : normal;
 	}
-#	if defined(FLOWMAP)
-	const bool cdHasFlow = true;
-#	else
-	const bool cdHasFlow = false;
-#	endif
 	const float cdFoamFade = 1.0 - smoothstep(ShoreWaves::FoamFadeStart, ShoreWaves::FoamFadeEnd, cdCamDist);
 	float2 ecWake = ShoreWaves::ObstacleWake(cdHasDepth ? cdH : 0.0, cdGrad, shoreFlow, swWorldPos.xy, SharedData::Timer);
-	float ecAround = cdHasDepth ? max(CDWater::ObstacleFoam(cdH, length(cdGrad), swWorldPos.xy, SharedData::Timer),
-		                          CDWater::QuietFoam(cdH, shoreFlow, cdHasFlow, swWorldPos.xy, SharedData::Timer)) : 0.0;
+	float ecAround = cdHasDepth ? CDWater::ObstacleFoam(cdH, length(cdGrad), swWorldPos.xy, SharedData::Timer) : 0.0;
 	ecAround = saturate(max(ecAround * (1.0 - ecWake.y), ecWake.x));
 	const float cdFoam = cdHasDepth ? saturate(max(cdRun.foam, ecAround) * cdFoamFade * EI_FoamStrength) : 0.0;
 	const float3 cdFoamTint = CDWater::FoamTint(cdH);
@@ -2069,6 +2063,13 @@ PS_OUTPUT main(PS_INPUT input)
 		float softW = (2.0 + 6.0 * swN) * (0.6 + 0.4 * saturate(EI_FoamDepth / 5.0));
 		float shoreSoft = smoothstep(0.0, softW, max(shoreDepth, 0.0));
 		finalColor = lerp(diffuseOutput.refractionColor, finalColor, lerp(1.0, shoreSoft, shoreMask * (inWorld ? 1.0 : 0.0)));
+	}
+	{
+		float storm = saturate(SharedData::WaveLook.w);
+		float crestN = ShoreWaves::VNoise(swWorldPos.xy / 17.0);
+		float crestBreak = saturate((0.62 - input.WaveShape.z) * lerp(2.0, 6.5, storm)) * lerp(0.45, 1.0, crestN) * lerp(0.4, 1.0, storm) * saturate(SharedData::WaveLook.x);
+		float sprayMask = max(shoreWaves.foam * shoreMask, crestBreak);
+		finalColor += ShoreWaves::SprayDroplets(swWorldPos.xy, SharedData::Timer, sprayMask);
 	}
 #endif
 #undef SHOREWAVES_ACTIVE

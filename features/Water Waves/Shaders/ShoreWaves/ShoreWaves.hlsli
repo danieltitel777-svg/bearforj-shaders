@@ -10,7 +10,7 @@ cbuffer ShoreWavesWaterfallCB : register(b13)
 	float4 EI4, EI5;             // v0.4: foam texture, surf (wave height / run-up / period)
 	float4 EIwPad6;              // EI6 slot of the shared GPUBlock (blood, unused by water)
 	float4 CD0, CD1, CD2, CD3;   // v0.11: Crimson-Desert-inspired layers (CDWater.hlsli)
-	float4 ECParallax;           // Bearforj: x on, y foam depth (units). zw unused. No wave-height map.
+	float4 ECParallax;           // x foam parallax on, y foam depth (units), z spray on, w spray amount
 };
 
 // v0.4: 2048^2 seamless foam lace (textures/ElementalContact/foam.dds), bound by the DLL on PS t107.
@@ -19,6 +19,9 @@ Texture2D<float4> EIFoamTex : register(t107);
 // Bearforj: foam_height.dds is the alpha of foam.dds. Flat when ECParallax.x is 0.
 // The EC ripple normal (water_normals.dds) is not used. Small wave detail is the Gerstner ripple.
 Texture2D<float4> EIFoamHeightTex : register(t111);
+// Physical Particles spark atlas, 2x2: spark_01 top-left, spark_02 top-right, spark_03 bottom-left, spark_04 bottom-right.
+// Data\Shaders\PhysicalParticles\sparks_atlas.dds. White and semi-transparent. Bound on PS t113.
+Texture2D<float4> EISparkAtlas : register(t113);
 float3 gECView = float3(0, 0, 1);
 
 float2 ECParallaxUv(Texture2D<float4> heightTex, float2 uv, float worldPerTile, float depthUnits)
@@ -305,6 +308,43 @@ namespace ShoreWaves
 		o.x = saturate(max(front, max(around * 0.9, spread * 0.6)));
 		o.y = saturate(lee);
 		return o;
+	}
+
+	// Fine droplets on a breaking crest or the shore foam. Each one leaves with the foam,
+	// travels a short way, and falls back (the sine is the hop). The atlas is spark_01..04.
+	float3 SprayDroplets(float2 worldXZ, float time, float foamMask)
+	{
+		if (ECParallax.z < 0.5 || ECParallax.w <= 0.0)
+			return 0;
+		float mask = saturate(foamMask) * ECParallax.w;
+		if (mask < 0.04)
+			return 0;
+		const float cell = 36.0;
+		float2 home = floor(worldXZ / cell);
+		float3 sum = 0;
+		[unroll]
+		for (int i = 0; i < 9; ++i) {
+			float2 c = home + float2((i % 3) - 1, (i / 3) - 1);
+			float2 origin = (c + float2(Hash21(c + 1.7), Hash21(c.yx + 2.9))) * cell;
+			float life = lerp(0.55, 0.95, Hash21(c + 4.1));
+			float age = frac(time / life + Hash21(c + 8.3));
+			float2 dir = float2(Hash21(c + 3.2) - 0.5, Hash21(c + 5.4) - 0.5);
+			dir *= rsqrt(max(dot(dir, dir), 1e-4));
+			float2 pos = origin + dir * lerp(8.0, 16.0, Hash21(c + 6.6)) * age;
+			float arc = sin(age * 3.14159265);
+			float rad = lerp(4.2, 1.8, age);
+			float2 d = (worldXZ - pos) / rad;
+			float blob = saturate(1.0 - length(d));
+			float alive = arc * (1.0 - smoothstep(0.78, 1.0, age));
+			float pick = Hash21(c + 11.0) * 3.999;
+			float2 quad = float2(pick < 1.0 ? 0.0 : (pick < 2.0 ? 1.0 : (pick < 3.0 ? 0.0 : 1.0)), pick < 2.0 ? 0.0 : 1.0);
+			float2 local = saturate(d * 0.5 + 0.5);
+			float2 uv = (quad + 0.08 + local * 0.84) * 0.5;
+			float4 spark = EISparkAtlas.SampleLevel(Normals01Sampler, uv, 0);
+			float cover = saturate(spark.a * max(spark.r, max(spark.g, spark.b)));
+			sum += cover * blob * alive;
+		}
+		return saturate(sum) * mask * float3(0.92, 0.95, 0.97);
 	}
 
 }

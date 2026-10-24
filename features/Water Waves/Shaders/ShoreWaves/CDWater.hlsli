@@ -18,7 +18,6 @@ namespace CDWater
 	float BeachSlope()   { return clamp(CD1.w, 0.01, 1.0); }
 	float FoamDepthCol() { return EI3.w > 0.5 ? CD2.x : 0.0; }
 	float ObstacleAmt()  { return EI3.w > 0.5 ? CD2.y : 0.0; }
-	float QuietAmt()     { return EI3.w > 0.5 ? CD2.z : 0.0; }
 	float CrestFoamAmt() { return EI3.w > 0.5 ? CD2.w : 0.0; }
 	float CrestDecay()   { return max(CD3.x, 0.2); }
 
@@ -81,21 +80,6 @@ namespace CDWater
 		float shallowBand = 1.0 - smoothstep(6.0, 45.0, h);
 		float n = ShoreWaves::FoamNoise(pAbs * 1.6, t * 1.4);
 		return saturate(steep * shallowBand * smoothstep(0.35, 0.7, n + 0.15) * amt);
-	}
-
-	// (b) quiet-zone foam (shader approximation of a baked mask): slow flow + shallow-medium depth -> foam gathers
-	// in eddies / calm bays. flow = flow-map vector (0 when the water has no flow map).
-	float QuietFoam(float h, float2 flow, bool hasFlow, float2 pAbs, float t)
-	{
-		float amt = QuietAmt();
-		if (amt <= 0.0 || !hasFlow)
-			return 0;
-		float fs = length(flow);
-		float calm = 1.0 - smoothstep(0.08, 0.40, fs);
-		float nearBand = smoothstep(2.0, 10.0, h) * (1.0 - smoothstep(60.0, 180.0, h));
-		float2 drift = flow * t * 6.0;
-		float n = ShoreWaves::VNoise((pAbs - drift) / 70.0) * 0.6 + ShoreWaves::VNoise((pAbs - drift) / 19.0) * 0.4;
-		return saturate(calm * nearBand * smoothstep(0.55, 0.85, n) * amt * 0.8);
 	}
 
 	// foam colour by depth: thin, water-tinted foam over deep water, bright white in the shallows

@@ -57,7 +57,9 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	Detail,
 	FoamParallax,
 	ShoreContact,
-	CrestParallax)
+	CrestParallax,
+	Spray,
+	SprayIntensity)
 
 namespace
 {
@@ -188,13 +190,17 @@ void WaterWaves::DataLoaded()
 	};
 	loadDDS(L"Data\\textures\\ElementalContact\\foam.dds", ecFoamSRV, ecFoamFile);
 	loadDDS(L"Data\\textures\\ElementalContact\\foam_height.dds", ecFoamHeightSRV, ecFoamHeightFile);
+	loadDDS(L"Data\\Shaders\\PhysicalParticles\\sparks_atlas.dds", ecSparkSRV, ecSparkFile);
 	winrt::com_ptr<ID3D11Texture2D> hold;
 	if (!ecFoamFile)
 		makeNeutral(255, 255, 255, 255, hold.put(), ecFoamSRV.put(), "WaterWaves Foam Fallback");
 	hold = nullptr;
 	if (!ecFoamHeightFile)
 		makeNeutral(128, 128, 128, 255, hold.put(), ecFoamHeightSRV.put(), "WaterWaves Foam Height Fallback");
-	logger::info("[Water Waves] Elemental Contact foam {} foam height {}", ecFoamFile, ecFoamHeightFile);
+	hold = nullptr;
+	if (!ecSparkFile)
+		makeNeutral(0, 0, 0, 0, hold.put(), ecSparkSRV.put(), "WaterWaves Spark Fallback");
+	logger::info("[Water Waves] Elemental Contact foam {} foam height {} spark atlas {}", ecFoamFile, ecFoamHeightFile, ecSparkFile);
 }
 
 WaterWaveMath::Params WaterWaves::MakeParams(bool a_flowmap) const
@@ -740,7 +746,6 @@ void WaterWaves::BindElementalContact()
 		data.ei[4][3] = 1.0f;
 		data.cd[2][0] = 0.8f;
 		data.cd[2][1] = 1.0f;
-		data.cd[2][2] = 0.6f;
 		data.cd[2][3] = 0.9f;
 		data.cd[3][0] = 5.0f;
 	}
@@ -760,6 +765,8 @@ void WaterWaves::BindElementalContact()
 	const bool parallax = on && settings.FoamParallax && ecFoamHeightFile;
 	data.parallax[0] = parallax ? 1.0f : 0.0f;
 	data.parallax[1] = 8.0f;
+	data.parallax[2] = (on && settings.Spray && ecSparkFile) ? 1.0f : 0.0f;
+	data.parallax[3] = std::clamp(settings.SprayIntensity, 0.0f, 2.0f);
 	D3D11_MAPPED_SUBRESOURCE mapped{};
 	if (FAILED(context->Map(ecCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
 		return;
@@ -769,8 +776,10 @@ void WaterWaves::BindElementalContact()
 	context->PSSetConstantBuffers(13, 1, &cb);
 	ID3D11ShaderResourceView* foam = ecFoamSRV.get();
 	ID3D11ShaderResourceView* foamH = ecFoamHeightSRV.get();
+	ID3D11ShaderResourceView* spark = ecSparkSRV.get();
 	context->PSSetShaderResources(107, 1, &foam);
 	context->PSSetShaderResources(111, 1, &foamH);
+	context->PSSetShaderResources(113, 1, &spark);
 	ecBound = true;
 }
 
@@ -787,6 +796,7 @@ void WaterWaves::UnbindElementalContact()
 	ID3D11ShaderResourceView* srv = nullptr;
 	context->PSSetShaderResources(107, 1, &srv);
 	context->PSSetShaderResources(111, 1, &srv);
+	context->PSSetShaderResources(113, 1, &srv);
 }
 
 void WaterWaves::DrawSettings()
@@ -820,6 +830,12 @@ void WaterWaves::DrawSettings()
 	BFUI::Checkbox(T(TKEY("foam_parallax"), "Foam parallax"), &settings.FoamParallax);
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::Text("%s", T(TKEY("foam_parallax_tt"), "Shifts the foam lace by the foam height map, the alpha of foam.dds. Off samples the foam flat. Small wave detail stays the Gerstner ripple."));
+	BFUI::Checkbox(T(TKEY("spray"), "Spray"), &settings.Spray);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text("%s", T(TKEY("spray_tt"), "Fine white droplets from the spark atlas. They leave a breaking crest and the shore surf with the foam, then fall back. Off leaves the foam without spray."));
+	BFUI::SliderFloat(T(TKEY("spray_amount"), "Spray amount"), &settings.SprayIntensity, 0.0f, 2.0f, "%.2f");
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text("%s", T(TKEY("spray_amount_tt"), "How strong those droplets are. Zero hides them. The foam underneath stays."));
 }
 
 void WaterWaves::LoadSettings(json& o_json)

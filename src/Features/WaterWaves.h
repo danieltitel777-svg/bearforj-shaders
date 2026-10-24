@@ -51,6 +51,9 @@ struct WaterWaves : Feature
 		bool ShoreContact = true;
 		// Off restores the unshifted detail ripple. The height is the Gerstner jacobian, not a foam texture.
 		bool CrestParallax = true;
+		// Droplets from the spark atlas on a breaking crest and on the shore foam.
+		bool Spray = true;
+		float SprayIntensity = 1.0f;
 	} settings;
 
 	virtual void PostPostLoad() override;
@@ -127,8 +130,10 @@ private:
 	winrt::com_ptr<ID3D11Buffer> ecCB;
 	winrt::com_ptr<ID3D11ShaderResourceView> ecFoamSRV;
 	winrt::com_ptr<ID3D11ShaderResourceView> ecFoamHeightSRV;
+	winrt::com_ptr<ID3D11ShaderResourceView> ecSparkSRV;
 	bool ecFoamFile = false;
 	bool ecFoamHeightFile = false;
+	bool ecSparkFile = false;
 	bool ecBound = false;
 	mutable std::atomic<float> smoothedWind{ 0.0f };
 	mutable std::atomic<float> smoothedAngle{ 0.0f };
