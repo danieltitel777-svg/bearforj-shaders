@@ -17,7 +17,7 @@ struct SnowDeformation : Feature
 				T("feature.snow_deformation.key_feature_2", "Works on vanilla snow textures and on Snow Cover snow"),
 				T("feature.snow_deformation.key_feature_3", "Prints fill back in over time, faster while it snows"),
 				T("feature.snow_deformation.key_feature_4", "Optional snow blanket raises snowy ground so prints become trenches down to the ground"),
-				T("feature.snow_deformation.key_feature_5", "Separate ground toggle presses mud, dirt and sand less deeply than snow, and main roads only slightly, using the landscape blend") } };
+				T("feature.snow_deformation.key_feature_5", "Separate ground toggle gives mud, dirt, sand, riverbed and main roads their own print depth, using the landscape blend") } };
 	}
 
 	static constexpr uint32_t kTexels = 2048;
@@ -42,6 +42,13 @@ struct SnowDeformation : Feature
 	static_assert((kTexels & (kTexels - 1)) == 0);
 	static_assert(kWindowSpan < static_cast<int32_t>(kSlots));
 
+	struct GroundType
+	{
+		std::string id;
+		float depth = 2.4f;
+		std::vector<std::string> textures{};
+	};
+
 	struct Settings
 	{
 		bool Enabled = true;
@@ -55,10 +62,7 @@ struct SnowDeformation : Feature
 		float Lifetime = 240.0f;
 		float TrianglePixels = 24.0f;
 		bool GroundDeformation = true;
-		float SoftGroundDepth = 2.4f;
-		float RoadDepth = 0.72f;
-		std::vector<std::string> SoftGroundTextures{};
-		std::vector<std::string> RoadTextures{};
+		std::vector<GroundType> GroundTypes{};
 	};
 
 	Settings settings;
