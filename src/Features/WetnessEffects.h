@@ -73,8 +73,9 @@ public:
 		uint EnableWallRain = true;
 		float WallRainTrailLength = 1.0f;
 
-		// Open Shaders CharacterRainSpots. Defaults are that source's values,
-		// except dry time, which is Jiaye Skin.h WetFadeTime (10 seconds).
+		// Open Shaders CharacterRainSpots. Defaults are that source's values.
+		// Actor drying is Advanced Skin WetFadeTime. CharacterDryTime remains so
+		// the constant-buffer layout does not shift; it is not a slider.
 		uint EnableCharacterRainSpots = true;
 		float CharacterSpotDensity = 1.0f;
 		float CharacterSpotRadius = 0.75f;
@@ -85,7 +86,7 @@ public:
 		float CharacterCoatIntensity = 5.0f;
 		uint EnableWetHair = true;
 		float CharacterRainActivityMultiplier = 2.5f;
-		float CharacterDryTime = 10.0f;
+		float CharacterDryTime = 10.0f;  // unused layout slot; see comment above
 		uint EnableWeaponRainDrops = true;
 		uint EnableSkinnedRainStreaks = true;
 		uint EnableArmorClothingDryingDrops = true;
@@ -173,6 +174,9 @@ public:
 		return settings.EnableWetnessEffects && settings.EnableCharacterRainSpots;
 	}
 
+	/** @brief Current rain intensity (0–1) copied for Advanced Skin's per-actor coat. */
+	float ActorRainWetness() const { return actorRainWetness; }
+
 	/** @brief Draws the ImGui settings panel for wetness effects configuration. */
 	virtual void DrawSettings() override;
 
@@ -234,7 +238,7 @@ private:
 
 	size_t rainTimer = 0;  // milliseconds; size_t for precision
 	bool splashesOfStormsLoaded = false;
-	mutable float characterSurfaceWetness = 0.0f;
+	mutable float actorRainWetness = 0.0f;
 	mutable float environmentSurfaceWetness = 0.0f;
 	mutable std::uint32_t retainedWetnessFrame = 0xffffffffu;
 

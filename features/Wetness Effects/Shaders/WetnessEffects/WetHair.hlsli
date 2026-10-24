@@ -1,6 +1,5 @@
-// Elemental Contact v0.13.2 Shaders/ShoreWaves/WetHair.hlsli, hair only.
-// The waterline test is the ActorWet depth check this file called (strength 0.9, edges 6 and 3,
-// menu default 0.9). Dividing by that strength cancels it, which is the EC result at the default.
+// Elemental Contact v0.13.2 Shaders/ShoreWaves/WetHair.hlsli, albedo only.
+// The wet amount is Advanced Skin's per-actor value. This file does not sample a waterline.
 // ShoreWaves, ActorSurface and the Elemental Contact menu DLL are not part of this package.
 #ifndef __SHOREWAVES_WETHAIR_HLSLI__
 #define __SHOREWAVES_WETHAIR_HLSLI__
@@ -10,9 +9,6 @@ namespace WetHair
 	static const float ClumpOffsetUV = 0.004;
 	static const float Darken = 0.70;
 	static const float Saturate = 1.25;
-	static const float TransmissionCut = 0.25;
-	static const float WaterlineEdgeAbove = 6.0;
-	static const float WaterlineEdgeBelow = 3.0;
 
 	float Hash(float2 p)
 	{
@@ -26,19 +22,6 @@ namespace WetHair
 		float2 i = floor(p), f = frac(p);
 		f = f * f * (3.0 - 2.0 * f);
 		return lerp(lerp(Hash(i), Hash(i + float2(1, 0)), f.x), lerp(Hash(i + float2(0, 1)), Hash(i + float2(1, 1)), f.x), f.y);
-	}
-
-	float Waterline(float waterHeight, float pixelZ)
-	{
-		if (waterHeight < -1.0e8)
-			return 0.0;
-		return smoothstep(-WaterlineEdgeAbove, WaterlineEdgeBelow, waterHeight - pixelZ);
-	}
-
-	// waterHeight / pixelZ: camera-relative Z (Skyrim is Z-up); rain: hair/skin rain wetness 0..1
-	float Wetness(float waterHeight, float pixelZ, float rain)
-	{
-		return saturate(max(Waterline(waterHeight, pixelZ), rain));
 	}
 
 	// strandDir: strand direction in UV space (from the hair flow map, else (0,1))

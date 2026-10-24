@@ -261,8 +261,8 @@ namespace CharacterRainSpots
 	}
 
 	/** @brief Returns surface-attached coverage, water height, and trail absorption.
-	 *  retainedWetness is the drying coat (0 on armor/clothes when that toggle is off).
-	 *  sweat is Jiaye Advanced Skin sweat, already faded by WetFadeTime on the CPU.
+	 *  retainedWetness is Advanced Skin's per-actor water/rain coat, faded by WetFadeTime.
+	 *  sweat is that same actor's sweat. Armor/clothes pass 0 retained when their toggle is off.
 	 */
 	float3 Evaluate(float3 modelPosition, float3 relativeWorldPosition, float3 worldNormal, float skyVisibility,
 		bool heldWeapon, float retainedWetness, float sweat)
@@ -293,7 +293,9 @@ namespace CharacterRainSpots
 			                       lerp(VerticalSurfaceCoverage, 1.0f, smoothstep(0.0f, UpwardFacingEnd, facing));
 			float visibility = distanceFade;
 			float configuredDensity = settings.CharacterSpotDensity;
-			[branch] if (visibility > 0.0f && rainExposure > 0.0f && configuredDensity > 0.0f)
+			// Drying and sweat stay after the sky closes. Fresh impacts still need open sky.
+			float coat = saturate(max(retainedWetness, sweat));
+			[branch] if (visibility > 0.0f && configuredDensity > 0.0f && max(rainExposure, coat) > 0.0f)
 			{
 				float activity = max(settings.CharacterRainActivityMultiplier, MinimumActivityMultiplier);
 				float sweatAmount = saturate(sweat);
@@ -324,9 +326,9 @@ namespace CharacterRainSpots
 						         projectionWeights[projectionIndex];
 					}
 				}
-				water.xz *= visibility * rainExposure * settings.CharacterSpotStrength;
+				water.xz *= visibility * settings.CharacterSpotStrength * lerp(rainExposure, 1.0f, coat);
 			}
-			// Shelter suppresses localized water here; the broad retained sheen is applied separately in Lighting.hlsl.
+			// Open sky still fades fresh rain. A wet or sweating actor keeps drying drops.
 			// Coverage fades the coat contribution; flattening its height as well would attenuate normals twice.
 		}
 		return saturate(water);

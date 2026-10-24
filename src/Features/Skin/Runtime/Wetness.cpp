@@ -1,4 +1,5 @@
 #include "Features/Skin.h"
+#include "Features/WetnessEffects.h"
 #include "Globals.h"
 #include "State.h"
 #include <cmath>
@@ -75,13 +76,20 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 		            (staminaPercentage >= settings.StartSweat) ? 0.0f :
 		            (staminaPercentage <= settings.FullSweat)  ? 1.0f :
 		                                                         (settings.StartSweat - staminaPercentage) / sweatRange;
-		if (actor->IsInWater()) {
+		// Rain uses the same coat as swimming. WetFadeTime is the only dry.
+		// 4096 puts the shader waterline above the actor, so rain wets the whole body.
+		constexpr float kRainCoverage = 4096.0f;
+		const bool inWater = actor->IsInWater();
+		float waterline = 0.0f;
+		if (inWater) {
 			wetness.y = 2.0f;
 			const float waterHeight = GetWaterHeight(userData, actor->GetPosition());
-			wetness.w = std::max(0.0f, waterHeight - positionZ);
+			waterline = std::max(0.0f, waterHeight - positionZ);
+			wetness.w = waterline;
 		} else {
-			wetness.y = 0.0f;
-			wetness.w = 0.0f;
+			const float rain = globals::features::wetnessEffects.ActorRainWetness();
+			wetness.y = rain;
+			wetness.w = rain > 0.0f ? kRainCoverage : 0.0f;
 		}
 
 		if (inserted) {
@@ -104,8 +112,7 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 					wetness.w = cached.wetness.w;
 				}
 			} else if (cached.wetness.y > wetness.y) {
-				cached.wetness.y -= *globals::game::deltaTime / fadeTime;
-				cached.wetness.y = std::max(cached.wetness.y, 0.0f);
+				cached.wetness.y = std::max(wetness.y, cached.wetness.y - *globals::game::deltaTime / fadeTime);
 				wetness.y = cached.wetness.y;
 				if (wetness.y == 0.0f) {
 					wetness.w = 0.0f;
@@ -119,6 +126,10 @@ float4 Skin::GetWetness(RE::BSGeometry* geometry)
 				cached.wetness.w = wetness.w;
 			} else {
 				wetness.w = cached.wetness.w;
+			}
+			// A rain-coverage sentinel must not replace the swimming waterline.
+			if (inWater) {
+				wetness.w = waterline;
 			}
 			cached.wetness = wetness;
 		}

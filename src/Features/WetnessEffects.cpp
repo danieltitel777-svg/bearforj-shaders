@@ -59,7 +59,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	CharacterCoatIntensity,
 	EnableWetHair,
 	CharacterRainActivityMultiplier,
-	CharacterDryTime,
 	EnableWeaponRainDrops,
 	EnableSkinnedRainStreaks,
 	EnableArmorClothingDryingDrops,
@@ -100,8 +99,6 @@ static void SanitizeWallRainSettings(WetnessEffects::Settings& settings)
 	settings.CharacterSpotNormalStrength = clamp(settings.CharacterSpotNormalStrength, defaults.CharacterSpotNormalStrength, 0.0f, 1.0f);
 	settings.CharacterCoatIntensity = clamp(settings.CharacterCoatIntensity, defaults.CharacterCoatIntensity, 0.0f, 8.0f);
 	settings.CharacterRainActivityMultiplier = clamp(settings.CharacterRainActivityMultiplier, defaults.CharacterRainActivityMultiplier, 0.25f, 8.0f);
-	// Jiaye WetFadeTime slider is 0..50. Keep the same range; the shader clamps away from zero.
-	settings.CharacterDryTime = clamp(settings.CharacterDryTime, defaults.CharacterDryTime, 0.05f, 50.0f);
 	settings.CharacterSpotLifetime = clamp(settings.CharacterSpotLifetime, defaults.CharacterSpotLifetime, 0.2f, 20.0f);
 	settings.CharacterSpotInterval = clamp(settings.CharacterSpotInterval, defaults.CharacterSpotInterval, 0.2f, 20.0f);
 	settings.CharacterDropPause = clamp(settings.CharacterDropPause, defaults.CharacterDropPause, 0.0f, 1.0f);
@@ -509,13 +506,10 @@ void WetnessEffects::DrawBearforjWetnessSettings()
 			settings.EnableWetHair = wetHair;
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("wet_hair_tooltip"),
-				"Elemental Contact wet hair: clumped strands, darkening, and translucency from hair_sss.dds. Rain drops on hair stay with character rain drops. Off leaves Jiaye hair wetness without that look."));
+				"Wet look from the actor's Advanced Skin wetness. hair_sss.dds only shapes clumping and darkening. Drying time is Advanced Skin wetness fade time. Off leaves hair without that look."));
 		}
 
 		auto characterDisabled = Util::DisableGuard(!settings.EnableCharacterRainSpots);
-		ImGui::SliderFloat(T(TKEY("character_dry_time"), "Character dry time"), &settings.CharacterDryTime, 0.05f, 50.0f, "%.2f sec");
-		if (auto _tt = Util::HoverTooltipWrapper())
-			ImGui::Text("%s", T(TKEY("character_dry_time_tooltip"), "Seconds for character drops to dry. Default 10, Jiaye's WetFadeTime."));
 		ImGui::SliderFloat(T(TKEY("character_spot_lifetime"), "Drop lifetime"), &settings.CharacterSpotLifetime, 0.2f, 20.0f, "%.2f sec");
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text("%s", T(TKEY("character_spot_lifetime_tooltip"), "How long one character drop or streak cycle lasts. Default 3 seconds, from Open Shaders."));
@@ -1159,6 +1153,7 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 	data.settings.RaindropInterval = 1.0f / settings.RaindropInterval;
 	data.settings.RippleLifetime = settings.RaindropInterval / settings.RippleLifetime;
 	AdvanceRetainedWetness(data);
+	actorRainWetness = std::clamp(data.Raining, 0.0f, 1.0f);
 
 	return data;
 }
@@ -1181,14 +1176,6 @@ void WetnessEffects::AdvanceRetainedWetness(PerFrame& a_data) const
 		return std::max(target, retained - deltaSeconds * dryRate);
 	};
 
-	if (!settings.EnableWetnessEffects || !settings.EnableCharacterRainSpots) {
-		if (advance)
-			characterSurfaceWetness = 0.0f;
-	} else if (advance) {
-		const float weatherIntensity = std::sqrt(std::clamp(a_data.Wetness, 0.0f, 1.0f));
-		characterSurfaceWetness = approach(weatherIntensity, characterSurfaceWetness, deltaSeconds, settings.CharacterDryTime);
-	}
-
 	if (!settings.EnableWetnessEffects || !settings.EnableEnvironmentVerticalDrops) {
 		if (advance)
 			environmentSurfaceWetness = 0.0f;
@@ -1200,7 +1187,8 @@ void WetnessEffects::AdvanceRetainedWetness(PerFrame& a_data) const
 	a_data.CharacterImpactIntensity = settings.EnableWetnessEffects && settings.EnableCharacterRainSpots ?
 	                                      std::sqrt(std::clamp(a_data.Wetness, 0.0f, 1.0f)) :
 	                                      0.0f;
-	a_data.CharacterRetainedWetness = settings.EnableWetnessEffects && settings.EnableCharacterRainSpots ? characterSurfaceWetness : 0.0f;
+	// Actor drying is Advanced Skin wetness, not this weather-only coat.
+	a_data.CharacterRetainedWetness = 0.0f;
 	a_data.EnvironmentRetainedWetness = settings.EnableWetnessEffects && settings.EnableEnvironmentVerticalDrops ? environmentSurfaceWetness : 0.0f;
 	a_data.CharacterStatePad = 0.0f;
 }
@@ -1277,7 +1265,7 @@ void WetnessEffects::SaveSettings(json& o_json)
 void WetnessEffects::RestoreDefaultSettings()
 {
 	settings = {};
-	characterSurfaceWetness = 0.0f;
+	actorRainWetness = 0.0f;
 	environmentSurfaceWetness = 0.0f;
 	retainedWetnessFrame = 0xffffffffu;
 	climatePreset = defaultPreset;
