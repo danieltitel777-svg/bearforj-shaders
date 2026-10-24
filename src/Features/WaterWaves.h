@@ -45,12 +45,12 @@ struct WaterWaves : Feature
 		float TessRange = 2048.0f;
 		float Foam = 1.0f;
 		float Detail = 1.0f;
-		// Off restores the unshifted detail ripple. The height is the Gerstner jacobian, not a foam texture.
+		// Foam lace shifts by the foam.dds alpha. Off samples the foam flat.
 		bool FoamParallax = true;
 		// Elemental Contact beach surf. Off leaves that surf out. Foam on rocks, crests and currents stays.
 		bool ShoreContact = true;
-		// Foam lace shifts by the foam.dds alpha. Off samples the foam flat.
-		bool HeightParallax = true;
+		// Off restores the unshifted detail ripple. The height is the Gerstner jacobian, not a foam texture.
+		bool CrestParallax = true;
 	} settings;
 
 	virtual void PostPostLoad() override;

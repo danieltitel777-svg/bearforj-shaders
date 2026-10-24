@@ -57,7 +57,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	Detail,
 	FoamParallax,
 	ShoreContact,
-	HeightParallax)
+	CrestParallax)
 
 namespace
 {
@@ -174,7 +174,7 @@ void WaterWaves::DataLoaded()
 	Util::SetResourceName(flowSampler.get(), "WaterWaves Flow Sampler");
 
 	D3D11_BUFFER_DESC ecDesc{};
-	ecDesc.ByteWidth = 464;
+	ecDesc.ByteWidth = 192;
 	ecDesc.Usage = D3D11_USAGE_DYNAMIC;
 	ecDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	ecDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -358,7 +358,7 @@ void WaterWaves::ApplyShared(float& a_displacedHeight, float& a_cameraBelow, flo
 	a_foam = std::clamp(settings.Foam, 0.0f, 2.0f);
 	a_detail = std::clamp(settings.Detail, 0.0f, 2.0f);
 	// The shader reads a negative detail as "crest parallax off". Zero would lose the sign.
-	if (!settings.FoamParallax)
+	if (!settings.CrestParallax)
 		a_detail = -a_detail - 0.001f;
 	a_storm = std::clamp(weather.storm, 0.0f, 1.0f);
 	a_murk = std::clamp(weather.storm * 0.55f + rain * 0.85f, 0.0f, 1.0f);
@@ -712,13 +712,11 @@ namespace
 {
 	struct ECWaterGPU
 	{
-		float points[16][4]{};
-		float info[4]{};
 		float ei[7][4]{};
 		float cd[4][4]{};
 		float parallax[4]{};
 	};
-	static_assert(sizeof(ECWaterGPU) == 464);
+	static_assert(sizeof(ECWaterGPU) == 192);
 }
 
 void WaterWaves::BindElementalContact()
@@ -759,7 +757,7 @@ void WaterWaves::BindElementalContact()
 		data.cd[1][2] = 7.0f;
 		data.cd[1][3] = 0.08f;
 	}
-	const bool parallax = on && settings.HeightParallax && ecFoamHeightFile;
+	const bool parallax = on && settings.FoamParallax && ecFoamHeightFile;
 	data.parallax[0] = parallax ? 1.0f : 0.0f;
 	data.parallax[1] = 8.0f;
 	D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -813,20 +811,25 @@ void WaterWaves::DrawSettings()
 	BFUI::SliderFloat(T(TKEY("detail"), "Detail"), &settings.Detail, 0.0f, 2.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::Text("%s", T(TKEY("detail_tt"), "Fine ripples on top of the swells. Two rotated samples of one normal map, so the pattern does not tile."));
-	BFUI::Checkbox(T(TKEY("foam_parallax"), "Crest parallax"), &settings.FoamParallax);
+	BFUI::Checkbox(T(TKEY("crest_parallax"), "Crest parallax"), &settings.CrestParallax);
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::Text("%s", T(TKEY("foam_parallax_tt"), "Shifts the fine ripple by the folding crest, including on flowmap water. Off leaves that ripple where the original shader put it. This is not a foam.dds height map."));
+		ImGui::Text("%s", T(TKEY("crest_parallax_tt"), "Shifts the fine ripple by the folding crest, including on flowmap water. Off leaves that ripple where the original shader put it. This is not a foam.dds height map."));
 	BFUI::Checkbox(T(TKEY("shore_surf"), "Shore surf"), &settings.ShoreContact);
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::Text("%s", T(TKEY("shore_surf_tt"), "Elemental Contact waves and foam at the beach. Off leaves that surf out. Foam on rocks, crests and currents stays."));
-	BFUI::Checkbox(T(TKEY("height_parallax"), "Foam parallax"), &settings.HeightParallax);
+	BFUI::Checkbox(T(TKEY("foam_parallax"), "Foam parallax"), &settings.FoamParallax);
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::Text("%s", T(TKEY("height_parallax_tt"), "Shifts the foam lace by the foam height map, the alpha of foam.dds. Off samples the foam flat. Small wave detail stays the Gerstner ripple."));
+		ImGui::Text("%s", T(TKEY("foam_parallax_tt"), "Shifts the foam lace by the foam height map, the alpha of foam.dds. Off samples the foam flat. Small wave detail stays the Gerstner ripple."));
 }
 
 void WaterWaves::LoadSettings(json& o_json)
 {
 	settings = o_json;
+	// Older saves named the crest toggle FoamParallax and the foam toggle HeightParallax.
+	if (o_json.contains("HeightParallax") && !o_json.contains("CrestParallax")) {
+		settings.CrestParallax = o_json.value("FoamParallax", settings.CrestParallax);
+		settings.FoamParallax = o_json.value("HeightParallax", settings.FoamParallax);
+	}
 }
 
 void WaterWaves::SaveSettings(json& o_json)

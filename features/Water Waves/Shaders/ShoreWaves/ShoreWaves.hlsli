@@ -3,11 +3,9 @@
 #ifndef __SHOREWAVES_HLSLI__
 #define __SHOREWAVES_HLSLI__
 
-// Bound by the DLL on every water draw (v0.3). Unbound -> zeros -> no waterfalls, v0.2 defaults.
+// Bound by the DLL on every water draw. Unbound reads as zeros.
 cbuffer ShoreWavesWaterfallCB : register(b13)
 {
-	float4 WaterfallPoints[16];  // xyz camera-relative impact point, w radius (game units)
-	float4 WaterfallInfo;        // x = point count
 	float4 EI0, EI1, EI2, EI3;   // v0.3 live menu settings, see EISettings.hlsli
 	float4 EI4, EI5;             // v0.4: foam texture, surf (wave height / run-up / period)
 	float4 EIwPad6;              // EI6 slot of the shared GPUBlock (blood, unused by water)
@@ -189,10 +187,7 @@ namespace ShoreWaves
 	}
 }
 
-// ===================== River waves / rock foam / waterfall foam (added) =====================
-// Optional waterfall impact points, bound by the ActorGrime/DTD fork DLL (BSWaterShader hook).
-// Unbound -> zeros -> WaterfallInfo.x == 0 -> no effect.
-// (ShoreWavesWaterfallCB moved to the top of this file in v0.3)
+// River waves and rock foam.
 
 namespace ShoreWaves
 {
