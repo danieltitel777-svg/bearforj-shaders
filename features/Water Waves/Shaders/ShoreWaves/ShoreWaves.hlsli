@@ -285,6 +285,33 @@ namespace ShoreWaves
 		return saturate(saturate(band * strong * smoothstep(0.45, 0.8, n)) * 0.6 * EI_RockFoam);
 	}
 
+	// Foam around a body in the current. gradH points toward deeper water, so it points
+	// away from an actor or a rock that the depth buffer hits. x is foam to add:
+	// it piles up on the upstream face, runs along the sides, and spreads as it
+	// travels downstream. y is the calm band immediately behind the body.
+	float2 ObstacleWake(float h, float2 gradH, float2 flow, float2 pAbs, float time)
+	{
+		float2 o = 0;
+		float gl = length(gradH);
+		float fs = length(flow);
+		if (gl < 1e-4 || fs < 0.02 || h < 0.0)
+			return o;
+		float2 g = gradH / gl;
+		float2 f = flow / fs;
+		float into = saturate(dot(f, -g));
+		float away = saturate(dot(f, g));
+		float side = saturate(1.0 - abs(dot(f, g)));
+		float contact = 1.0 - smoothstep(2.0, 36.0, h);
+		float lee = (1.0 - smoothstep(1.0, 16.0, h)) * away;
+		float down = smoothstep(14.0, 40.0, h) * (1.0 - smoothstep(90.0, 240.0, h)) * away;
+		float front = into * contact * (0.65 + 0.35 * VNoise(pAbs / 8.0 - f * time * 10.0));
+		float around = side * contact * (0.45 + 0.55 * VNoise(pAbs / 20.0 - f * time * 28.0));
+		float spread = down * VNoise((pAbs - f * time * 45.0) / lerp(16.0, 80.0, saturate(h / 200.0)));
+		o.x = saturate(max(front, max(around * 0.9, spread * 0.6)));
+		o.y = saturate(lee);
+		return o;
+	}
+
 }
 #include "ShoreWaves/CDWater.hlsli"
 #endif

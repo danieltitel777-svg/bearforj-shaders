@@ -1508,8 +1508,7 @@ void ApplyCrestFoam(inout float3 color, inout float opacity, PS_INPUT input, flo
 	float upstream = 0.5;
 #	if defined(FLOWMAP)
 	{
-		// Same decode as GetFlowmapDataWorldSpace. Foam drifts with that current and
-		// piles up where the current runs into shallower water.
+		// Same decode as GetFlowmapDataWorldSpace. Foam drifts with that current.
 		FlowmapData worldFlow = GetFlowmapDataWorldSpace(input, float2(0, 0));
 		float flowLen = length(worldFlow.flowVector);
 		if (flowLen > 1.0e-4) {
@@ -1530,8 +1529,19 @@ void ApplyCrestFoam(inout float3 color, inout float opacity, PS_INPUT input, flo
 	float shore = saturate(contact * 1.7 - 0.28) * lerp(0.55, 1.0, n) * distFade;
 	float objectFoam = saturate(max(ring, contact * saturate(grad * 0.08) * 2.4)) * lerp(0.65, 1.0, n);
 #	if defined(FLOWMAP)
-	objectFoam *= lerp(0.35, 1.65, upstream);
 	shore *= lerp(0.75, 1.2, upstream);
+#	endif
+#	if !defined(VR) && !defined(STENCIL)
+	{
+		// Calm immediately behind an actor or object. foam.dds carries the pile
+		// on the front, the foam along the sides, and the spread downstream.
+		float2 flow2 = 0;
+#		if defined(FLOWMAP)
+		flow2 = GetFlowmapDataWorldSpace(input, float2(0, 0)).flowVector;
+#		endif
+		float2 wake = ShoreWaves::ObstacleWake(vertical, depthGrad, flow2, absXZ, SharedData::Timer);
+		objectFoam *= 1.0 - wake.y;
+	}
 #	endif
 	// Jacobian falls when a crest folds. That foam is not limited to storms or to non-flow water.
 	float crest = saturate((0.62 - input.WaveShape.z) * lerp(2.0, 6.5, storm)) * lerp(0.45, 1.0, n) * lerp(0.4, 1.0, storm);
@@ -1692,8 +1702,11 @@ PS_OUTPUT main(PS_INPUT input)
 	const bool cdHasFlow = false;
 #	endif
 	const float cdFoamFade = 1.0 - smoothstep(ShoreWaves::FoamFadeStart, ShoreWaves::FoamFadeEnd, cdCamDist);
-	const float cdFoam = cdHasDepth ? saturate(max(cdRun.foam, max(CDWater::ObstacleFoam(cdH, length(cdGrad), swWorldPos.xy, SharedData::Timer),
-	                                      CDWater::QuietFoam(cdH, shoreFlow, cdHasFlow, swWorldPos.xy, SharedData::Timer))) * cdFoamFade * EI_FoamStrength) : 0.0;
+	float2 ecWake = ShoreWaves::ObstacleWake(cdHasDepth ? cdH : 0.0, cdGrad, shoreFlow, swWorldPos.xy, SharedData::Timer);
+	float ecAround = cdHasDepth ? max(CDWater::ObstacleFoam(cdH, length(cdGrad), swWorldPos.xy, SharedData::Timer),
+		                          CDWater::QuietFoam(cdH, shoreFlow, cdHasFlow, swWorldPos.xy, SharedData::Timer)) : 0.0;
+	ecAround = saturate(max(ecAround * (1.0 - ecWake.y), ecWake.x));
+	const float cdFoam = cdHasDepth ? saturate(max(cdRun.foam, ecAround) * cdFoamFade * EI_FoamStrength) : 0.0;
 	const float3 cdFoamTint = CDWater::FoamTint(cdH);
 #endif
 // BEARFORJ_EC_WATER_END shore
@@ -2042,7 +2055,7 @@ PS_OUTPUT main(PS_INPUT input)
 	finalColor = lerp(finalColor, ShoreWaves::FoamColor * cdFoamTint * shoreWaves.foamTint * saturate(SharedData::DirLightColor.xyz * 0.6 + 0.3), shoreWaves.foam * shoreMask);
 	{
 		float3 flowLace;
-		float flowVis = ShoreWaves::TexturedFoam(extraFoam, swWorldPos.xy, SharedData::Timer, 0.0, flowLace);
+		float flowVis = ShoreWaves::TexturedFoam(saturate(extraFoam * (1.0 - ecWake.y)), swWorldPos.xy, SharedData::Timer, 0.0, flowLace);
 		finalColor = lerp(finalColor, ShoreWaves::FoamColor * cdFoamTint * flowLace * saturate(SharedData::DirLightColor.xyz * 0.6 + 0.3), flowVis);
 	}
 	{
