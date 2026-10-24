@@ -64,23 +64,23 @@ int main()
 	sea.windSpeed = 0.8f;
 	sea.windAngle = 0.4f;
 	sea.time = 12.0f;
-	const Sample far = Evaluate(0, 0, kFadeEnd, 0, sea, false);
-	Expect(far.height == 0.0f && far.dx == 0.0f && far.slopeX == 0.0f, "height is 0 at the LOD fade end");
+	const Sample farSample = Evaluate(0, 0, kFadeEnd, 0, sea, false);
+	Expect(farSample.height == 0.0f && farSample.dx == 0.0f && farSample.slopeX == 0.0f, "height is 0 at the LOD fade end");
 	const Sample farNormal = Evaluate(0, 0, kNormalFadeEnd, 0, sea, true);
 	Expect(farNormal.slopeX == 0.0f && farNormal.height == 0.0f, "normal fade is 0 at its own end");
-	const Sample near = Evaluate(1000.0f, -250.0f, 30.0f, -10.0f, sea, false);
-	Expect(std::isfinite(near.height) && std::isfinite(near.dx) && std::isfinite(near.slopeY), "near sample is finite");
-	Expect(std::fabs(near.height) > 0.01f, "near sample actually moves");
+	const Sample nearSample = Evaluate(1000.0f, -250.0f, 30.0f, -10.0f, sea, false);
+	Expect(std::isfinite(nearSample.height) && std::isfinite(nearSample.dx) && std::isfinite(nearSample.slopeY), "near sample is finite");
+	Expect(std::fabs(nearSample.height) > 0.01f, "near sample actually moves");
 	const Sample again = Evaluate(1000.0f, -250.0f, 30.0f, -10.0f, sea, false);
-	Expect(again.height == near.height && again.dx == near.dx, "the same point is stable");
+	Expect(again.height == nearSample.height && again.dx == nearSample.dx, "the same point is stable");
 
 	// A domain-shader corner is Offset(plane). The vertex shader writes that same Offset(plane).
 	// This test locks the CPU function the vertex and domain shaders both mirror.
 	const float damp = ShoreDamp(50.0f, 160.0f);
-	const float corner = near.height * damp;
+	const float corner = nearSample.height * damp;
 	const float domainCorner = Evaluate(1000.0f, -250.0f, 30.0f, -10.0f, sea, false).height * damp;
 	Expect(corner == domainCorner, "factor-1 corner matches the vertex displacement");
-	Expect(near.dx * ShoreDamp(4.0f, 160.0f) == 0.0f && near.dy * ShoreDamp(0.0f, 160.0f) == 0.0f, "horizontal shore offset is 0 in the contact band");
+	Expect(nearSample.dx * ShoreDamp(4.0f, 160.0f) == 0.0f && nearSample.dy * ShoreDamp(0.0f, 160.0f) == 0.0f, "horizontal shore offset is 0 in the contact band");
 
 	// 2x2 land grid. Texel (x,y) is the land Z at origin + (x,y)*cell. CPU and GPU use this same sample.
 	const float land[4] = { 100.0f, 110.0f, 120.0f, 130.0f };

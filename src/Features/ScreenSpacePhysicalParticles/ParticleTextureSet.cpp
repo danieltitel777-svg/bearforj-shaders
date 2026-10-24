@@ -61,7 +61,8 @@ namespace ScreenSpacePhysicalParticles
 		{
 			const char* leaves = kParticleTexturePaths[0];
 			const char* sparks = kParticleTexturePaths[1];
-			const char* small = kParticleTexturePaths[2];
+			// rpcndr.h defines `small` as char, so this atlas pointer cannot use that name.
+			const char* smallTex = kParticleTexturePaths[2];
 			std::vector<ParticleTextureSet::Slice> slices;
 			const auto add4 = [&](const char* a_groupName, const char* a_prefix, const char* a_species, const char* a_region, const char* a_path, std::uint32_t a_base, std::uint32_t a_grid, bool a_tint) {
 				for (std::uint32_t frame = 0; frame < 4; ++frame) {
@@ -78,17 +79,17 @@ namespace ScreenSpacePhysicalParticles
 			add4("leaves", "leaf_birch_", "birch", "", leaves, 4, 4, true);
 			add4("leaves", "leaf_aspen_", "aspen", "", leaves, 8, 4, true);
 			add4("leaves", "leaf_maple_", "maple", "", leaves, 12, 4, true);
-			add4("leaves", "needles_pine_hjaal_", "pine", "pine_hjaal", small, 10, 4, false);
+			add4("leaves", "needles_pine_hjaal_", "pine", "pine_hjaal", smallTex, 10, 4, false);
 			add4("sparks", "spark_", "", "", sparks, 0, 2, true);
-			AddCell(slices, a_group, "fluff", "fluff_01", "", "01", "", small, 0, 4, true);
-			AddCell(slices, a_group, "fluff", "fluff_02", "", "02", "", small, 1, 4, true);
-			AddCell(slices, a_group, "dandelions", "dandelion_01", "", "01", "", small, 14, 4, true);
-			AddCell(slices, a_group, "dandelions", "dandelion_02", "", "02", "", small, 15, 4, true);
-			AddCell(slices, a_group, "spores", "spore_01", "", "01", "", small, 2, 4, true);
-			AddCell(slices, a_group, "spores", "spore_cluster_01", "", "01", "", small, 3, 4, true);
-			AddCell(slices, a_group, "fireflies", "firefly_01", "", "01", "", small, 4, 4, true);
-			AddCell(slices, a_group, "fireflies", "firefly_glow_01", "", "01", "", small, 5, 4, true);
-			add4("moths", "moth_frame_", "", "", small, 6, 4, true);
+			AddCell(slices, a_group, "fluff", "fluff_01", "", "01", "", smallTex, 0, 4, true);
+			AddCell(slices, a_group, "fluff", "fluff_02", "", "02", "", smallTex, 1, 4, true);
+			AddCell(slices, a_group, "dandelions", "dandelion_01", "", "01", "", smallTex, 14, 4, true);
+			AddCell(slices, a_group, "dandelions", "dandelion_02", "", "02", "", smallTex, 15, 4, true);
+			AddCell(slices, a_group, "spores", "spore_01", "", "01", "", smallTex, 2, 4, true);
+			AddCell(slices, a_group, "spores", "spore_cluster_01", "", "01", "", smallTex, 3, 4, true);
+			AddCell(slices, a_group, "fireflies", "firefly_01", "", "01", "", smallTex, 4, 4, true);
+			AddCell(slices, a_group, "fireflies", "firefly_glow_01", "", "01", "", smallTex, 5, 4, true);
+			add4("moths", "moth_frame_", "", "", smallTex, 6, 4, true);
 			return slices;
 		}
 
