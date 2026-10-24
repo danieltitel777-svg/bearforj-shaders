@@ -1079,7 +1079,7 @@ float SnowDeformation::GroundCoverScale(const RE::NiPoint3& a_position) const
 	// tree, so the corner is cellX * 4096, the same grid Util::WorldToCell uses.
 	if (auto* cell = tes->GetCell(a_position); cell && cell->IsExteriorCell()) {
 		if (auto* coordinates = cell->GetCoordinates()) {
-			if (auto* land = cell->GetLand(); land && land->loadedData) {
+			if (auto* land = cell->GetRuntimeData().cellLand; land && land->loadedData) {
 				const auto& data = *land->loadedData;
 				const float localX = a_position.x - static_cast<float>(coordinates->cellX) * 4096.0f;
 				const float localY = a_position.y - static_cast<float>(coordinates->cellY) * 4096.0f;
