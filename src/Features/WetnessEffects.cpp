@@ -541,7 +541,7 @@ void WetnessEffects::DrawBearforjWetnessSettings()
 			settings.EnableEnvironmentVerticalDrops = verticalDrops;
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T(TKEY("environment_vertical_drops_tooltip"),
-				"Keeps a drying timer for vertical surfaces. This package does not add a separate wall-rain flow; ordinary wetness still covers those surfaces."));
+				"Rain streaks run down steep surfaces that are open to the sky, and they keep drying after the rain stops. Flat surfaces keep the ordinary wetness."));
 		}
 		auto environmentDisabled = Util::DisableGuard(!settings.EnableEnvironmentVerticalDrops);
 		ImGui::SliderFloat(T(TKEY("environment_drop_dry_time"), "Environment drop dry time"), &settings.EnvironmentDropDryTime, 0.05f, 50.0f, "%.2f sec");

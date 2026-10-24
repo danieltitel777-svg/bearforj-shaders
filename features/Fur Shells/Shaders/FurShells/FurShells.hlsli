@@ -20,6 +20,9 @@ namespace FurShells
 		float RootTest;
 		float Density;
 		float TipWeight;
+		// Advanced Skin rain coat (Skin::GetWetness .y), packed in the former pad before Wind.
+		float ActorWetness;
+		float ActorWetnessPad;
 		float4 Wind;
 		float WetStrength;
 		float3 Inertia;

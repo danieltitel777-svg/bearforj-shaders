@@ -1,6 +1,7 @@
 #include "FurShells.h"
 
 #include "Features/FurShells/AssetScan.h"
+#include "Features/Skin.h"
 #include "Globals.h"
 #include "GpuPass.h"
 #include "I18n/I18n.h"
@@ -885,6 +886,7 @@ void FurShells::BeginPass(RE::BSShader* a_shader, RE::BSRenderPass* a_pass)
 	PerPass perPass{ values.Length, static_cast<float>(shells), values.Droop, values.RootThreshold, values.TipThreshold, values.RootDarkening, values.ShellColor, 0.0f, density, tipWeight };
 	perPass.Wind = float4(wind.x, wind.y, wind.z, 0.0f);
 	perPass.WetStrength = settings.WetStrength;
+	perPass.ActorWetness = std::clamp(globals::features::skin.GetWetness(geometry).y, 0.0f, 1.0f);
 	const float3 inertia = GetInertia(geometry, values.Length, values.Droop);
 	perPass.Inertia = inertia;
 	FillTouch(perPass, geometry);

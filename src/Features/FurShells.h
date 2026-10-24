@@ -119,7 +119,8 @@ private:
 		float RootTest;
 		float Density;
 		float TipWeight;
-		float Pad0 = 0.0f;
+		// Advanced Skin rain coat from Skin::GetWetness, saturated. Matches ActorWetness in the shader.
+		float ActorWetness = 0.0f;
 		float Pad1 = 0.0f;
 		float4 Wind;
 		float WetStrength;

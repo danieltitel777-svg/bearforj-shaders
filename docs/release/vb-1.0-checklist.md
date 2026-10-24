@@ -24,10 +24,17 @@ Branch `bearforj/vb-1.0` from `bearforj/1-base` (`967ea4c`). Feature histories w
 - Actor snow does not add FeetCoat leg snow. Mud (`feet.y`) and `EICold::Snow` stay. Rain #610 and `RainDrop.png` stay.
 - No OIT, OptiScaler, old SSPP, WorldSnow, old DTD, Windswept, needles-as-snow, snowdrift, roof drops, embers, or wind reaction.
 
-## Not in the shader
+## Shader behavior added on this branch
 
-- Environment vertical-drop shading from the wetness branch is not in Bottled's wetness shader. There is no wall-rain flow to attach it to. The settings and the drying timer are packed. The menu says ordinary wetness still covers those surfaces.
-- Volumetric puddles do not shift the bottom albedo. Bottled wetness has no `GetParallaxSampleOffset`. Edge darkening and the raindrop normal are applied.
+- Environment vertical drops use the wetness-branch streak shading. `EnvironmentRetainedWetness` and the slope sliders drive it. Drop size, speed, density, layering, and normal strength stay at that branch's defaults, because this constant buffer has no wall-rain sliders. Character rain surfaces are skipped. Flat surfaces keep ordinary wetness.
+- Volumetric puddle floors shift the sampled albedo with a local `GetParallaxSampleOffset`. Edge darkening and the raindrop normal stay.
+- Fur wetness reads Advanced Skin's shared rain coat (`Skin::GetWetness` `.y`, saturated) from the fur pass buffer. It no longer uses the global Skin Wetness slider.
+
+## Still absent
+
+- `features/Terrain Variation` has no `Default.json` on this branch, `bearforj/1-base`, `bearforj-0.6.4`, or `bearforj-0.6.7`. The feature does not load that file.
+- No shader, source file, or commit in this repository contains `Lighting::40100001`.
+- Physical Sky is not in the vb 1.0 integration list, and no shader here samples a Physical Sky LUT. The feature was not ported.
 - Source PNGs are 2048. Atlas cells are 512 or 1024. `tools/bearforj/build_particle_atlases.py` integer-box downscales them. Pixel content is not redrawn.
 
 ## Slots

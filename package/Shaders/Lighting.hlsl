@@ -48,7 +48,7 @@
 float GetFurWet()
 {
 #	if defined(WETNESS_EFFECTS) && !defined(HAIR) && !defined(EYE) && !defined(LANDSCAPE)
-	return FurShells::GetWetFactor(SharedData::wetnessEffectsSettings.SkinWetness, true);
+	return FurShells::GetWetFactor(FurShells::ActorWetness, true);
 #	else
 	return 0.0;
 #	endif
@@ -2755,6 +2755,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	// leaves puddle at the original value above. Roofs stay dry because wetnessOcclusion is skylight.
 #		if defined(LANDSCAPE) && defined(EMAT) && defined(SKYLIGHTING) && !defined(SKINNED)
 	float volumetricEdge = 0.0;
+	float volumetricBottom = 0.0;
+	float2 volumetricUvOffset = 0.0;
 	[branch] if (SharedData::wetnessEffectsSettings.EnableVolumetricPuddles != 0 && LANDSCAPE_PARALLAX_ENABLED) {
 		float puddleRelief = ExtendedMaterials::TerrainMaxWeightedHeightScale(input, displacementParams);
 		[branch] if (puddleRelief > 0.01 && flatnessAmount > 0.0 && wetnessOcclusion >= 0.35) {
@@ -2769,6 +2771,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 				float rainFilm = wetness * saturate(wetnessOcclusion * 2.0) * nearFactor;
 				puddle = lerp(rainFilm, max(rainFilm, puddleVolume.coverage), puddleVolume.coverage);
 				volumetricEdge = puddleVolume.edgeBand;
+				volumetricBottom = puddleVolume.bottomAmount;
+				volumetricUvOffset = puddleVolume.uvOffset;
 				float4 puddleDrop = WetnessEffects::TexPuddleRaindrops.SampleLevel(SampColorSampler, puddleVolume.raindropUv, 0);
 				float3 puddleDropNormal = puddleDrop.rgb * 2.0 - 1.0;
 				puddleDropNormal.xy *= saturate(puddleDrop.a);
@@ -2796,6 +2800,16 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	// Apply ripple normal effects
 	float3 rippleNormal = normalize(lerp(float3(0, 0, 1), raindropInfo.xyz, lerp(flatnessAmount, 1.0, 0.5)));
 	wetnessNormal = ReorientNormal(rippleNormal, wetnessNormal);
+
+#		if !defined(SKIN) && !defined(HAIR) && !defined(EYE)
+	bool applyEnvironmentDrops = true;
+#			if defined(CHARACTER_RAIN_SURFACE)
+	applyEnvironmentDrops = !characterRainSurface;
+#			endif
+	float3 environmentDropDx = ddx(input.WorldPosition.xyz);
+	float3 environmentDropDy = ddy(input.WorldPosition.xyz);
+	WetnessEffects::ApplyEnvironmentVerticalDrops(input.WorldPosition.xyz, vertexNormal.xyz, wetnessOcclusion, nearFactor, waterHeight, environmentDropDx, environmentDropDy, wetnessNormal, wetnessGlossinessAlbedo, wetnessGlossinessSpecular, applyEnvironmentDrops);
+#		endif
 
 #		if defined(CS_SKIN_SHADING)
 	if (skinEnabled && (skinWetness > 0.0f)) {
@@ -3372,6 +3386,16 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float wetnessDarkeningAmount = porosity * wetnessGlossinessAlbedo;
 	material.BaseColor = lerp(material.BaseColor, pow(abs(material.BaseColor), 1.0 + wetnessDarkeningAmount), 0.5);
 #		if defined(LANDSCAPE) && defined(EMAT) && defined(SKYLIGHTING) && !defined(SKINNED)
+	float2 puddleUvDx = ddx(uv);
+	float2 puddleUvDy = ddy(uv);
+	float3 puddleAlbedoDx = ddx(material.BaseColor);
+	float3 puddleAlbedoDy = ddy(material.BaseColor);
+	[branch] if (volumetricBottom > 0.001)
+	{
+		float2 bottomShift = WetnessEffects::GetParallaxSampleOffset(volumetricUvOffset, puddleUvDx, puddleUvDy, volumetricBottom);
+		float3 puddleBottom = material.BaseColor + puddleAlbedoDx * bottomShift.x + puddleAlbedoDy * bottomShift.y;
+		material.BaseColor = lerp(material.BaseColor, max(puddleBottom, 0.0), volumetricBottom);
+	}
 	material.BaseColor *= lerp(1.0, 1.0 - SharedData::wetnessEffectsSettings.VolumetricPuddleEdgeDarkening, volumetricEdge);
 #		endif
 #		endif

@@ -4078,7 +4078,7 @@
     "feature.wetness_effects.environment_slope_full": "Slope where drops are full",
     "feature.wetness_effects.environment_slope_start": "Slope where drops start",
     "feature.wetness_effects.environment_vertical_drops": "Vertical surface drops",
-    "feature.wetness_effects.environment_vertical_drops_tooltip": "Keeps a drying timer for vertical surfaces. This package does not add a separate wall-rain flow; ordinary wetness still covers those surfaces.",
+    "feature.wetness_effects.environment_vertical_drops_tooltip": "Rain streaks run down steep surfaces that are open to the sky, and they keep drying after the rain stops. Flat surfaces keep the ordinary wetness.",
     "feature.wetness_effects.grass_wet_roughness": "Grass Wet Roughness",
     "feature.wetness_effects.grass_wet_roughness_tooltip": "Roughness wet grass blades fall to in rain. Lower values give a sharper, wetter sheen.",
     "feature.wetness_effects.grid_size": "Grid Size",
