@@ -5,7 +5,9 @@
 #include "HDRDisplay.h"
 #include "Hooks.h"
 #include "PostProcessing.h"
+#include "Precipitation.h"
 #include "RenderDoc.h"
+#include "ReverseZ.h"
 #include "State.h"
 #include "Upscaling/DX12SwapChain.h"
 #include "Upscaling/FidelityFX.h"
@@ -30,6 +32,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	upscaleMethodNoDLSS,
 	qualityMode,
 	frameLimitMode,
+	antiLag2FPSLimit,
 	frameGenerationMode,
 	frameGenerationForceEnable,
 	frameGenerationAllowInMenus,
@@ -396,6 +399,13 @@ void Upscaling::DrawSettings()
 					"When generation pauses, caps rendered FPS instead."));
 		}
 
+		int displayedFPS = static_cast<int>(settings.antiLag2FPSLimit * 2);
+		if (ImGui::SliderInt("Gameplay FPS limit (including FG)", &displayedFPS,
+				static_cast<int>(kGameplayMinRenderedFPSLimit * 2), static_cast<int>(kGameplayMaxRenderedFPSLimit * 2), "%d FPS", ImGuiSliderFlags_AlwaysClamp))
+			settings.antiLag2FPSLimit = static_cast<uint>((displayedFPS + 1) / 2);
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::TextUnformatted("Gameplay only, rounded to even displayed FPS with AMD FSR 2x generation. Anti-Lag 2 runs first; a pre-input timer supplies any remaining frame budget. Menus and loading screens use 60 rendered FPS. Without driver support, the timer enforces the cap.");
+
 		ImGui::SeparatorText(T(TKEY("fg_shared_options"), "Options"));
 		{
 			auto disabled = Util::DisableGuard(!fgEnabled);
@@ -524,6 +534,7 @@ void Upscaling::LoadSettings(json& o_json)
 	// detect absence explicitly so a pre-existing config still runs the migration.
 	const bool hadFsr4SchemaVersion = o_json.contains("fsr4RuntimeSelectionSchemaVersion");
 	settings = o_json;
+	settings.antiLag2FPSLimit = std::clamp(settings.antiLag2FPSLimit, kGameplayMinRenderedFPSLimit, kGameplayMaxRenderedFPSLimit);
 	if (!hadFsr4SchemaVersion)
 		settings.fsr4RuntimeSelectionSchemaVersion = 0;
 	ApplyLegacyFsr4RuntimeSelectionMigration(settings, fidelityFX.GetFsr4AdapterSupport());
@@ -627,8 +638,8 @@ void Upscaling::PostPostLoad()
 	// Patches facegen texture generation to not use dynamic resolution
 	stl::detour_thunk<BSFaceGenManager_UpdatePendingCustomizationTextures>(REL::RelocationID(26455, 27041));
 
-	// Patches precipitation camera to not use dynamic resolution
-	stl::write_thunk_call<Main_RenderPrecipitation>(REL::RelocationID(35560, 36559).address() + Util::VersionedRelocation::Select(0x3A1, 0x3A1, 0x3BF));
+	// Shared precipitation hook also locks dynamic resolution for the precip camera.
+	Precipitation::Install();
 
 	// Forces FXAA off
 	stl::detour_thunk<BSImageSpace_Init_FXAA>(REL::RelocationID(98974, 105626));
@@ -1779,7 +1790,7 @@ void Upscaling::MenuManagerDrawInterfaceStartHook::thunk(int64_t a1)
 	// When FG is active, its SetUIBuffer redirects to uiBufferWrapped instead
 	// When HDR Display is not loaded, skip entirely so vanilla UI renders to kFRAMEBUFFER
 	auto& upscaling = globals::features::upscaling;
-	if (!upscaling.d3d12SwapChainActive && globals::features::hdrDisplay.loaded) {
+	if (!upscaling.d3d12SwapChainActive && globals::features::hdrDisplay.IsEnabled()) {
 		globals::features::hdrDisplay.SetUIBuffer();
 	}
 
@@ -1789,13 +1800,15 @@ void Upscaling::MenuManagerDrawInterfaceStartHook::thunk(int64_t a1)
 void Upscaling::Main_PostProcessing::thunk(RE::ImageSpaceManager* a_this, uint32_t a3, RE::RENDER_TARGET a_target, void* a_4, bool a_5)
 {
 	auto& postProcessing = globals::features::postProcessing;
-	if (postProcessing.loaded) {
+	if (postProcessing.IsEnabled()) {
 		postProcessing.DrawBeforeUpscaling();
 	}
 
 	auto& upscaling = globals::features::upscaling;
 	auto upscaleMethod = upscaling.GetUpscaleMethod();
 
+	upscaling.frameGenerationSceneVisited = true;
+	upscaling.frameGenerationNeutralGuides = false;
 	const bool prepareFrameGeneration = upscaling.ShouldPrepareFrameGeneration();
 	if (prepareFrameGeneration && postProcessing.loaded)
 		postProcessing.ClearBorderMotionVectorsForFrameGen();
@@ -1811,7 +1824,7 @@ void Upscaling::Main_PostProcessing::thunk(RE::ImageSpaceManager* a_this, uint32
 
 	// Redirect kFRAMEBUFFER to float texture before ISHDR runs so HDR values >1.0 survive
 	// When HDR Display is not loaded, ISHDR writes to vanilla kFRAMEBUFFER (SDR path)
-	bool hdrLoaded = globals::features::hdrDisplay.loaded;
+	bool hdrLoaded = globals::features::hdrDisplay.IsEnabled();
 	if (hdrLoaded)
 		globals::features::hdrDisplay.RedirectFramebuffer();
 
@@ -1824,12 +1837,34 @@ void Upscaling::Main_PostProcessing::thunk(RE::ImageSpaceManager* a_this, uint32
 	Util::SetTemporal(false);
 }
 
-void Upscaling::Main_RenderPrecipitation::thunk()
+void Upscaling::OnBeforeInputPoll()
 {
-	auto& runtimeData = globals::game::graphicsState->GetRuntimeData();
-	runtimeData.dynamicResolutionLock = 1;
-	func();
-	runtimeData.dynamicResolutionLock = 0;
+	if (!d3d12SwapChainActive)
+		return;
+	auto* ui = globals::game::ui;
+	const bool gameplay = ui && !ui->GameIsPaused() && !ui->IsMenuOpen(RE::DialogueMenu::MENU_NAME) &&
+	                      !ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME) && !ui->IsMenuOpen(RE::MainMenu::MENU_NAME);
+	const bool frameGeneration = settings.frameGenerationMode != 0;
+	const auto gameplayLimit = std::clamp(settings.antiLag2FPSLimit, kGameplayMinRenderedFPSLimit, kGameplayMaxRenderedFPSLimit);
+	const auto fpsLimit = gameplay ? (frameGeneration ? gameplayLimit : gameplayLimit * 2) : kAntiLag2RenderedFPSLimit;
+	dx12SwapChain.UpdateAntiLag2BeforeInput(fpsLimit, gameplay && frameGeneration);
+}
+
+void Upscaling::PrepareMenuFrameGeneration()
+{
+	if (frameGenerationSceneVisited || frameGenerationPrepared || !ShouldPrepareFrameGeneration())
+		return;
+	auto* depth = dx12SwapChain.depthBufferShared12;
+	auto* motion = dx12SwapChain.motionVectorBufferShared12;
+	if (!depth || !motion || !depth->rtv || !motion->rtv)
+		return;
+	const float farDepth = globals::features::reverseZ.IsActive() ? 0.0f : 1.0f;
+	const float depthClear[4]{ farDepth, 0, 0, 0 };
+	const float motionClear[4]{};
+	globals::d3d::context->ClearRenderTargetView(depth->rtv, depthClear);
+	globals::d3d::context->ClearRenderTargetView(motion->rtv, motionClear);
+	frameGenerationNeutralGuides = true;
+	frameGenerationPrepared = true;
 }
 
 void Upscaling::BSFaceGenManager_UpdatePendingCustomizationTextures::thunk()

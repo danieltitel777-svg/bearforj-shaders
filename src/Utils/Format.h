@@ -1,6 +1,7 @@
 // string and printing related helpers
 
 #pragma once
+#include "StringUtils.h"
 #include <string_view>
 
 namespace Util
@@ -117,9 +118,6 @@ namespace Util
 	 * @return The remaining frame time not accounted for by measured components
 	 */
 	float CalculateOtherFrameTime(float totalFrameTime, float measuredSum);
-
-	/** Case-insensitive equality for two strings. */
-	bool IEquals(std::string_view a, std::string_view b);
 
 	/** @brief ASCII-lowercased copy of the string. */
 	std::string ToLower(std::string text);

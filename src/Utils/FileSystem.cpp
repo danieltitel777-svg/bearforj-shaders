@@ -258,6 +258,28 @@ namespace Util
 			return GetShadersRealPath() / "Features";
 		}
 
+		bool SafeExists(const std::filesystem::path& path)
+		{
+			std::error_code ec;
+			const bool result = std::filesystem::exists(path, ec);
+			if (ec) {
+				logger::warn("Failed to check existence of '{}': {}", path.string(), ec.message());
+				return false;
+			}
+			return result;
+		}
+
+		std::filesystem::path SafeRelative(const std::filesystem::path& path, const std::filesystem::path& base)
+		{
+			std::error_code ec;
+			auto result = std::filesystem::relative(path, base, ec);
+			if (ec) {
+				logger::warn("Failed to resolve '{}' relative to '{}': {}", path.string(), base.string(), ec.message());
+				return path;
+			}
+			return result;
+		}
+
 		std::filesystem::path GetRealPathFromDataRelative(const std::filesystem::path& dataRelativePath)
 		{
 			std::filesystem::path root = GetRootRealPath();

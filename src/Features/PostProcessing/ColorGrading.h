@@ -105,6 +105,7 @@ struct ColorGrading : public PostProcessFeature
 		float4 asccdl[3];
 		float4 liftgammagain[3];  // lift，gamma，gain
 		float4 inOutGamma;        // .z = input gamma, .w = output gamma
+		float4 inputLuminance;
 		float4 oklchSaturation;
 		float4 oklchColorMixer[7];
 		float4 contrast;
@@ -174,7 +175,8 @@ struct ColorGrading : public PostProcessFeature
 	virtual void DrawSettings() override;
 
 	virtual void Draw(TextureInfo&) override;
-	void UpdateColorSpaceTransforms(bool hdrEnabled = false);
+	void UpdateColorSpaceTransforms(bool hdrEnabled = false, Gamut inputGamut = Gamut::Rec709);
+	PostProcessFeature::Gamut GetDisplayGamut() const;
 
 	/**
 	 * @brief True when HDR Display is on, tonemapping is enabled, the active tonemapper is

@@ -33,7 +33,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float volumetricLightingPower = VLSourceTex.Sample(VLSourceSampler, screenPosition).x;
 	float3 volumetricLightingColor = VolumetricLightingColor.xyz;
 #		if defined(EFFECTS11)
-	if (SharedData::enbSettings.Enable) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::Effects11Feature) && SharedData::enbSettings.Enable)) {
 		// Preset intensities are far above vanilla, so the accumulated power must be capped or the rays become a flat veil
 		volumetricLightingPower = saturate(volumetricLightingPower);
 		// The game blends the custom colour with the sunlight, which Effects 11 has graded as direct lighting; rebuild the sunlight share from the ungraded sunlight

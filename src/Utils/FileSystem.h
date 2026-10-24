@@ -230,6 +230,12 @@ namespace Util
 		 */
 		std::filesystem::path GetRealPathFromDataRelative(const std::filesystem::path& dataRelativePath);
 
+		/** @brief std::filesystem::exists that returns false and logs when the query itself fails. */
+		bool SafeExists(const std::filesystem::path& path);
+
+		/** @brief std::filesystem::relative that returns the original path and logs when resolution fails. */
+		std::filesystem::path SafeRelative(const std::filesystem::path& path, const std::filesystem::path& base);
+
 		/**
 		 * Returns the path to the plugin log file in the default SKSE logging folder.
 		 * @return Documents / "My Games" / "Skyrim..." / "SKSE" / "BearforjShaders.log"

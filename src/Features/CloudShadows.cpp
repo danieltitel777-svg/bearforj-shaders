@@ -44,7 +44,7 @@ void CloudShadows::RestoreDefaultSettings()
 
 CloudShadows::Settings CloudShadows::GetCommonBufferData()
 {
-	if (!loaded)
+	if (!IsEnabled())
 		return settings;
 
 	auto data = settings;

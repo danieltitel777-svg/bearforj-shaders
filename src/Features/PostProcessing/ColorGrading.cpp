@@ -84,7 +84,7 @@ bool exposureSlider(float* val)
 void drawHDRStatus()
 {
 	auto& hdr = globals::features::hdrDisplay;
-	if (hdr.loaded && hdr.settings.enableHDR) {
+	if (hdr.IsEnabled() && hdr.settings.enableHDR) {
 		Icons::Text(Icons::TI(ICON_TI_CHECK));
 		ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
 		ImGui::TextColored(Util::Colors::GetSuccess(), "%s",
@@ -424,7 +424,7 @@ void ColorGrading::DrawSettings()
 	ImGui::Checkbox(T(TKEY("enable_tonemapping"), "Enable Tonemapping"), &settings.enableTonemap);
 	if (settings.enableTonemap) {
 		auto& hdrRef = globals::features::hdrDisplay;
-		const bool hdrActive = hdrRef.loaded && hdrRef.settings.enableHDR;
+		const bool hdrActive = hdrRef.IsEnabled() && hdrRef.settings.enableHDR;
 
 		if (ImGui::Checkbox(T(TKEY("use_open_drt"), "Use OpenDRT"), &settings.useOpenDrt))
 			recompileFlag = true;
@@ -611,7 +611,7 @@ void ColorGrading::DrawSettings()
 	{
 		auto& spaces = getAvailableColorSpaces();
 		auto& hdr = globals::features::hdrDisplay;
-		const bool hdrEnabled = hdr.loaded && hdr.settings.enableHDR;
+		const bool hdrEnabled = hdr.IsEnabled() && hdr.settings.enableHDR;
 
 		constexpr int kHDRColorSpace = 2;  // BT2020
 		constexpr int kSDRColorSpace = 0;  // sRGB / BT709 gamut
@@ -625,7 +625,7 @@ void ColorGrading::DrawSettings()
 		if (auto _tt = Util::HoverTooltipWrapper())
 			ImGui::Text(T(TKEY("output_color_space_tooltip"), "Output switches automatically: SDR -> sRGB, HDR -> BT2020."));
 
-		UpdateColorSpaceTransforms(hdrEnabled);
+		UpdateColorSpaceTransforms(hdrEnabled, wideGamutActive ? Gamut::ACEScg : Gamut::Rec709);
 	}
 
 	if (ImGui::Button(T(TKEY("save_lut_and_output_image"), "Save LUT and Output Image"))) {
@@ -713,24 +713,25 @@ void ColorGrading::SaveSettings(json& o_json)
 	o_json["ODRT2"] = part2;
 }
 
-void ColorGrading::UpdateColorSpaceTransforms(bool hdrEnabled)
+void ColorGrading::UpdateColorSpaceTransforms(bool hdrEnabled, Gamut inputGamut)
 {
 	auto& spaces = getAvailableColorSpaces();
 	settings.processColorSpace = std::clamp(settings.processColorSpace, 0, static_cast<int>(spaces.size()) - 1);
 
 	auto& tonemappers = TonemapperInfo::GetTonemappers();
 
-	// Auto-detect input color space: ACEScg when wide gamut mode is active, otherwise sRGB
-	const bool wideGamutActive = globals::features::linearLighting.IsACEScgActive();
-	const int kInputColorSpace = wideGamutActive ? 5 : 0;  // 5 = ACEScg, 0 = sRGB
-	constexpr int kHDRColorSpace = 2;                      // BT2020
-	constexpr int kSDRColorSpace = 0;                      // sRGB / BT709 gamut
+	constexpr int kHDRColorSpace = 2;
+	constexpr int kSDRColorSpace = 0;
+	constexpr int kACEScgColorSpace = 5;
+	constexpr int kXYZColorSpace = 4;
+	const int inputColorSpace = inputGamut == Gamut::ACEScg ? kACEScgColorSpace : inputGamut == Gamut::Rec2020 ? kHDRColorSpace :
+	                                                                                                             kSDRColorSpace;
 	const int outputColorSpace = hdrEnabled ? kHDRColorSpace : kSDRColorSpace;
 	// OpenDRT consumes XYZ D65 and outputs linear Rec.709 (SDR) or Rec.2020 (HDR).
 	// Bypassing tonemapping keeps both intermediate spaces in the working gamut.
 	const int tonemapInputSpace =
 		!settings.enableTonemap ? settings.processColorSpace :
-		settings.useOpenDrt     ? 4 :
+		settings.useOpenDrt     ? kXYZColorSpace :
 								  ((hdrEnabled && tonemappers[tonemapperType].supportsHDR) ?
 										  tonemappers[tonemapperType].nativeInputSpaceHDR :
 										  tonemappers[tonemapperType].nativeInputSpace);
@@ -749,9 +750,15 @@ void ColorGrading::UpdateColorSpaceTransforms(bool hdrEnabled)
 		};
 	};
 
-	storeMatrix(getWhiteAdaptedRGBMatrix(spaces[kInputColorSpace], spaces[settings.processColorSpace]), inputToWorkingMatrix);
+	storeMatrix(getWhiteAdaptedRGBMatrix(spaces[inputColorSpace], spaces[settings.processColorSpace]), inputToWorkingMatrix);
 	storeMatrix(getWhiteAdaptedRGBMatrix(spaces[settings.processColorSpace], spaces[tonemapInputSpace]), workingToTonemapMatrix);
 	storeMatrix(getWhiteAdaptedRGBMatrix(spaces[tonemapOutputSpace], spaces[outputColorSpace]), tonemapToOutputMatrix);
+}
+
+PostProcessFeature::Gamut ColorGrading::GetDisplayGamut() const
+{
+	const auto& hdr = globals::features::hdrDisplay;
+	return hdr.IsEnabled() && hdr.settings.enableHDR ? Gamut::Rec2020 : Gamut::Rec709;
 }
 
 bool ColorGrading::IsReadyToTonemap() const
@@ -981,8 +988,8 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 
 	RE::ImageSpaceData imageSpaceData = pp.imageSpaceManager->gameISData;
 	auto& hdr = globals::features::hdrDisplay;
-	const bool hdrEnabled = hdr.loaded && hdr.settings.enableHDR;
-	UpdateColorSpaceTransforms(hdrEnabled);
+	const bool hdrEnabled = hdr.IsEnabled() && hdr.settings.enableHDR;
+		UpdateColorSpaceTransforms(hdrEnabled, inout_tex.gamut);
 
 	// Always compute XYZ matrices for white balance
 	{
@@ -1003,6 +1010,17 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 		.asccdl = { settings.slope, settings.power, settings.cdlOffset },
 		.liftgammagain = { settings.lift, settings.gamma, settings.gain },
 		.inOutGamma = settings.inOutGamma,
+		.inputLuminance = [&]() {
+			static const auto luminanceVectors = []() {
+				constexpr std::array spaces{ "sRGB", "ACEScg", "BT2020" };
+				std::array<float4, spaces.size()> vectors;
+				for (size_t i = 0; i < spaces.size(); ++i) {
+					const auto toXYZ = getRGBMatrix(spaces[i], "XYZ");
+					vectors[i] = float4{ toXYZ(1, 0), toXYZ(1, 1), toXYZ(1, 2), 0.f };
+				}
+				return vectors;
+			}();
+			return luminanceVectors[static_cast<size_t>(inout_tex.gamut)]; }(),
 		.oklchSaturation = settings.oklchSaturation,
 		.oklchColorMixer = { settings.oklchColorMixer[0], settings.oklchColorMixer[1], settings.oklchColorMixer[2], settings.oklchColorMixer[3], settings.oklchColorMixer[4], settings.oklchColorMixer[5], settings.oklchColorMixer[6] },
 		.contrast = settings.contrast,
@@ -1109,7 +1127,7 @@ void ColorGrading::Draw(TextureInfo& inout_tex)
 		}
 	}
 
-	inout_tex = { texColor->resource.get(), texColor->srv.get() };
+	inout_tex = { texColor->resource.get(), texColor->srv.get(), GetDisplayGamut() };
 	globals::profiler->EndPass();
 
 	const bool curveReadbackActive =

@@ -396,11 +396,11 @@ void ExponentialHeightFog::DrawVolumetricSettings()
 	ImGui::SliderFloat(T(TKEY("directional_shadow_bias"), "Directional Shadow Bias"), &settings.volumetricShadowBias, 0.0f, 0.05f, "%.4f", ImGuiSliderFlags_AlwaysClamp);
 	ImGui::EndDisabled();
 	ImGui::SliderFloat(T(TKEY("sky_lighting_scattering_intensity"), "Sky Lighting Scattering Intensity"), &settings.volumetricSkyLightingIntensity, 0.0f, 10.0f, "%.2f");
-	ImGui::BeginDisabled(!globals::features::lightLimitFix.loaded);
+	ImGui::BeginDisabled(!globals::features::lightLimitFix.IsEnabled());
 	ImGui::SliderFloat(T(TKEY("local_light_scattering_intensity"), "Local Light Scattering Intensity"), &settings.volumetricLocalLightScatteringIntensity, 0.0f, 10.0f, "%.2f");
 	ImGui::EndDisabled();
 	const bool hasScattering = settings.volumetricDirectionalScatteringIntensity > 0.0f || settings.volumetricSkyLightingIntensity > 0.0f ||
-	                           (globals::features::lightLimitFix.loaded && settings.volumetricLocalLightScatteringIntensity > 0.0f);
+	                           (globals::features::lightLimitFix.IsEnabled() && settings.volumetricLocalLightScatteringIntensity > 0.0f);
 	ImGui::BeginDisabled(!hasScattering);
 	ImGui::SliderFloat(T(TKEY("volumetric_scattering_distribution"), "Volumetric Scattering Distribution"), &settings.volumetricFogScatteringDistribution, -0.9f, 0.9f, "%.2f");
 	ImGui::EndDisabled();
@@ -981,7 +981,7 @@ void ExponentialHeightFog::Prepass()
 	ID3D11ShaderResourceView* directionalShadowLightData = globals::deferred && globals::deferred->directionalShadowLights ? globals::deferred->directionalShadowLights->srv.get() : nullptr;
 	auto& lightLimitFix = globals::features::lightLimitFix;
 	const bool hasLocalLightData =
-		lightLimitFix.loaded &&
+		lightLimitFix.IsEnabled() &&
 		lightLimitFix.lights &&
 		lightLimitFix.lightIndexList &&
 		lightLimitFix.lightGrid;
@@ -990,12 +990,12 @@ void ExponentialHeightFog::Prepass()
 	auto* depthSrv = Util::GetCurrentSceneDepthSRV(true);
 	auto& ibl = globals::features::ibl;
 	auto& skylighting = globals::features::skylighting;
-	const bool hasIBL = ibl.loaded &&
+	const bool hasIBL = ibl.IsEnabled() &&
 	                    ibl.settings.EnableIBL != 0 &&
 	                    !ibl.IsDisabledForCurrentScene() &&
 	                    ibl.envIBLTexture &&
 	                    ibl.skyIBLTexture;
-	const bool hasSkylighting = skylighting.loaded && skylighting.texProbeArray;
+	const bool hasSkylighting = skylighting.IsEnabled() && skylighting.texProbeArray;
 
 	const bool temporalReprojection = Util::GetTemporal();
 	const bool temporalHistoryValid =

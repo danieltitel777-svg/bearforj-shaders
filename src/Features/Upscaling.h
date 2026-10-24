@@ -49,6 +49,9 @@ public:
 	};
 
 	static constexpr uint32_t kFsr4RuntimeSelectionSchemaVersion = 1;
+	static constexpr uint32_t kAntiLag2RenderedFPSLimit = 60;
+	static constexpr uint32_t kGameplayMinRenderedFPSLimit = 20;
+	static constexpr uint32_t kGameplayMaxRenderedFPSLimit = 240;
 
 	struct Settings
 	{
@@ -56,6 +59,7 @@ public:
 		uint upscaleMethodNoDLSS = (uint)UpscaleMethod::kFSR;
 		uint qualityMode = 1;  // Default to Quality (1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance, 0=Native AA)
 		uint frameLimitMode = 1;
+		uint antiLag2FPSLimit = kAntiLag2RenderedFPSLimit;
 		uint frameGenerationMode = 1;
 		uint frameGenerationForceEnable = 0;
 		bool frameGenerationAllowInMenus = false;
@@ -112,6 +116,8 @@ public:
 	bool d3d12SwapChainActive = false;
 	// Set by Main_PostProcessing when frame-generation inputs were copied; cleared after Present.
 	bool frameGenerationPrepared = false;
+	bool frameGenerationSceneVisited = false;
+	bool frameGenerationNeutralGuides = false;
 
 	globals::FrameBufferCache worldCameraFrame{};
 	bool worldCameraFrameValid = false;
@@ -126,6 +132,8 @@ public:
 	bool IsFrameGenerationActive() const;
 	/** @brief Returns whether settings and menu state permit preparing frame-generation inputs this frame. */
 	bool ShouldPrepareFrameGeneration() const;
+	/** @brief Supplies neutral guides when menus present without a world render pass. */
+	void PrepareMenuFrameGeneration();
 	/** @brief Returns the frame-generation decision made in post-processing, held until the frame is presented. */
 	bool ShouldUseFrameGenerationThisFrame() const;
 	bool IsUpscalingActive() const;
@@ -146,6 +154,8 @@ public:
 	virtual void Load() override;
 	virtual void PostPostLoad() override;
 	virtual void SetupResources() override;
+	/** @brief Applies the gameplay or menu Anti-Lag FPS limit immediately before input polling. */
+	void OnBeforeInputPoll() override;
 
 	UpscaleMethod GetUpscaleMethod() const;
 
@@ -269,12 +279,6 @@ private:
 	struct Main_PostProcessing
 	{
 		static void thunk(RE::ImageSpaceManager* a_this, uint32_t a3, RE::RENDER_TARGET a_target, void* a_4, bool a_5);
-		static inline REL::Relocation<decltype(thunk)> func;
-	};
-
-	struct Main_RenderPrecipitation
-	{
-		static void thunk();
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
 

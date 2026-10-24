@@ -28,6 +28,7 @@
 #include "Features/ProceduralAurora.h"
 #include "Features/NightEye.h"
 #include "Features/PostProcessing.h"
+#include "Features/RainRendering.h"
 #include "Features/RainRefraction.h"
 #include "Features/ReverseZ.h"
 #include "Features/RemoteControl/NvPerf.h"
@@ -415,11 +416,11 @@ namespace WeatherExtensions
 			// Moonlight colours feed Effects11's grading; the dim must follow it, as its colour filter lifts zero
 			globals::features::skySync.ApplyMoonlightColors(sky);
 			globals::features::volumetricLighting.DetectNightRenderData();
-			if (globals::features::effects11.loaded)
+			if (globals::features::effects11.IsEnabled())
 				globals::features::effects11.OnSkyUpdateColors(sky);
 			globals::features::skySync.OnSkyUpdateColors(sky);
 			globals::features::proceduralAurora.OnSkyUpdate(sky);
-			if (globals::features::effects11.loaded)
+			if (globals::features::effects11.IsEnabled())
 				globals::features::effects11.FinishSkyUpdateColors(sky);
 			if (globals::features::volumetricLighting.loaded)
 				globals::features::volumetricLighting.ApplyGodRaySettings();
@@ -483,7 +484,7 @@ namespace PostProcessingExtensions
 			// Post Processing runs its pipeline into kMAIN/kMAIN_COPY, then lets the vanilla
 			// pass run so ISHDR can take its POSTPROCESS passthrough branch.
 			auto& postProcessing = globals::features::postProcessing;
-			if (postProcessing.loaded)
+			if (postProcessing.IsEnabled())
 				postProcessing.PreProcess(input);
 
 			func(a1, a2, a3, a4, a5);
@@ -497,6 +498,10 @@ namespace PostProcessingExtensions
 		static void thunk(RE::BSShader* This, RE::BSRenderPass* Pass, uint32_t RenderFlags)
 		{
 			func(This, Pass, RenderFlags);
+			if (globals::features::rainRendering.IsEnabled() &&
+				globals::state->currentPixelDescriptor == static_cast<uint32_t>(SIE::ShaderCache::ParticleShaderTechniques::EnvCubeRain)) {
+				globals::features::rainRendering.DrawAtVanillaRainPass();
+			}
 			if (globals::features::rainRefraction.loaded)
 				globals::features::rainRefraction.ModifyParticle();
 		}
@@ -688,6 +693,17 @@ struct BSShaderRenderTargets_Create
 		globals::ReInit();
 		globals::features::reverseZ.SetupDepthTargets();
 		globals::state->Setup();
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+struct BSInputDeviceManager_BeforeInputPoll
+{
+	/** @brief Invokes loaded features before polling engine input devices, then forwards to the engine. */
+	static void thunk(RE::BSInputDeviceManager* a_this, float a_secsSinceLastFrame)
+	{
+		Feature::ForEachLoadedFeature("OnBeforeInputPoll", [](Feature* feature) { feature->OnBeforeInputPoll(); });
+		func(a_this, a_secsSinceLastFrame);
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -1152,7 +1168,7 @@ namespace Hooks
 				if (shaderCache->IsEnabled() && state->ShaderEnabled(RE::BSShader::Type::ImageSpace)) {
 					RE::BSImagespaceShader* isShader = CurrentlyDispatchedShader;
 					uint32_t techniqueId = CurrentComputeShaderTechniqueId;
-					if (vl.loaded) {
+					if (vl.IsEnabled()) {
 						if (CurrentlyDispatchedShader == nullptr) {
 							techniqueId = 0;
 							if (CurrentlyDispatchedComputeShader->name == "ISVolumetricLightingGenerateCS"sv) {
@@ -1241,6 +1257,9 @@ namespace Hooks
 	{
 		logger::info("Hooking BSImageSpace::Init::IBLF");
 		stl::detour_thunk<BSImageSpace_Init_IBLF>(REL::RelocationID(100480, 107198));
+
+		logger::info("Hooking BSInputDeviceManager::PollInputDevices entry");
+		stl::detour_thunk<BSInputDeviceManager_BeforeInputPoll>(REL::RelocationID(67315, 68617));
 
 		// This input hook also drives per-frame Reflex update (see BSInputDeviceManager_PollInputDevices::thunk).
 		logger::info("Hooking BSInputDeviceManager::PollInputDevices");

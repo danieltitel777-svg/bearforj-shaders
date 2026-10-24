@@ -36,6 +36,11 @@ namespace Color
 			dot(v4, kBlueVec4) + dot(v2, kBlueVec2));
 	}
 
+	float RGBToLuminance(float3 color, float3 luminanceWeights)
+	{
+		return dot(color, luminanceWeights);
+	}
+
 	float RGBToLuminance(float3 color)
 	{
 #if defined(ENABLE_ACESCG)

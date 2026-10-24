@@ -139,12 +139,6 @@ public:
 	/** @brief Renders the skylighting occlusion map using the precipitation rendering system. */
 	void RenderOcclusion();
 
-	struct Main_Precipitation_RenderOcclusion
-	{
-		static void thunk();
-		static inline REL::Relocation<decltype(thunk)> func;
-	};
-
 	struct SetViewFrustum
 	{
 		static void thunk(RE::NiCamera* a_camera, RE::NiFrustum* a_frustum);

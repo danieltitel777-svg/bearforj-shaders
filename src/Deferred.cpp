@@ -12,6 +12,7 @@
 #include "Features/Effects11.h"
 #include "Features/FurShells.h"
 #include "Features/IBL.h"
+#include "Features/RainRendering.h"
 #include "Features/ReverseZ.h"
 #include "Features/ScreenSpaceGI.h"
 #include "Features/Skylighting.h"
@@ -360,11 +361,11 @@ void Deferred::DeferredPasses()
 	auto dispatchCount = Util::GetScreenDispatchCount(true);
 
 	auto& sss = globals::features::subsurfaceScattering;
-	if (sss.loaded)
+	if (sss.IsEnabled())
 		sss.DrawSSS();
 
 	auto& dynamicCubemaps = globals::features::dynamicCubemaps;
-	if (dynamicCubemaps.loaded)
+	if (dynamicCubemaps.IsEnabled())
 		dynamicCubemaps.UpdateCubemap();
 
 	auto& ibl = globals::features::ibl;
@@ -380,19 +381,19 @@ void Deferred::DeferredPasses()
 			masks.SRV,                                                                                       // t3  MasksTexture
 			Util::GetCurrentSceneDepthSRV(false),                                                            // t4  DepthTexture (24/32-bit; HLSL type baked at compile via TERRAIN_BLENDING)
 			dynamicCubemaps.loaded ? reflectance.SRV : nullptr,                                              // t5  ReflectanceTexture
-			dynamicCubemaps.loaded ? dynamicCubemaps.envTexture->srv.get() : nullptr,                        // t6  EnvTexture
-			dynamicCubemaps.loaded ? dynamicCubemaps.envReflectionsTexture->srv.get() : nullptr,             // t7  EnvReflectionsTexture
-			dynamicCubemaps.loaded && skylighting.loaded ? skylighting.texProbeArray->srv.get() : nullptr,   // t8  SkylightingProbeArray
+			dynamicCubemaps.IsEnabled() ? dynamicCubemaps.envTexture->srv.get() : nullptr,                            // t6  EnvTexture
+			dynamicCubemaps.IsEnabled() ? dynamicCubemaps.envReflectionsTexture->srv.get() : nullptr,                 // t7  EnvReflectionsTexture
+			dynamicCubemaps.IsEnabled() && skylighting.IsEnabled() ? skylighting.texProbeArray->srv.get() : nullptr,  // t8  SkylightingProbeArray
 			masks2.SRV,                                                                                      // t9  Masks2Texture (vertexAO in .x)
 			ssgi.loaded ? ssgiOutput : nullptr,                                                                  // t10 SsgiTexture
 			ssgi.loaded ? ssgiSH1Output : nullptr,                                                           // t11 SsgiSH1Texture
 			nullptr,                                                                                         // t12 unused
 			ssr.loaded ? ssrOutput : nullptr,                                                                // t13 SsrTexture
-			ibl.loaded ? ibl.envIBLTexture->srv.get() : nullptr,                                             // t14 EnvIBLTexture
-			ibl.loaded ? ibl.skyIBLTexture->srv.get() : nullptr,                                             // t15 SkyIBLTexture
+			ibl.IsEnabled() ? ibl.envIBLTexture->srv.get() : nullptr,                                                 // t14 EnvIBLTexture
+			ibl.IsEnabled() ? ibl.skyIBLTexture->srv.get() : nullptr,                                                 // t15 SkyIBLTexture
 		};
 
-		if (dynamicCubemaps.loaded)
+		if (dynamicCubemaps.IsEnabled())
 			context->CSSetSamplers(0, 1, &linearSampler);
 
 		context->CSSetShaderResources(0, ARRAYSIZE(srvs), srvs);
@@ -425,7 +426,7 @@ void Deferred::DeferredPasses()
 		context->CSSetShader(nullptr, nullptr, 0);
 	}
 
-	if (dynamicCubemaps.loaded)
+	if (dynamicCubemaps.IsEnabled())
 		dynamicCubemaps.PostDeferred();
 
 	if (globals::features::effects11.loaded) {
@@ -693,6 +694,8 @@ void Deferred::Hooks::Main_RenderWorld::thunk(bool a1)
 	state->permutationData.ExtraShaderDescriptor |= static_cast<uint32_t>(State::ExtraShaderDescriptors::InWorld);
 	state->inWorld = true;
 	func(a1);
+	if (globals::features::rainRendering.IsEnabled())
+		globals::features::rainRendering.DrawForcedRainFallback();
 
 	if (globals::features::upscaling.loaded)
 		globals::features::upscaling.CaptureWorldCamera();
@@ -718,14 +721,13 @@ void Deferred::Hooks::Main_RenderWorld_BlendedDecals::thunk(RE::BSShaderAccumula
 	if (globals::shaderCache->IsEnabled() && globals::state->inWorld) {
 		auto& terrainBlending = globals::features::terrainBlending;
 		// Defer terrain rendering until after everything else
-		if (terrainBlending.loaded && terrainBlending.settings.Enabled) {
+		if (terrainBlending.IsEnabled() && terrainBlending.settings.Enabled) {
 			terrainBlending.RenderTerrainBlendingPasses();
 		}
 	}
 
-	auto& furShells = globals::features::furShells;
-	if (furShells.loaded)
-		furShells.RenderDeferredShells();
+	if (globals::shaderCache->IsEnabled() && globals::state->inWorld)
+		Feature::ForEachLoadedFeature("OnBeforeBlendedDecals", [](Feature* feature) { feature->OnBeforeBlendedDecals(); });
 
 	// Deferred blended decals
 

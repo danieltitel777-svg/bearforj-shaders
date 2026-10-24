@@ -186,6 +186,21 @@ namespace Util
 		return shadowState->GetRuntimeData().posAdjust.getEye();
 	}
 
+	RE::NiPoint3 GetEyePosition(int eyeIndex)
+	{
+		auto* shadowState = globals::game::shadowState;
+		if (!REL::Module::IsVR())
+			return shadowState->GetRuntimeData().posAdjust.getEye();
+		return shadowState->GetVRRuntimeData().posAdjust.getEye(eyeIndex);
+	}
+
+	RE::NiPoint3 GetAverageEyePosition()
+	{
+		if (!REL::Module::IsVR())
+			return GetEyePosition();
+		return (GetEyePosition(0) + GetEyePosition(1)) * 0.5f;
+	}
+
 	float4 GetCameraData()
 	{
 		static float& cameraNear = (*(float*)(REL::RelocationID(517032, 403540).address() + 0x40));

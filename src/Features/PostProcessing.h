@@ -136,12 +136,7 @@ struct PostProcessing : Feature
 	void ClearBorderMotionVectorsForFrameGen();
 	void DrawFeature(PostProcessFeature& feature, PostProcessFeature::TextureInfo& lastTexColor);
 
-	enum class Gamut : uint
-	{
-		Rec709,
-		ACEScg,
-		Rec2020
-	};
+	using Gamut = PostProcessFeature::Gamut;
 	struct alignas(16) CopyCB
 	{
 		Gamut inputGamut = Gamut::Rec709;

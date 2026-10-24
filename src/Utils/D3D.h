@@ -8,6 +8,13 @@
 
 namespace Util
 {
+	/** @brief Identity for real D3D11 pointers. Open Shaders wraps the same objects and unwraps them here. */
+	template <class T>
+	constexpr T* AsReal(T* a_pointer) noexcept
+	{
+		return a_pointer;
+	}
+
 	/**
 	 * @brief ID3DInclude handler resolving #include paths under Data\Shaders,
 	 *        shared by every HLSL compile call site in this codebase.

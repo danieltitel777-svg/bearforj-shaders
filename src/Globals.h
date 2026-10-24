@@ -38,6 +38,7 @@ struct VanillaFresnel;
 struct VolumetricLighting;
 struct WaterEffects;
 struct PerformanceOverlay;
+struct RainRendering;
 struct WetnessEffects;
 struct ExtendedTranslucency;
 struct ReverseZ;
@@ -145,6 +146,7 @@ namespace globals
 		extern VolumetricLighting volumetricLighting;
 		extern WaterEffects waterEffects;
 		extern PerformanceOverlay performanceOverlay;
+		extern RainRendering rainRendering;
 		extern WetnessEffects wetnessEffects;
 		extern ExtendedTranslucency extendedTranslucency;
 		extern ReverseZ reverseZ;
@@ -249,6 +251,8 @@ namespace globals
 		extern RE::ImageSpaceManager* imageSpaceManager;
 		extern bool* bEnableVolumetricLighting;
 		extern std::atomic<bool> quitGame;
+
+		extern bool isVR;
 
 		extern RE::BSGraphics::PixelShader** currentPixelShader;
 		extern RE::BSGraphics::VertexShader** currentVertexShader;

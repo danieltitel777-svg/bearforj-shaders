@@ -430,7 +430,7 @@ cbuffer PerGeometry : register(b2)
 float GetWaterFogFade()
 {
 #			if defined(EXP_HEIGHT_FOG)
-	if (SharedData::exponentialHeightFogSettings.enabled) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		return ExponentialHeightFog::GetVanillaFogFade(PosAdjust.w);
 	}
 #			endif
@@ -802,7 +802,7 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 	float maxRainDropDistance = SharedData::wetnessEffectsSettings.RaindropFxRange * SharedData::wetnessEffectsSettings.RaindropFxRange * 3;
 	float rainDropDistance = dot(input.WPosition.xyz, input.WPosition.xyz);
 	float distanceFadeout = saturate((1 - saturate(rainDropDistance / maxRainDropDistance)) * 3);
-	if (finalNormal.z > 0 && SharedData::wetnessEffectsSettings.Raining > 0.0f && SharedData::wetnessEffectsSettings.EnableRaindropFx &&
+	if (finalNormal.z > 0 && SharedData::wetnessEffectsSettings.Raining > 0.0f && (RuntimeFeatures::IsEnabled(RuntimeFeatures::WetnessEffectsFeature) && SharedData::wetnessEffectsSettings.EnableRaindropFx) &&
 		(rainDropDistance < maxRainDropDistance) && wetnessOcclusion > 0.05) {
 		float rippleStrengthModifier = (wetnessOcclusion * wetnessOcclusion) * distanceFadeout;
 		float3 rippleWPosition = input.WPosition.xyz + finalNormal * 16;
@@ -997,7 +997,7 @@ DiffuseOutput GetWaterDiffuseColor(PS_INPUT input, float3 normal, float3 viewDir
 	}
 
 #					if defined(HORIZON_FIX)
-	if (HorizonFix::IsEmptyDepth(DepthTex.Load(float3(refractionScreenPosition, 0)).x))
+	if (RuntimeFeatures::IsEnabled(RuntimeFeatures::HorizonFixFeature) && HorizonFix::IsEmptyDepth(DepthTex.Load(float3(refractionScreenPosition, 0)).x))
 		distanceMul = 1.0.xxxx;
 #					endif
 #				endif
@@ -1058,7 +1058,7 @@ float3 GetSunColor(float3 normal, float3 viewDirection, float3 worldPosition)
 
 	float3 sunColor = Color::DirectionalLight(ColorManagement::SRGBToWorking(SunColor.xyz)) * SunDir.w * (1.0 - exp(-DeepColor.w));
 #				if defined(EXP_HEIGHT_FOG)
-	if (SharedData::exponentialHeightFogSettings.enabled) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		sunColor *= ExponentialHeightFog::GetSunlightFogAttenuation(worldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz);
 	}
 #				endif
@@ -1127,7 +1127,7 @@ PS_OUTPUT main(PS_INPUT input)
 		FogParam.z);
 
 #					if defined(HORIZON_FIX)
-	if (HorizonFix::IsEmptyDepth(DepthTex.Load(float3(screenPosition, 0)).x))
+	if (RuntimeFeatures::IsEnabled(RuntimeFeatures::HorizonFixFeature) && HorizonFix::IsEmptyDepth(DepthTex.Load(float3(screenPosition, 0)).x))
 		distanceMul = 1.0.xxxx;
 #					endif
 #				endif
@@ -1321,12 +1321,12 @@ PS_OUTPUT main(PS_INPUT input)
 #						endif
 
 #						if defined(IBL)
-	if (SharedData::iblSettings.EnableIBL) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ImageBasedLightingFeature) && RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && SharedData::iblSettings.EnableIBL)) {
 		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor, input.WPosition.xyz);
 	}
 #						endif
 #						if defined(EXP_HEIGHT_FOG)
-	if (SharedData::exponentialHeightFogSettings.enabled) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		float4 exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFog(input.WPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, fogColor, float4(input.HPosition.xy * FrameBuffer::DynamicResolutionParams2.xy, input.HPosition.z, 1));
 		if (ExponentialHeightFog::ShouldDisableVanillaFog()) {
 			fogColor = exponentialHeightFog.xyz;
@@ -1378,12 +1378,12 @@ PS_OUTPUT main(PS_INPUT input)
 #						endif
 
 #						if defined(IBL)
-	if (SharedData::iblSettings.EnableIBL) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ImageBasedLightingFeature) && RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && SharedData::iblSettings.EnableIBL)) {
 		preFogColor = ImageBasedLighting::GetFogIBLColor(preFogColor, input.WPosition.xyz);
 	}
 #						endif
 #						if defined(EXP_HEIGHT_FOG)
-	if (SharedData::exponentialHeightFogSettings.enabled) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		float4 exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFog(input.WPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, preFogColor, float4(input.HPosition.xy * FrameBuffer::DynamicResolutionParams2.xy, input.HPosition.z, 1));
 		if (ExponentialHeightFog::ShouldDisableVanillaFog()) {
 			preFogColor = exponentialHeightFog.xyz;
@@ -1410,12 +1410,12 @@ PS_OUTPUT main(PS_INPUT input)
 	float fogFactor = min(FogParam.w, pow(saturate(-diffuseOutput.depth * FogParam.y - FogParam.x), FogParam.z));
 	float3 fogColor = lerp(ColorManagement::SRGBToWorking(FogNearColor.xyz), ColorManagement::SRGBToWorking(FogFarColor.xyz), fogFactor);
 #						if defined(EXP_HEIGHT_FOG)
-	if (SharedData::exponentialHeightFogSettings.enabled && ExponentialHeightFog::ShouldDisableVanillaFog()) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled) && ExponentialHeightFog::ShouldDisableVanillaFog()) {
 		fogFactor = 0;
 	}
 #						endif
 #						if defined(IBL)
-	if (SharedData::iblSettings.EnableIBL) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ImageBasedLightingFeature) && RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && SharedData::iblSettings.EnableIBL)) {
 		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor, input.WPosition.xyz);
 	}
 #						endif

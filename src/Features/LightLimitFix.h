@@ -323,6 +323,12 @@ public:
 
 	/** @brief Installs shader setup geometry hooks and the inverse-square light creation and luminance hooks. */
 	virtual void PostPostLoad() override;
+	bool RequiresRenderMaintenance() const override { return IsRuntimeAvailable(); }
+	bool RequiresRestartForToggle() const override { return true; }
+	std::string_view GetRuntimeToggleNote() const override
+	{
+		return "Enabling or disabling LLF requires a restart. Off skips its light and shadow backend, hooks and resources. Shader cache is unchanged.";
+	}
 	/** @brief Unlocks the vanilla magic light limit on data load. */
 	virtual void DataLoaded() override;
 	/** @brief Recompiles the cluster building and culling compute shaders. */

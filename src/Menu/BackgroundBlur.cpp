@@ -578,7 +578,7 @@ namespace BackgroundBlur
 		auto& upscaling = globals::features::upscaling;
 		bool useUpscalingBackbuffer = upscaling.d3d12SwapChainActive;
 
-		auto* hdr = globals::features::hdrDisplay.loaded ? &globals::features::hdrDisplay : nullptr;
+		auto* hdr = globals::features::hdrDisplay.IsEnabled() ? &globals::features::hdrDisplay : nullptr;
 		bool hdrActive = hdr &&
 		                 hdr->settings.enableHDR && hdr->hdrDataCB && hdr->outputTexture &&
 		                 hdr->hdrTexture && hdr->hdrTexture->resource && hdr->hdrTexture->srv && hdr->hdrTexture->rtv;

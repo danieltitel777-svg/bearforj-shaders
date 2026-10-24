@@ -122,10 +122,18 @@ struct PostProcessFeature : public std::enable_shared_from_this<PostProcessFeatu
 	virtual void SaveSettings(json& o_json) = 0;
 	virtual void DrawSettings() = 0;
 
+	enum class Gamut : uint
+	{
+		Rec709,
+		ACEScg,
+		Rec2020
+	};
+
 	struct TextureInfo
 	{
 		ID3D11Texture2D* tex = nullptr;
 		ID3D11ShaderResourceView* srv = nullptr;
+		Gamut gamut = Gamut::Rec709;
 	};
 	virtual void Draw(TextureInfo& inout_tex) = 0;  // read from last pass, do the thing, and replace it with output texture
 

@@ -150,7 +150,7 @@ void SampleSSGI(uint2 pixCoord, float3 normalWS, out float ao, out float3 il)
 	float3 directionalAmbientColor = 0;
 
 #	if defined(IBL)
-	if (SharedData::iblSettings.EnableIBL) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ImageBasedLightingFeature) && RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && SharedData::iblSettings.EnableIBL)) {
 		float3 vanillaDALC = Color::Ambient(max(0, SharedData::GetAmbient(normalWS)));
 
 #		if defined(SKYLIGHTING)
@@ -205,7 +205,7 @@ void SampleSSGI(uint2 pixCoord, float3 normalWS, out float ao, out float3 il)
 
 	float3 reflectance = ReflectanceTexture[dispatchID.xy];
 
-	if (any(reflectance > 0.0)) {
+	if (RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && any(reflectance > 0.0)) {
 		float3 V = -normalize(positionWS.xyz);
 		float3 R = reflect(-V, normalWS);
 
@@ -228,7 +228,7 @@ void SampleSSGI(uint2 pixCoord, float3 normalWS, out float ao, out float3 il)
 #	endif
 
 #	if defined(IBL)
-		if (SharedData::iblSettings.EnableIBL) {
+		if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ImageBasedLightingFeature) && RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && SharedData::iblSettings.EnableIBL)) {
 			float3 envSample = EnvTexture.SampleLevel(LinearSampler, R, level);
 			float3 fullSample = EnvReflectionsTexture.SampleLevel(LinearSampler, R, level);
 			float3 envSpecular, skySpecular;

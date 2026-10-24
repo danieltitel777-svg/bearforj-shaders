@@ -967,7 +967,8 @@ void FeatureListRenderer::ListMenuVisitor::DrawFeatureRow(Feature* feat, bool in
 	MenuFonts::FontRoleGuard fontGuard(Menu::FontRole::Subheading);
 
 	const auto featureName = feat->GetShortName();
-	bool isDisabled = globals::state->IsFeatureDisabled(featureName);
+	const bool persistedDisabled = globals::state->IsFeatureDisabled(featureName);
+	bool isDisabled = feat->SupportsLiveToggle() ? (feat->loaded ? !feat->IsEnabled() : persistedDisabled) : (feat->RequiresRestartForToggle() && feat->loaded ? !feat->IsEnabled() : persistedDisabled);
 	bool isLoaded = feat->loaded;
 	bool hasFailedMessage = !feat->failedLoadedMessage.empty();
 	auto& themeSettings = globals::menu->GetSettings().Theme;
@@ -975,7 +976,9 @@ void FeatureListRenderer::ListMenuVisitor::DrawFeatureRow(Feature* feat, bool in
 	ImVec4 textColor;
 
 	// Determine the text color based on the state
-	if (isDisabled) {
+	if (feat->HasAnyPendingRestart()) {
+		textColor = themeSettings.StatusPalette.RestartNeeded;
+	} else if (isDisabled) {
 		textColor = themeSettings.StatusPalette.Disable;
 	} else if (isLoaded) {
 		textColor = ImGui::GetStyleColorVec4(ImGuiCol_Text);
@@ -1090,7 +1093,8 @@ void FeatureListRenderer::DrawMenuVisitor::operator()(const PinnedFeature& pinne
 void FeatureListRenderer::DrawMenuVisitor::operator()(Feature* feat)
 {
 	const auto featureName = feat->GetShortName();
-	bool isDisabled = globals::state->IsFeatureDisabled(featureName);
+	const bool persistedDisabled = globals::state->IsFeatureDisabled(featureName);
+	bool isDisabled = feat->SupportsLiveToggle() ? (feat->loaded ? !feat->IsEnabled() : persistedDisabled) : (feat->RequiresRestartForToggle() && feat->loaded ? !feat->IsEnabled() : persistedDisabled);
 	bool isLoaded = feat->loaded;
 	bool hasFailedMessage = !feat->failedLoadedMessage.empty();
 
@@ -1124,7 +1128,7 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bo
 
 	const char* baselinesButtonText = T("menu.features.use_baselines", "Use Baselines");
 	const char* restoreButtonText = T("menu.features.restore_defaults", "Restore Defaults");
-	const char* bootLabel = T("menu.features.load_at_boot", "Load at Boot");
+	const char* bootLabel = feat->SupportsLiveToggle() ? T("menu.features.enabled_live", "Enabled") : T("menu.features.load_at_boot", "Load at Boot");
 	const float bootToggleWidth = frameHeight * 1.6f;
 	const float baselinesButtonWidth = ImGui::CalcTextSize(baselinesButtonText).x + buttonPadding;
 	const float restoreButtonWidth = ImGui::CalcTextSize(restoreButtonText).x + ImGui::GetFontSize() + style.ItemInnerSpacing.x + buttonPadding;
@@ -1203,16 +1207,27 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* feat, bo
 
 		// Enable/Disable at boot toggle
 		nextItem(ImGui::CalcTextSize(bootLabel).x + style.ItemInnerSpacing.x + bootToggleWidth);
-		bool bootEnabled = !isDisabled;
-		auto bootTooltip = [isDisabled]() {
+		bool bootEnabled = feat->SupportsLiveToggle() ? !isDisabled : !globals::state->IsFeatureDisabled(feat->GetShortName());
+		auto bootTooltip = [feat, bootEnabled]() {
 			if (auto _tt = Util::HoverTooltipWrapper()) {
-				ImGui::Text(
-					T("menu.features.boot_toggle_tooltip",
-						"Toggle feature loading at boot.\n"
-						"Current state: %s\n"
-						"Restart required for changes to take effect.\n"
-						"Disabling removes performance impact."),
-					!isDisabled ? T("menu.features.enabled", "Enabled") : T("menu.features.disabled", "Disabled"));
+				if (feat->SupportsLiveToggle()) {
+					ImGui::Text(
+						T("menu.features.runtime_toggle_tooltip",
+							"Toggle this feature's runtime effects.\n"
+							"Current state: %s\n"
+							"Compiled feature support is retained."),
+						bootEnabled ? T("menu.features.enabled", "Enabled") : T("menu.features.disabled", "Disabled"));
+				} else {
+					ImGui::Text(
+						T("menu.features.boot_toggle_tooltip",
+							"Toggle feature loading at boot.\n"
+							"Current state: %s\n"
+							"Restart required for changes to take effect.\n"
+							"Disabling removes performance impact."),
+						bootEnabled ? T("menu.features.enabled", "Enabled") : T("menu.features.disabled", "Disabled"));
+				}
+				if (const auto note = feat->GetRuntimeToggleNote(); !note.empty())
+					ImGui::TextUnformatted(note.data(), note.data() + note.size());
 			}
 		};
 
@@ -1276,10 +1291,13 @@ void FeatureListRenderer::DrawMenuVisitor::RenderFeatureSettings(Feature* feat, 
 {
 	auto& themeSettings = globals::menu->GetSettings().Theme;
 
+	if (feat->RequiresRestartForToggle() && feat->HasAnyPendingRestart())
+		ImGui::TextColored(themeSettings.StatusPalette.RestartNeeded, "%s", "Restart to apply the selected feature state.");
+
 	if (isDisabled) {
-		ImGui::TextColored(themeSettings.StatusPalette.Disable, "%s", T("menu.features.settings_hidden_disabled", "Feature settings are hidden because this feature is disabled at boot."));
+		ImGui::TextColored(themeSettings.StatusPalette.Disable, "%s", T("menu.features.settings_hidden_disabled", "Feature settings are hidden while this feature is disabled."));
 		ImGui::Spacing();
-		ImGui::Text("%s", T("menu.features.enable_to_access_config", "Turn on Load at Boot above and restart the game to change its settings."));
+		ImGui::Text("%s", feat->SupportsLiveToggle() ? T("menu.features.enable_to_access_config", "Enable the feature above to access its configuration options.") : T("menu.features.enable_restart_to_access", "Turn on Load at Boot above and restart the game to change its settings."));
 	} else {
 		if (isLoaded) {
 			DrawFeatureBody(feat);

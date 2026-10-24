@@ -111,10 +111,15 @@ float3 Gamma(float3 col, float3 gamma, float3 black_pivot, float3 white_pivot)
 	return col;
 }
 
+float3 Saturation(float3 col, float sat, float3 luminanceWeights)
+{
+	float luma = Color::RGBToLuminance(col, luminanceWeights);
+	return lerp(luma, col, sat);
+}
+
 float3 Saturation(float3 col, float sat)
 {
-	float luma = Color::RGBToLuminance(col);
-	return lerp(luma, col, sat);
+	return Saturation(col, sat, float3(0.2125, 0.7154, 0.0721));
 }
 
 // https://www.shadertoy.com/view/MdjBRy

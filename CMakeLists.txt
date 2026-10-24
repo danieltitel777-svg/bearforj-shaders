@@ -167,6 +167,7 @@ target_include_directories(
         ${BSHOSHANY_THREAD_POOL_INCLUDE_DIRS}
         ${CLIB_UTIL_INCLUDE_DIRS}
         "${CMAKE_SOURCE_DIR}/package/Shaders"
+        "${CMAKE_SOURCE_DIR}/extern/AntiLag2-SDK"
         "${CMAKE_SOURCE_DIR}/extern/sk_hdr_png/include"
         ${DETOURS_INCLUDE_DIRS}
         "${CMAKE_SOURCE_DIR}/extern/NRD/Include"

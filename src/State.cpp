@@ -1,5 +1,7 @@
 #include "State.h"
 
+#include "Utils/RuntimeResources.h"
+
 #include <algorithm>
 #include <cmath>
 #include <codecvt>
@@ -161,7 +163,13 @@ void State::UpdateEffectShaderPermutation(RE::BSRenderPass* a_pass)
 void State::Draw()
 {
 	ZoneScoped;
-	if (globals::features::sceneManager.loaded)
+	Util::PollRuntimeResourceDiagnostics();
+	for (auto* feature : Feature::GetFeatureList()) {
+		if (feature->loaded && feature->runtimeLifecycleStarted.load(std::memory_order_acquire) &&
+			feature->runtimeResetPending.exchange(false, std::memory_order_acq_rel))
+			feature->ApplyRuntimeState();
+	}
+	if (globals::features::sceneManager.IsEnabled())
 		globals::features::sceneManager.Update();
 
 	auto shaderCache = globals::shaderCache;
@@ -175,7 +183,7 @@ void State::Draw()
 	auto& skylighting = globals::features::skylighting;
 
 	if (shaderCache->IsEnabled()) {
-		if (terrainBlending.loaded && terrainBlending.settings.Enabled) {
+		if (terrainBlending.IsEnabled() && terrainBlending.settings.Enabled) {
 			ZoneScopedN("TerrainBlending::TerrainShaderHacks");
 			terrainBlending.TerrainShaderHacks();
 		}
@@ -185,7 +193,7 @@ void State::Draw()
 			globals::features::snowDeformation.ApplyDrawState();
 		}
 
-		if (cloudShadows.loaded) {
+		if (cloudShadows.IsEnabled()) {
 			ZoneScopedN("CloudShadows::SkyShaderHacks");
 			cloudShadows.SkyShaderHacks();
 		}
@@ -195,17 +203,17 @@ void State::Draw()
 			globals::features::rainRefraction.ParticleShaderHacks();
 		}
 
-		if (terrainHelper.loaded) {
+		if (terrainHelper.IsEnabled()) {
 			ZoneScopedN("TerrainHelper::SetShaderResources");
 			terrainHelper.SetShaderResources(context);
 		}
 
-		if (skin.loaded) {
+		if (skin.IsEnabled()) {
 			ZoneScopedN("Skin::SetShaderResources");
 			skin.SetShaderResources(context);
 		}
 
-		if (truePBR.loaded) {
+		if (truePBR.IsEnabled()) {
 			ZoneScopedN("TruePBR::SetShaderResources");
 			truePBR.SetShaderResources(context);
 		}
@@ -226,7 +234,7 @@ void State::Draw()
 				if (currentPixelDescriptor & static_cast<uint32_t>(SIE::ShaderCache::UtilityShaderFlags::RenderShadowmask)) {
 					if (volumetricShadows.loaded)
 						volumetricShadows.CopyShadowLightData();
-					if (globals::features::exponentialHeightFog.loaded)
+					if (globals::features::exponentialHeightFog.IsEnabled())
 						globals::features::exponentialHeightFog.CaptureDirectionalShadowMap();
 					if (skylighting.loaded)
 						skylighting.CaptureShadowCascadeSRV();
@@ -234,7 +242,7 @@ void State::Draw()
 			}
 		}
 
-		if (globals::menu->overlayVisible && globals::features::performanceOverlay.loaded && globals::features::performanceOverlay.IsOverlayVisible())
+		if (globals::menu->overlayVisible && globals::features::performanceOverlay.IsEnabled() && globals::features::performanceOverlay.IsOverlayVisible())
 			Debug();
 
 		updateShader = false;
@@ -413,7 +421,7 @@ void State::Setup()
 	// gating logic that wants to read the log can run during feature SetupResources.
 	CheckTypedUAVLoadSupport();
 
-	Feature::ForEachLoadedFeature("SetupResources", [](Feature* feature) { feature->SetupResources(); });
+	Feature::ForEachAvailableFeature("SetupResources", [](Feature* feature) { feature->InitializeRuntimeResources(); });
 	globals::deferred->SetupResources();
 	Feature::ForEachLoadedFeature("PostSetupResources", [](Feature* feature) { feature->PostSetupResources(); });
 	PostProcessingMode::ApplyPending();
@@ -636,7 +644,10 @@ void State::Load(bool a_allowReload)
 					logger::info("Feature '{}' is disabled by default", featureName);
 				}
 				bool isDisabled = !feature->IsAlwaysEnabled() && disabledFeatures.contains(featureName) && disabledFeatures[featureName];
-				if (!isDisabled) {
+				// Runtime-toggle features stay loaded while disabled so the shader cache does not change.
+				if (feature->IsRuntimeListed())
+					feature->SetEnabled(!isDisabled);
+				if (!isDisabled || feature->IsRuntimeListed()) {
 					logger::info("Loading Feature: '{}'", featureName);
 
 					// Settings arrive already layered: defaults, Baseline packs, then the user's edits

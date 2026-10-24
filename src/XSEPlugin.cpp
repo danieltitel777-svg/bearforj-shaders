@@ -91,7 +91,10 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 				auto shaderCache = globals::shaderCache;
 
 				// Run feature PostPostLoad() first so features can disable themselves if needed
-				Feature::ForEachLoadedFeature("PostPostLoad", [](Feature* feature) { feature->PostPostLoad(); });
+				Feature::ForEachAvailableFeature("PostPostLoad", [](Feature* feature) {
+					feature->LatchRuntimeState();
+					feature->PostPostLoad();
+				});
 
 				shaderCache->RemoveLegacyDiskCache();
 
@@ -132,7 +135,7 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 					shaderCache->TrimDiskCache();
 				}
 
-				Feature::ForEachLoadedFeature("DataLoaded", [](Feature* feature) { feature->DataLoaded(); });
+				Feature::ForEachAvailableFeature("DataLoaded", [](Feature* feature) { feature->DataLoaded(); });
 			}
 
 			break;
@@ -140,7 +143,7 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 	case SKSE::MessagingInterface::kPostLoadGame:
 		{
 			if (errors.empty())
-				Feature::ForEachLoadedFeature("GameLoaded", [](Feature* feature) { feature->GameLoaded(); });
+				Feature::ForEachAvailableFeature("GameLoaded", [](Feature* feature) { feature->GameLoaded(); });
 			break;
 		}
 	}
@@ -251,7 +254,7 @@ bool Load()
 	if (errors.empty()) {
 		Hooks::InstallEarlyHooks();
 		logger::info("Calling feature Load methods");
-		Feature::ForEachLoadedFeature("Load", [](Feature* feature) { feature->Load(); });
+		Feature::ForEachAvailableFeature("Load", [](Feature* feature) { feature->Load(); });
 	}
 
 	return true;

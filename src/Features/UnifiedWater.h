@@ -117,6 +117,11 @@ struct UnifiedWater : OverlayFeature
 
 	/** @brief Installs engine hooks for water mesh replacement and worldspace handling. */
 	virtual void PostPostLoad() override;
+	bool RequiresRestartForToggle() const override { return true; }
+	std::string_view GetRuntimeToggleNote() const override
+	{
+		return "Enabling or disabling Unified Water requires a restart. Off keeps native water rendering and skips replacement meshes, flowmaps and hooks. Shader cache is unchanged.";
+	}
 
 private:
 	RE::NiPointer<RE::BSTriShape> waterMesh;

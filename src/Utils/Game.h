@@ -4,6 +4,13 @@
 
 #include <cstdint>
 
+/**
+ * @brief Binds a runtime-data member. Flat builds use GetRuntimeData().
+ *        VR builds use GetVRRuntimeData() when that method exists on the type.
+ */
+#define GET_INSTANCE_MEMBER(a_value, a_source) \
+	auto& a_value = !REL::Module::IsVR() ? (a_source)->GetRuntimeData().a_value : (a_source)->GetVRRuntimeData().a_value;
+
 namespace Util
 {
 	/** @brief Forces weather and refreshes its cloud passes and sky model. */
@@ -39,6 +46,10 @@ namespace Util
 	float GetVerticalFOVRad();
 
 	RE::NiPoint3 GetEyePosition();
+	/** @brief Eye position for a stereo index. Flat builds ignore the index. */
+	RE::NiPoint3 GetEyePosition(int eyeIndex);
+	/** @brief Midpoint of the two eyes. Flat builds return the single eye position. */
+	RE::NiPoint3 GetAverageEyePosition();
 
 	float2 ConvertToDynamic(float2 a_size, bool a_ignoreLock = false);
 

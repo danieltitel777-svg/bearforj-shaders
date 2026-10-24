@@ -42,6 +42,11 @@ struct HorizonFix : Feature
 
 	/** @brief Disables the feature when the HorizonFix plugin is not installed. */
 	virtual void PostPostLoad() override;
+	bool RequiresRestartForToggle() const override { return true; }
+	std::string_view GetRuntimeToggleNote() const override
+	{
+		return "Enabling or disabling Horizon Fix integration requires a restart. This controls shader compatibility only; HorizonFix.dll remains loaded. Shader cache is unchanged.";
+	}
 
 	virtual bool IsCore() const override { return true; }
 

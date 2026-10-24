@@ -46,14 +46,14 @@ namespace ExponentialHeightFog
 
 	bool ShouldDisableVanillaFog()
 	{
-		return SharedData::exponentialHeightFogSettings.enabled && SharedData::exponentialHeightFogSettings.disableVanillaFog != 0;
+		return (RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled) && SharedData::exponentialHeightFogSettings.disableVanillaFog != 0;
 	}
 
 	bool ShouldApplyVolumetricFog(out uint3 volumeSize)
 	{
 		volumeSize = 0u.xxx;
 		bool applyVolumetricFog = false;
-		[branch] if (SharedData::exponentialHeightFogSettings.enabled != 0 &&
+		[branch] if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled) != 0 &&
 					 SharedData::exponentialHeightFogSettings.volumetricFogEnabled != 0 &&
 					 SharedData::exponentialHeightFogSettings.volumetricFogDistance > GetVolumetricStartDistance() + 1.0f)
 		{

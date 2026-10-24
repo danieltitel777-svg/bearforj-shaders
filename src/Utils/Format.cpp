@@ -252,14 +252,6 @@ namespace Util
 		return totalFrameTime - measuredSum;
 	}
 
-	bool IEquals(std::string_view a, std::string_view b)
-	{
-		return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(),
-										   [](char ca, char cb) {
-											   return std::tolower(static_cast<unsigned char>(ca)) == std::tolower(static_cast<unsigned char>(cb));
-										   });
-	}
-
 	std::string ToLower(std::string text)
 	{
 		std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });

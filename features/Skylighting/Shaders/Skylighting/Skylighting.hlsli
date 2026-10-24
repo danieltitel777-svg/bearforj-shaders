@@ -101,7 +101,7 @@ namespace Skylighting
 		shadowVisibility = 1.0;
 #	endif
 
-		if (SharedData::InInterior)
+		if (!RuntimeFeatures::IsEnabled(RuntimeFeatures::SkylightingFeature) || SharedData::InInterior)
 			return scaledUnitSH;
 
 		positionMS.xyz += normalWS * CELL_SIZE * 0.5;  // Receiver normal bias
@@ -165,7 +165,7 @@ namespace Skylighting
 
 	float GetSkylightingDiffuse(sh2 skylightingSH, float3 positionMS, float3 evalNormal, float vertexAO = 1.0)
 	{
-		if (SharedData::InInterior)
+		if (!RuntimeFeatures::IsEnabled(RuntimeFeatures::SkylightingFeature) || SharedData::InInterior)
 			return 1.0;
 
 		float3 candidateNormal = float3(evalNormal.xy, max(0.0, evalNormal.z));
@@ -176,11 +176,11 @@ namespace Skylighting
 		return saturate(skylightingDiffuse / max(vertexAO, EPSILON_DIVISION));
 	}
 
-	sh2 SampleNoBias(float3 positionMS)
+	sh2 SampleNoBiasIncludingInteriors(float3 positionMS)
 	{
 		sh2 scaledUnitSH = UNIT_SH / 1e-10;
 
-		if (SharedData::InInterior)
+		if (!RuntimeFeatures::IsEnabled(RuntimeFeatures::SkylightingFeature))
 			return scaledUnitSH;
 
 		float3 positionMSAdjusted = positionMS - SharedData::skylightingSettings.PosOffset.xyz;
@@ -214,6 +214,14 @@ namespace Skylighting
 		}
 
 		return SphericalHarmonics::Scale(sum, rcp(wsum + EPSILON_WEIGHT_SUM));
+	}
+
+	sh2 SampleNoBias(float3 positionMS)
+	{
+		if (!RuntimeFeatures::IsEnabled(RuntimeFeatures::SkylightingFeature) || SharedData::InInterior)
+			return UNIT_SH / 1e-10;
+
+		return SampleNoBiasIncludingInteriors(positionMS);
 	}
 #endif
 }

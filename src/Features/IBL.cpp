@@ -241,7 +241,7 @@ void IBL::Prepass()
 		context->PSSetShaderResources(76, 2, views);
 	}
 
-	std::array<ID3D11ShaderResourceView*, 1> srvs = { (dynamicCubemaps.loaded && envTexture) ? envTexture->srv.get() : nullptr };
+	std::array<ID3D11ShaderResourceView*, 1> srvs = { (dynamicCubemaps.IsEnabled() && envTexture) ? envTexture->srv.get() : nullptr };
 	std::array<ID3D11UnorderedAccessView*, 1> uavs = { envIBLTexture->uav.get() };
 	std::array<ID3D11SamplerState*, 1> samplers = { Deferred::GetSingleton()->linearSampler };
 

@@ -59,7 +59,7 @@ namespace Util
 			return zPrepassCopy.depthSRV;
 
 		auto& tb = globals::features::terrainBlending;
-		if (tb.loaded && tb.settings.Enabled) {
+		if (tb.IsEnabled() && tb.settings.Enabled) {
 			const bool use16bit = prefer16bit && !globals::features::reverseZ.IsActive();
 			auto* srv = use16bit ? (tb.blendedDepthTexture16 ? tb.blendedDepthTexture16->srv.get() : nullptr) : (tb.blendedDepthTexture ? tb.blendedDepthTexture->srv.get() : nullptr);
 			if (srv)

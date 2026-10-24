@@ -184,7 +184,7 @@ PS_OUTPUT main(PS_INPUT input)
 	// The engine writes these constants straight into the buffer, bypassing any C++ conversion hook.
 	float3 fogColor = lerp(ColorManagement::SRGBToWorking(FogNearColor.xyz), ColorManagement::SRGBToWorking(FogFarColor.xyz), fogFactor);
 #		if defined(IBL)
-	if (SharedData::iblSettings.EnableIBL) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ImageBasedLightingFeature) && RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && SharedData::iblSettings.EnableIBL)) {
 		float2 fogUV = input.TexCoord.xy;
 		float4 fogPositionWS = float4(2 * float2(fogUV.x, -fogUV.y + 1) - 1, depth, 1);
 		fogPositionWS = mul(FrameBuffer::CameraViewProjInverse, fogPositionWS);

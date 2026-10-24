@@ -606,6 +606,7 @@ void PostProcessing::CopyToRenderTarget(
 void PostProcessing::BeginLinearProcessing(PostProcessFeature::TextureInfo& texture)
 {
 	auto& ll = globals::features::linearLighting;
+	texture.gamut = ll.IsLinearLightingActive() && ll.settings.enableACEScg ? Gamut::ACEScg : Gamut::Rec709;
 	if (ll.IsLinearLightingActive())
 		return;
 	auto* context = globals::d3d::context;
@@ -623,13 +624,16 @@ void PostProcessing::BeginLinearProcessing(PostProcessFeature::TextureInfo& text
 	context->PSSetShaderResources(0, 1, &srv);
 	cb = nullptr;
 	context->PSSetConstantBuffers(1, 1, &cb);
-	texture = { texInput->resource.get(), texInput->srv.get() };
+	texture = { texInput->resource.get(), texInput->srv.get(), texture.gamut };
 }
 
 void PostProcessing::DrawFeature(PostProcessFeature& feature, PostProcessFeature::TextureInfo& lastTexColor)
 {
 	if (feature.WritesToMainTexture()) {
+		const auto gamut = lastTexColor.gamut;
 		feature.Draw(lastTexColor);
+		if (&feature != pipeline[static_cast<size_t>(FeaturePipelineIndex::ColorGrading)].get())
+			lastTexColor.gamut = gamut;
 	} else {
 		PostProcessFeature::TextureInfo inTex = lastTexColor;
 		feature.Draw(inTex);
@@ -642,7 +646,7 @@ void PostProcessing::DrawBeforeUpscaling()
 		return;
 
 	auto& upscaling = globals::features::upscaling;
-	if (!upscaling.loaded)
+	if (!upscaling.IsEnabled())
 		return;
 
 	auto renderer = globals::game::renderer;
@@ -676,7 +680,7 @@ void PostProcessing::DrawBeforeUpscaling()
 
 	if (processing)
 		CopyToRenderTarget(gameTexMain, texCopyMain.get(), lastTexColor.tex, lastTexColor.srv,
-			CopyCB{ .gamma = globals::features::linearLighting.IsLinearLightingActive() ? 1.f : Util::ColorSpace::GAME_GAMMA_INV });
+			CopyCB{ .inputGamut = lastTexColor.gamut, .outputGamut = lastTexColor.gamut, .gamma = globals::features::linearLighting.IsLinearLightingActive() ? 1.f : Util::ColorSpace::GAME_GAMMA_INV });
 
 	state->EndPerfEvent();
 }

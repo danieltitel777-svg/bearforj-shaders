@@ -1,5 +1,7 @@
 #include "Feature.h"
 
+#include "Utils/RuntimeResources.h"
+
 #include "CSEditor/SceneManager/SceneManager.h"
 #include "FeatureIssues.h"
 #include "FeatureVersions.h"
@@ -34,6 +36,7 @@
 #include "Features/PostProcessing.h"
 #include "Features/ProceduralAurora.h"
 #include "Features/RainRefraction.h"
+#include "Features/RainRendering.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
 #include "Features/ScreenSpaceGI.h"
@@ -67,6 +70,7 @@
 #include "TruePBR.h"
 
 #include <unordered_map>
+#include <unordered_set>
 
 void Feature::Load(json& o_json)
 {
@@ -252,6 +256,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::remoteControl,
 		&globals::features::csEditor,
 		&globals::features::sceneManager,
+		&globals::features::rainRendering,
 		&globals::features::screenshotFeature,
 		&globals::features::linearLighting,
 		&globals::features::effects11,
@@ -301,6 +306,43 @@ std::vector<std::string> Feature::GetLoadedFeatureNames()
 	return names;
 }
 
+Feature* Feature::FindRegisteredFeatureByShortName(const std::string& shortName)
+{
+	static const auto featuresByShortName = [] {
+		std::unordered_map<std::string, Feature*> index;
+		for (auto* feature : GetFeatureList())
+			index.emplace(feature->GetShortName(), feature);
+		return index;
+	}();
+
+	const auto it = featuresByShortName.find(shortName);
+	return it == featuresByShortName.end() ? nullptr : it->second;
+}
+
+bool Feature::IsRuntimeListed() const
+{
+	static const auto names = [] {
+		std::unordered_set<std::string> listed;
+#define RUNTIME_FEATURE(name, index) listed.emplace(#name);
+#include "../package/Shaders/Common/RuntimeFeatureList.hlsli"
+#undef RUNTIME_FEATURE
+		return listed;
+	}();
+	return names.contains(GetShortName());
+}
+
+void Feature::SetEnabled(bool value)
+{
+	value = IsAlwaysEnabled() || value;
+	const bool previous = requestedEnabled.exchange(value, std::memory_order_acq_rel);
+	if (RequiresRestartForToggle() && runtimeBootSnapshot.IsLatched())
+		return;
+	if (!runtimeLifecycleStarted.load(std::memory_order_acquire))
+		runtimeEnabled.store(value, std::memory_order_release);
+	if (previous != value)
+		runtimeResetPending.store(true, std::memory_order_release);
+}
+
 bool Feature::ToggleAtBootSetting()
 {
 	if (IsAlwaysEnabled())
@@ -309,9 +351,70 @@ bool Feature::ToggleAtBootSetting()
 	const std::string featureName = GetShortName();
 	auto disabled = state->IsFeatureDisabled(featureName);
 	state->SetFeatureDisabled(featureName, !disabled);
+	if (IsRuntimeListed())
+		SetEnabled(disabled);
 	state->CheckCoreSettingsChanged();
 
 	return state->IsFeatureDisabled(featureName);  // Return the new state
+}
+
+void Feature::InitializeRuntimeResources()
+{
+	if (!IsRuntimeAvailable()) {
+		logger::info("[ResourceLifetime] feature={} startup_disabled=true resource_initialization=skipped", GetShortName());
+		runtimeLifecycleStarted.store(true, std::memory_order_release);
+		runtimeEnabled.store(false, std::memory_order_release);
+		runtimeResetPending.store(false, std::memory_order_release);
+		return;
+	}
+	{
+		Util::RuntimeResourceDiagnostics diagnostics(GetShortName(), "initialize-persistent");
+		SetupPersistentResources();
+	}
+	runtimeLifecycleStarted.store(true, std::memory_order_release);
+	if (!HasReleasableResources()) {
+		Util::RuntimeResourceDiagnostics diagnostics(GetShortName(), "initialize-retained");
+		SetupResources();
+		runtimeResourcesReady = true;
+	}
+	ApplyRuntimeState();
+	runtimeResetPending.store(false, std::memory_order_release);
+}
+
+void Feature::ApplyRuntimeState()
+{
+	const bool enable = RequiresRestartForToggle() && runtimeBootSnapshot.IsLatched() ?
+	                        runtimeBootSnapshot.Boot(&RuntimeToggleSettings::enabled) :
+	                        requestedEnabled.load(std::memory_order_acquire);
+	Util::RuntimeResourceDiagnostics diagnostics(GetShortName(), enable ? "enable" : "disable");
+	logger::info("[ResourceLifetime] feature={} requested={} resources_ready={} releasable={}",
+		GetShortName(), enable, runtimeResourcesReady, HasReleasableResources());
+	try {
+		if (!enable) {
+			runtimeEnabled.store(false, std::memory_order_release);
+			OnRuntimeDisabled();
+			if (HasReleasableResources() && runtimeResourcesReady) {
+				ReleaseResources();
+				runtimeResourcesReady = false;
+			}
+			return;
+		}
+		runtimeEnabled.store(true, std::memory_order_release);
+		if (!runtimeResourcesReady) {
+			SetupResources();
+			runtimeResourcesReady = true;
+		}
+		OnRuntimeEnabled();
+	} catch (const std::exception& e) {
+		runtimeEnabled.store(false, std::memory_order_release);
+		requestedEnabled.store(false, std::memory_order_release);
+		logger::error("{} runtime resources failed: {}", GetShortName(), e.what());
+		OnRuntimeDisabled();
+		if (HasReleasableResources()) {
+			ReleaseResources();
+			runtimeResourcesReady = false;
+		}
+	}
 }
 
 std::string Feature::GetDisplayCategory() const

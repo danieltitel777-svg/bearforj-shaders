@@ -1,5 +1,7 @@
 #include "FeatureBuffer.h"
 
+#include "Feature.h"
+
 #include <array>
 
 #include "Features/CloudShadows.h"
@@ -22,6 +24,7 @@
 #include "Features/ProceduralAurora.h"
 #include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
+#include "Features/RainRendering.h"
 #include "Features/ScreenSpaceGI.h"
 #include "Features/ScreenSpaceReflections.h"
 #include "Features/Skin.h"
@@ -56,6 +59,17 @@ std::pair<unsigned char*, size_t> _GetFeatureBufferData(Ts... feat_datas)
 
 std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 {
+	std::array<uint32_t, 4> runtimeFeatureFlags{};
+	static const auto runtimeFeatures = std::to_array<std::pair<Feature*, uint32_t>>({
+#define RUNTIME_FEATURE(name, index) { Feature::FindRegisteredFeatureByShortName(#name), index },
+#include "../package/Shaders/Common/RuntimeFeatureList.hlsli"
+#undef RUNTIME_FEATURE
+	});
+	static_assert(runtimeFeatures.size() <= sizeof(runtimeFeatureFlags) * 8);
+	for (const auto& [feature, index] : runtimeFeatures) {
+		if (feature && feature->IsEnabled())
+			runtimeFeatureFlags[index >> 5] |= 1u << (index & 31u);
+	}
 	return _GetFeatureBufferData(
 		globals::features::grassLighting.settings,
 		globals::features::extendedMaterials.settings,
@@ -87,5 +101,7 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::nightEye.GetCommonBufferData(),
 		globals::features::proceduralAurora.GetCommonBufferData(),
 		globals::features::screenSpaceGI.GetCommonBufferData(),
-		globals::features::screenSpaceReflections.GetCommonBufferData());
+		globals::features::screenSpaceReflections.GetCommonBufferData(),
+		globals::features::rainRendering.GetCommonBufferData(),
+		runtimeFeatureFlags);
 }

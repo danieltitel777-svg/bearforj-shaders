@@ -537,6 +537,10 @@ bool LightLimitFix::IsGlobalLight(RE::BSLight* a_light)
 
 void LightLimitFix::PostPostLoad()
 {
+	if (!IsRuntimeAvailable()) {
+		logger::info("[LLF] Startup disabled; shader support remains compiled");
+		return;
+	}
 	particleLightConfigs.Load();
 	Hooks::Install();
 	if (settings.EnableLocalShadows) {
@@ -653,6 +657,8 @@ float LightLimitFix::BSLight_GetLuminance::thunk(RE::BSLight* bsLight, RE::NiPoi
 
 void LightLimitFix::DataLoaded()
 {
+	if (!IsRuntimeAvailable())
+		return;
 	auto iMagicLightMaxCount = globals::game::gameSettingCollection->GetSetting("iMagicLightMaxCount");
 	iMagicLightMaxCount->data.i = MAXINT32;
 	logger::info("[LLF] Unlocked magic light limit");

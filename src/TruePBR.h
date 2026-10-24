@@ -62,6 +62,12 @@ public:
 	virtual void Prepass() override;
 	/** @brief Installs all Detours hooks for PBR material, shader, and decal interception. */
 	virtual void PostPostLoad() override;
+	bool RequiresRenderMaintenance() const override { return IsRuntimeAvailable(); }
+	bool RequiresRestartForToggle() const override { return true; }
+	std::string_view GetRuntimeToggleNote() const override
+	{
+		return "Enabling or disabling True PBR requires a restart. Off skips material conversion, hooks and resources. Shader cache is unchanged.";
+	}
 	/** @brief Looks up the default PBR land texture set by editor ID after data files are loaded. */
 	virtual void DataLoaded() override;
 

@@ -433,7 +433,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #		elif defined(HORIZFADE)
 #			if defined(EFFECTS11)
-	if (SharedData::enbSettings.Enable)
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::Effects11Feature) && SharedData::enbSettings.Enable))
 		skyScale = 0.0;
 #			endif
 	psout.Color.xyz = float3(1.5, 1.5, 1.5) * (input.Color.xyz * baseColor.xyz + skyScale);
@@ -477,7 +477,7 @@ PS_OUTPUT main(PS_INPUT input)
 	const bool inReflection = (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection) != 0;
 
 #	if defined(EXP_HEIGHT_FOG)
-	if (inReflection && SharedData::exponentialHeightFogSettings.enabled) {
+	if (inReflection && (RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		float skyFogDistance = SharedData::CameraData.x;
 #		if defined(HORIZON_FIX)
 		// Match the main view (ISSAOComposite.hlsl): fog the sky out to the HorizonFix far water's horizon

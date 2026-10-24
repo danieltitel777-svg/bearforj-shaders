@@ -163,7 +163,7 @@ void TerrainVariation::BSLightingShader_SetupGeometry(RE::BSRenderPass* a_pass)
 	auto& descriptor = globals::state->permutationData.ExtraFeatureDescriptor;
 	descriptor &= ~uint(State::ExtraFeatureDescriptors::TVMeshVariation);
 
-	if (!loaded || settings.enableMeshSupport == 0 || a_pass == nullptr || a_pass->geometry == nullptr) {
+	if (!IsEnabled() || settings.enableMeshSupport == 0 || a_pass == nullptr || a_pass->geometry == nullptr) {
 		return;
 	}
 

@@ -224,7 +224,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 diffuseColor = Color::DirectionalLight(SharedData::DirLightColor.xyz) * dirShadow * 0.5 * Color::BRDFScale;
 
 #			if defined(EXP_HEIGHT_FOG)
-	if (SharedData::exponentialHeightFogSettings.enabled) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		diffuseColor *= ExponentialHeightFog::GetSunlightFogAttenuation(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz);
 	}
 #			endif
@@ -261,7 +261,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 	float3 directionalAmbientColor = max(0, Color::Ambient(SharedData::GetAmbient(normal)));
 #			if defined(IBL)
-	if (SharedData::iblSettings.EnableIBL) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ImageBasedLightingFeature) && RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && SharedData::iblSettings.EnableIBL)) {
 		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal, input.WorldPosition.xyz);
 	}
 #			endif
@@ -271,7 +271,7 @@ PS_OUTPUT main(PS_INPUT input)
 	psout.Diffuse.w = 1;
 
 #			if defined(EXP_HEIGHT_FOG)
-	if (inReflection && SharedData::exponentialHeightFogSettings.enabled) {
+	if (inReflection && (RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		ApplyReflectionExponentialHeightFog(psout.Diffuse.xyz, input.WorldPosition.xyz, input.Position);
 	}
 #			endif
@@ -289,7 +289,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 diffuseColor = Color::DirectionalLight(SharedData::DirLightColor.xyz) * dirShadow * 0.5 * Color::BRDFScale;
 
 #			if defined(EXP_HEIGHT_FOG)
-	if (SharedData::exponentialHeightFogSettings.enabled) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		diffuseColor *= ExponentialHeightFog::GetSunlightFogAttenuation(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz);
 	}
 #			endif
@@ -326,7 +326,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 	float3 directionalAmbientColor = Color::Ambient(SharedData::GetAmbient(normal));
 #			if defined(IBL)
-	if (SharedData::iblSettings.EnableIBL) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ImageBasedLightingFeature) && RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && SharedData::iblSettings.EnableIBL)) {
 		directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -normal, input.WorldPosition.xyz);
 	}
 #			endif
@@ -334,7 +334,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 	float3 color = diffuseColor * baseColor.xyz;
 #			if defined(EXP_HEIGHT_FOG)
-	if (inReflection && SharedData::exponentialHeightFogSettings.enabled) {
+	if (inReflection && (RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		ApplyReflectionExponentialHeightFog(color, input.WorldPosition.xyz, input.Position);
 	}
 #			endif

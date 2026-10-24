@@ -294,7 +294,7 @@ void HDRDisplay::DrawSettings()
 		Util::Text::Warning(T(TKEY("sdr_display_not_detected"), "SDR Display (HDR not detected)"));
 	}
 
-	const bool isExclusiveFullscreen = globals::features::upscaling.loaded ? !globals::features::upscaling.isWindowed : wasExclusiveFullscreen;
+	const bool isExclusiveFullscreen = globals::features::upscaling.IsEnabled() ? !globals::features::upscaling.isWindowed : wasExclusiveFullscreen;
 
 	if (isExclusiveFullscreen) {
 		ImGui::Spacing();
@@ -840,7 +840,7 @@ HDRDisplay::D3D12UIBufferMode HDRDisplay::GetD3D12UIBufferMode()
 	if (!globals::features::upscaling.d3d12SwapChainActive)
 		return mode;
 
-	const bool hdrReady = loaded && settings.enableHDR && hdrDataCB && outputTexture;
+	const bool hdrReady = IsEnabled() && settings.enableHDR && hdrDataCB && outputTexture;
 	const bool hdrShaderAvailable = hdrReady && GetHDROutputCS() != nullptr;
 
 	mode.useUIBuffer = hdrShaderAvailable || IsFGCompositingThisFrame();
@@ -960,7 +960,7 @@ namespace
 		{
 			if (pBlendState) {
 				auto& hdr = globals::features::hdrDisplay;
-				const bool d3d11HdrCapture = hdr.loaded && hdr.settings.enableHDR && hdr.uiTexture;
+				const bool d3d11HdrCapture = hdr.IsEnabled() && hdr.settings.enableHDR && hdr.uiTexture;
 				const bool fgCapture = globals::features::upscaling.d3d12SwapChainActive;
 				if (d3d11HdrCapture || fgCapture)
 					pBlendState = hdr.GetPatchedAlphaBlendState(pBlendState);
@@ -1116,7 +1116,7 @@ HRESULT HDRDisplay::HandleSwapChainPresent(
 	const std::function<HRESULT(IDXGISwapChain*, UINT, UINT)>& presentChain)
 {
 	const bool frameGenActive = globals::features::upscaling.d3d12SwapChainActive;
-	const bool hdrReady = loaded && hdrDataCB && outputTexture && settings.enableHDR;
+	const bool hdrReady = IsEnabled() && hdrDataCB && outputTexture && settings.enableHDR;
 
 	D3D11_VIEWPORT savedViewport{};
 	UINT viewportCount = 1;
@@ -1608,7 +1608,7 @@ float HDRDisplay::GetDisplayMaxLuminance() const
 
 float4 HDRDisplay::GetSharedDataHDR() const
 {
-	if (!loaded)
+	if (!IsEnabled())
 		return { 0.0f, 0.0f, 0.0f, 0.0f };
 
 	auto* state = globals::state;

@@ -8,6 +8,7 @@
 #endif
 
 #include "Common/FrameBuffer.hlsli"
+#include "Common/RainRendering.hlsli"
 #include "Common/Spherical Harmonics/SphericalHarmonics.hlsli"
 
 namespace SharedData
@@ -721,6 +722,8 @@ namespace SharedData
 		ProceduralAuroraSettings proceduralAuroraSettings;
 		SSGISettings ssgiSettings;
 		SSRSettings ssrSettings;
+		RainRenderingSettings rainRenderingSettings;
+		uint4 RuntimeFeatureFlags;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);
@@ -730,6 +733,11 @@ namespace SharedData
 	{
 		uv = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(uv);
 		return int3(uv * BufferDim.xy, 0);
+	}
+
+	int3 ConvertUVToSampleCoord(float2 uv, uint)
+	{
+		return ConvertUVToSampleCoord(uv);
 	}
 
 	// Get a raw depth from the depth buffer. [0,1] in uv space
@@ -819,4 +827,5 @@ namespace SharedData
 		return SphericalHarmonics::Unproject(AmbientSHR, AmbientSHG, AmbientSHB, normal);
 	}
 }
+#include "Common/RuntimeFeatures.hlsli"
 #endif  // __SHARED_DATA_DEPENDENCY_HLSL__

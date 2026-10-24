@@ -376,12 +376,12 @@
 #	elif defined(TRUE_PBR)
 		return (PBRFlags & TERRAIN_DISPLACEMENT_MASK) != 0;
 #	elif defined(LANDSCAPE_SEAMS)
-		return SharedData::extendedMaterialSettings.EnableTerrainParallax ||
+		return (RuntimeFeatures::IsEnabled(RuntimeFeatures::ExtendedMaterialsFeature) && SharedData::extendedMaterialSettings.EnableTerrainParallax) ||
 		       (Permutation::ExtraFeatureDescriptor & Permutation::ExtraFeatureFlags::THLandHasDisplacement) != 0 ||
 		       LandscapeSeams::HasAnyFlag(LandscapeSeams::AnyParallaxMask);
 #	else
-		return SharedData::extendedMaterialSettings.EnableTerrainParallax ||
-		       (Permutation::ExtraFeatureDescriptor & Permutation::ExtraFeatureFlags::THLandHasDisplacement) != 0;
+		return (RuntimeFeatures::IsEnabled(RuntimeFeatures::ExtendedMaterialsFeature) && SharedData::extendedMaterialSettings.EnableTerrainParallax) ||
+		       (Permutation::ExtraFeatureDescriptor & Permutation::ExtraFeatureFlags::THLandHasDisplacement) != 0);
 #	endif
 	}
 

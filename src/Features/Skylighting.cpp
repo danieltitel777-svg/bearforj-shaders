@@ -2,6 +2,7 @@
 
 #include "Deferred.h"
 #include "I18n/I18n.h"
+#include "Precipitation.h"
 #include "ShaderCache.h"
 #include "State.h"
 #include "Utils/D3D.h"
@@ -329,9 +330,9 @@ void Skylighting::Prepass()
 
 void Skylighting::PostPostLoad()
 {
+	Precipitation::Install();
 	logger::info("[SKYLIGHTING] Hooking BSLightingShaderProperty::GetPrecipitationOcclusionMapRenderPassesImp");
 	stl::write_vfunc<0x2D, BSLightingShaderProperty_GetPrecipitationOcclusionMapRenderPassesImpl>(RE::VTABLE_BSLightingShaderProperty[0]);
-	stl::write_thunk_call<Main_Precipitation_RenderOcclusion>(REL::RelocationID(35560, 36559).address() + Util::VersionedRelocation::Select(0x3A1, 0x3A1, 0x3BF));
 
 	stl::write_thunk_call<SetViewFrustum>(REL::RelocationID(25643, 26185).address() + REL::Relocate(0x5D9, 0x59D));
 
@@ -589,7 +590,7 @@ void Skylighting::RenderOcclusion()
 	if (!shaderCache->IsEnabled()) {
 		TracyD3D11Zone(globals::state->tracyCtx, "Precipitation Mask");
 		state->BeginPerfEvent("Precipitation Mask");
-		Main_Precipitation_RenderOcclusion::func();
+		Precipitation::RenderOriginal();
 		state->EndPerfEvent();
 		return;
 	}
@@ -610,11 +611,8 @@ void Skylighting::RenderOcclusion()
 				if (!precipObject) {
 					precipObject = precip->lastPrecip;
 				}
-				auto particleShaderProperty = precipObject ? netimmerse_cast<RE::BSParticleShaderProperty*>(precipObject->GetGeometryRuntimeData().shaderProperty.get()) : nullptr;
-				if (particleShaderProperty && particleShaderProperty->particleEmitter) {
+				if (auto* rain = Precipitation::GetRainEmitter(precipObject.get())) {
 					precip->SetupMask();
-					auto rain = (RE::BSParticleShaderRainEmitter*)(particleShaderProperty->particleEmitter);
-
 					globals::profiler->BeginPass("Skylighting::PrecipMask");
 					precip->RenderMask(rain);
 					globals::profiler->EndPass();
@@ -731,11 +729,6 @@ void Skylighting::CaptureShadowCascadeSRV()
 	if (shadowCascadeSRV)
 		shadowCascadeSRV->Release();
 	shadowCascadeSRV = srv;
-}
-
-void Skylighting::Main_Precipitation_RenderOcclusion::thunk()
-{
-	globals::features::skylighting.RenderOcclusion();
 }
 
 void Skylighting::BSShaderAccumulator_StartGroupingAlphas::GrowPool()

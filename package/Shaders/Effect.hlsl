@@ -531,14 +531,14 @@ float3 GetLightingColor(float3 msPosition, float3 worldPosition, float2 screenPo
 	dirColor *= dirShadow;
 
 #		if defined(EXP_HEIGHT_FOG)
-	if (SharedData::exponentialHeightFogSettings.enabled) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		dirColor *= ExponentialHeightFog::GetSunlightFogAttenuation(worldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz);
 	}
 #		endif
 
 #		if defined(SKYLIGHTING)
 #			if defined(IBL)
-	if (!SharedData::iblSettings.EnableIBL)
+	if (!(RuntimeFeatures::IsEnabled(RuntimeFeatures::ImageBasedLightingFeature) && RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && SharedData::iblSettings.EnableIBL))
 #			endif
 	{
 		ambientColor = ColorManagement::SceneColor::ScaleByLinear(ambientColor, skylightingDiffuse);
@@ -613,7 +613,7 @@ float3 GetLightingShadow(float3 color, float3 worldPosition, float2 screenPositi
 	dirColor *= shadow;
 
 #		if defined(EXP_HEIGHT_FOG)
-	if (SharedData::exponentialHeightFogSettings.enabled) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		dirColor *= ExponentialHeightFog::GetSunlightFogAttenuation(worldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz);
 	}
 #		endif
@@ -895,7 +895,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float fogFactor = input.FogParam.w;
 	float3 fogColor = input.FogParam.xyz;
 #		if defined(IBL)
-	if (SharedData::iblSettings.EnableIBL) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ImageBasedLightingFeature) && RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && SharedData::iblSettings.EnableIBL)) {
 		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor);
 	}
 #		endif
@@ -903,7 +903,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float vanillaFogFactor = fogFactor;
 	float3 vanillaFogColor = fogColor;
 	float expFogFactor = 0;
-	if (SharedData::exponentialHeightFogSettings.enabled) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		const bool inReflection = Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InReflection;
 		float4 exponentialHeightFog = ExponentialHeightFog::GetExponentialHeightFogInternal(input.WorldPosition.xyz, FrameBuffer::CameraPosAdjust.xyz, fogColor, true, float4(input.Position.xy * FrameBuffer::DynamicResolutionParams2.xy, input.Position.z, 1), !inReflection);
 		expFogFactor = exponentialHeightFog.w;
@@ -936,7 +936,7 @@ PS_OUTPUT main(PS_INPUT input)
 #		else
 #			if defined(EXP_HEIGHT_FOG)
 	float3 blendedColor = lerp(lightColor, vanillaFogColor, vanillaFogFactor.xxx);
-	if (SharedData::exponentialHeightFogSettings.enabled) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ExponentialHeightFogFeature) && SharedData::exponentialHeightFogSettings.enabled)) {
 		blendedColor = ExponentialHeightFog::GetVanillaFogFade(input.FogAlpha) * lerp(blendedColor, fogColor, expFogFactor.xxx);
 		fogMul.xyz = 1.0.xxx;
 	}
@@ -964,7 +964,7 @@ PS_OUTPUT main(PS_INPUT input)
 #	endif
 	psout.Diffuse = finalColor;
 #	if defined(LIGHTING) && defined(LIGHT_LIMIT_FIX) && defined(LLFDEBUG)
-	if (SharedData::lightLimitFixSettings.EnableLightsVisualisation) {
+	if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::LightLimitFixFeature) && SharedData::lightLimitFixSettings.EnableLightsVisualisation)) {
 		if (SharedData::lightLimitFixSettings.LightsVisualisationMode == 0) {
 			psout.Diffuse.xyz = Color::TurboColormap(0.0);
 		} else if (SharedData::lightLimitFixSettings.LightsVisualisationMode == 1) {

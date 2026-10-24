@@ -247,7 +247,7 @@ struct SKIN_BSLightingShader_SetupMaterial
 		func(shader, material);
 
 		auto& skin = globals::features::skin;
-		if (skin.loaded) {
+		if (skin.IsEnabled()) {
 			skin.BSLightingShader_SetupMaterial(material);
 		}
 	}

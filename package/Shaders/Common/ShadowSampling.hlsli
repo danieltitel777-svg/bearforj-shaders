@@ -143,7 +143,7 @@ namespace ShadowSampling
 		float3 ambientColor = GetRawAmbientLighting();
 
 #if defined(IBL)
-		if (SharedData::iblSettings.EnableIBL) {
+		if ((RuntimeFeatures::IsEnabled(RuntimeFeatures::ImageBasedLightingFeature) && RuntimeFeatures::IsEnabled(RuntimeFeatures::DynamicCubemapsFeature) && SharedData::iblSettings.EnableIBL)) {
 			ambientColor = ImageBasedLighting::GetDiffuseIBL(ambientColor, ImageBasedLightingNormal, positionMS);
 		}
 #endif

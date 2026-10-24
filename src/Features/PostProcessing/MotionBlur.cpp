@@ -397,7 +397,7 @@ bool MotionBlur::UpdateConstantBuffers()
 	float2 targetResolution = { static_cast<float>(lastWidth), static_cast<float>(lastHeight) };
 
 	auto& upscaling = globals::features::upscaling;
-	if (upscaling.loaded && upscaling.IsUpscalingActive()) {
+	if (upscaling.IsEnabled() && upscaling.IsUpscalingActive()) {
 		velocityTextureScale.x = std::clamp(upscaling.resolutionScale.x, 0.0f, 1.0f);
 		velocityTextureScale.y = std::clamp(upscaling.resolutionScale.y, 0.0f, 1.0f);
 	}

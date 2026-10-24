@@ -4,8 +4,9 @@
 #include "FeatureConstraints.h"
 #include "FeatureVersions.h"
 #include "I18n/I18n.h"
-#include "Utils/RestartSettings.h"
+#include "Utils/BootSnapshot.h"
 
+#include <atomic>
 #include <span>
 #include <string_view>
 #ifdef TRACY_ENABLE
@@ -48,9 +49,49 @@ struct Feature
 	// Nexus Mods base URL for Skyrim Special Edition
 	static constexpr std::string_view NEXUS_BASE_URL = "https://www.nexusmods.com/skyrimspecialedition/mods/";
 	bool loaded = false;
-	// Whether the feature .ini is present on disk. Unlike `loaded` this stays true for
-	// features disabled at boot, so they remain reachable in the UI.
+	std::atomic<bool> runtimeEnabled{ true };
+	std::atomic<bool> runtimeResetPending{ false };
+	std::atomic<bool> requestedEnabled{ true };
+	std::atomic<bool> runtimeLifecycleStarted{ false };
+	bool runtimeResourcesReady = false;
+
+	struct RuntimeToggleSettings
+	{
+		bool enabled = true;
+	};
+	inline static constexpr Util::Settings::RestartTable<RuntimeToggleSettings, 1> kRuntimeRestartFields{ {
+		UTIL_RESTART_FIELD(RuntimeToggleSettings, enabled, "Feature Enabled"),
+	} };
+
+	/** @brief Whether changing the feature toggle takes effect only on the next launch. */
+	virtual bool RequiresRestartForToggle() const { return false; }
+	/** @brief Captures the selected feature state before startup hooks are installed. */
+	void LatchRuntimeState() { runtimeBootSnapshot.LatchIfNeeded(RuntimeToggleSettings{ requestedEnabled.load(std::memory_order_acquire) }); }
+
+	/** @brief Whether this installed feature currently contributes to rendering. */
+	bool IsEnabled() const { return loaded && runtimeEnabled.load(std::memory_order_relaxed); }
+
+	/** @brief Whether startup configuration permits this feature to run in this session. */
+	bool IsRuntimeAvailable() const
+	{
+		return !RequiresRestartForToggle() || (runtimeBootSnapshot.IsLatched() ? runtimeBootSnapshot.Boot(&RuntimeToggleSettings::enabled) : requestedEnabled.load(std::memory_order_relaxed));
+	}
+
+	/** @brief Selects the enabled state. Restart-required toggles stay pending until the next launch. */
+	void SetEnabled(bool value);
+	/** @brief True when the short name is one of the runtime-toggle features. */
+	bool IsRuntimeListed() const;
+	/** @brief Live on/off without a shader-cache rebuild. Restart-required features are excluded. */
+	bool SupportsLiveToggle() const { return IsRuntimeListed() && !RequiresRestartForToggle(); }
+	/** @brief Restart-required feature toggle differs from the state latched at startup. */
+	bool HasAnyPendingRestart() const
+	{
+		return RequiresRestartForToggle() && runtimeBootSnapshot.HasPendingChange(RuntimeToggleSettings{ requestedEnabled.load(std::memory_order_relaxed) }, &RuntimeToggleSettings::enabled);
+	}
+
+	// Whether the feature .ini is present, including features that failed to initialize.
 	bool installed = false;
+	Util::Settings::BootSnapshot<RuntimeToggleSettings> runtimeBootSnapshot{ kRuntimeRestartFields };
 	std::string version;
 	std::string failedLoadedMessage;
 
@@ -158,6 +199,10 @@ public:
 
 	/** @brief Whether the feature can never be disabled at boot, e.g. infrastructure other features rely on. */
 	virtual bool IsAlwaysEnabled() const { return false; }
+	/** @brief Keeps engine replacement resources current while their optional effects are disabled. */
+	virtual bool RequiresRenderMaintenance() const { return false; }
+	/** @brief Describes retained native support or limits of the live rendering switch. */
+	virtual std::string_view GetRuntimeToggleNote() const { return {}; }
 
 	/** @brief Whether the feature persists through the shared settings JSON rather than its own store. */
 	virtual bool UsesMainSettings() const { return true; }
@@ -181,12 +226,28 @@ public:
 
 	/** @brief Allocates GPU resources (textures, buffers) needed by this feature. */
 	virtual void SetupResources() {}
+	/** @brief Prepares resources required by installed engine replacements even while the effect is off. */
+	virtual void SetupPersistentResources() {}
+	/** @brief Whether this feature owns resources that can follow its live toggle. */
+	virtual bool HasReleasableResources() const { return false; }
+	/** @brief Releases feature-owned GPU resources without discarding shader programs. */
+	virtual void ReleaseResources() {}
+	/** @brief Initializes resources for the selected runtime state on the render thread. */
+	void InitializeRuntimeResources();
+	/** @brief Applies a queued toggle and its resource lifetime on the render thread. */
+	void ApplyRuntimeState();
 	// All loaded features have finished allocating resources.
 	virtual void PostSetupResources() {}
 	virtual void ModifySharedLighting(SharedLighting&) {}
 
 	/** @brief Releases and recreates transient state (e.g. on resolution change). */
 	virtual void Reset() {}
+
+	/** @brief Releases runtime overrides on the render thread when the live switch becomes disabled. */
+	virtual void OnRuntimeDisabled() {}
+
+	/** @brief Resets temporal state on the render thread when a feature becomes enabled. */
+	virtual void OnRuntimeEnabled() {}
 
 	virtual void DrawSettings() {}
 
@@ -201,6 +262,12 @@ public:
 
 	/** @brief Per-frame work executed before Prepass, earliest per-frame hook. */
 	virtual void EarlyPrepass() {}
+
+	/** @brief Runs immediately before the engine polls physical input devices. */
+	virtual void OnBeforeInputPoll() {}
+
+	/** @brief Replays deferred passes after terrain blending and before blended decals. */
+	virtual void OnBeforeBlendedDecals() {}
 
 	/**
 	 * @brief Called during disk-cache shader loading to generate additional shader permutations.
@@ -294,6 +361,8 @@ public:
 	 * @return Pointer to the feature if found and loaded, nullptr otherwise.
 	 */
 	static Feature* FindFeatureByShortName(const std::string& shortName);
+	/** @brief Finds a registered feature by short name, including features that are not currently enabled. */
+	static Feature* FindRegisteredFeatureByShortName(const std::string& shortName);
 
 	/**
 	 * @brief Gets sorted short names of all loaded features that appear in the menu.
@@ -334,10 +403,10 @@ public:
 	 * @param emitGpuZone When true and Tracy is enabled, also emits a GPU timer zone.
 	 */
 	template <typename Func>
-	static inline void ForEachLoadedFeature(std::string_view methodName, Func&& callback, bool emitGpuZone = false)
+	static inline void ForEachLoadedFeature(std::string_view methodName, Func&& callback, bool emitGpuZone = false, bool includeDisabled = false)
 	{
 		for (auto* feature : GetFeatureList()) {
-			if (feature->loaded) {
+			if (feature->loaded && (includeDisabled || feature->IsEnabled() || feature->RequiresRenderMaintenance())) {
 #ifdef TRACY_ENABLE
 				{
 					const auto zoneName = std::format("{}::{}", feature->GetShortName(), methodName);
@@ -354,5 +423,12 @@ public:
 #endif
 			}
 		}
+	}
+
+	/** @brief Runs initialization and maintenance for every loaded feature, including ones toggled off. */
+	template <typename Func>
+	static inline void ForEachAvailableFeature(std::string_view methodName, Func&& callback)
+	{
+		ForEachLoadedFeature(methodName, std::forward<Func>(callback), false, true);
 	}
 };

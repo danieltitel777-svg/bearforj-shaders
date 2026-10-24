@@ -114,7 +114,7 @@ public:
 	 */
 	static bool IsInteriorWithSun(const RE::TESObjectCELL* cell);
 	/** @brief Returns whether this feature is loaded and the current cell has interior sun enabled. */
-	bool IsActiveInteriorSun() const { return loaded && isInteriorWithSun.load(); }
+	bool IsActiveInteriorSun() const { return IsEnabled() && isInteriorWithSun.load(); }
 	virtual bool IsCore() const override { return true; };
 
 private:

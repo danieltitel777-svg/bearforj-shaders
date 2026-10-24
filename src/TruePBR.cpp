@@ -769,7 +769,7 @@ struct BSLightingShaderProperty_GetRenderPasses
 			return renderPasses;
 		}
 
-		const auto issEnabledAndInteriorWithSun = globals::features::interiorSun.loaded && globals::features::interiorSun.isInteriorWithSun;
+		const auto issEnabledAndInteriorWithSun = globals::features::interiorSun.IsEnabled() && globals::features::interiorSun.isInteriorWithSun;
 
 		const bool isPbr = IsPBRShaderProperty(property);
 
@@ -1720,6 +1720,10 @@ struct PBR_BSLightingShader_SetupMaterial
 
 void TruePBR::PostPostLoad()
 {
+	if (!IsRuntimeAvailable()) {
+		logger::info("[TruePBR] Startup disabled; shader support remains compiled");
+		return;
+	}
 	logger::info("[TruePBR] Hooking BGSTextureSet");
 	stl::detour_thunk<BGSTextureSet_ToShaderTextureSet>(REL::RelocationID(20905, 21361));
 
@@ -1770,6 +1774,8 @@ void TruePBR::PostPostLoad()
 
 void TruePBR::DataLoaded()
 {
+	if (!IsRuntimeAvailable())
+		return;
 	defaultPbrLandTextureSet = RE::TESForm::LookupByEditorID<RE::BGSTextureSet>("DefaultPBRLand");
 	SetupDefaultPBRLandTextureSet();
 }

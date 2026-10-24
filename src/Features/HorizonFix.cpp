@@ -10,6 +10,10 @@ void HorizonFix::DrawSettings()
 
 void HorizonFix::PostPostLoad()
 {
+	if (!IsRuntimeAvailable()) {
+		logger::info("[Horizon Fix] Startup disabled; shader support remains compiled");
+		return;
+	}
 	// The shader-side far-water support is only wanted while the HorizonFix plugin is
 	// actually installed; without it water keeps the vanilla far-clip look. Checked here
 	// because every SKSE plugin has loaded by now and the shader disk cache has not been
@@ -35,7 +39,7 @@ void HorizonFix::PostPostLoad()
 HorizonFix::Settings HorizonFix::GetCommonBufferData() const
 {
 	Settings data;
-	if (loaded && farWaterDistanceFn)
+	if (IsEnabled() && farWaterDistanceFn)
 		data.farWaterDistance = std::max(farWaterDistanceFn(), 0.0f);
 	return data;
 }

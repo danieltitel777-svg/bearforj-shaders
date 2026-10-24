@@ -993,9 +993,8 @@ void Menu::DrawDisableAtBootSettings()
 
 	ImGui::Text("%s",
 		T("menu.disable_at_boot_desc",
-			"Select features to disable at boot. "
-			"This is the same as deleting a feature.ini file. "
-			"Restart will be required to reenable."));
+			"Select features to disable. Changes are saved for the next launch and apply live unless marked restart required. "
+			"Toggles do not rebuild the shader cache."));
 
 	ImGui::Spacing();
 
@@ -1013,11 +1012,21 @@ void Menu::DrawDisableAtBootSettings()
 
 			const std::string featureName = feature->GetShortName();
 			bool isDisabled = disabledFeatures.contains(featureName) && disabledFeatures[featureName];
+			const auto checkboxLabel = std::format("{}{}##DisableAtBoot{}", feature->GetDisplayName(),
+				feature->SupportsLiveToggle() ? "" : " (restart required)", featureName);
 
-			if (ImGui::Checkbox(featureName.c_str(), &isDisabled)) {
-				// Update the disabledFeatures map based on user interaction
-				disabledFeatures[featureName] = isDisabled;
+			if (ImGui::Checkbox(checkboxLabel.c_str(), &isDisabled)) {
+				state->SetFeatureDisabled(featureName, isDisabled);
+				if (feature->IsRuntimeListed())
+					feature->SetEnabled(!isDisabled);
+				state->CheckCoreSettingsChanged();
 			}
+			if (const auto note = feature->GetRuntimeToggleNote(); !note.empty()) {
+				if (auto tooltip = Util::HoverTooltipWrapper())
+					ImGui::TextUnformatted(note.data(), note.data() + note.size());
+			}
+			if (feature->RequiresRestartForToggle() && feature->HasAnyPendingRestart())
+				ImGui::TextColored(globals::menu->GetTheme().StatusPalette.RestartNeeded, "%s", "Restart to apply the selected feature state.");
 		}
 	}
 }
@@ -1189,11 +1198,11 @@ void Menu::ProcessInputEventQueue()
 						 }
 					 } },
 					{ settings.ScreenshotKey, []() {
-						 if (globals::features::screenshotFeature.loaded)
+						 if (globals::features::screenshotFeature.IsEnabled())
 							 globals::features::screenshotFeature.captureRequested = true;
 					 } },
 					{ settings.Effects11ToggleKey, []() {
-						 if (globals::features::effects11.loaded)
+						 if (globals::features::effects11.IsEnabled())
 							 globals::features::effects11.ToggleEnabled();
 					 } },
 					{ settings.Effects11EditorKey, [&effects11EditorToggled]() {

@@ -31,6 +31,7 @@
 #include "Features/NightEye.h"
 #include "Features/PerformanceOverlay.h"
 #include "Features/PostProcessing.h"
+#include "Features/RainRendering.h"
 #include "Features/ProceduralSun.h"
 #include "Features/RainRefraction.h"
 #include "Features/RemoteControl.h"
@@ -112,6 +113,7 @@ namespace globals
 		VolumetricLighting volumetricLighting{};
 		WaterEffects waterEffects{};
 		PerformanceOverlay performanceOverlay{};
+		RainRendering rainRendering{};
 		WetnessEffects wetnessEffects{};
 		ExtendedTranslucency extendedTranslucency{};
 		ReverseZ reverseZ{};
@@ -162,6 +164,8 @@ namespace globals
 		RE::ImageSpaceManager* imageSpaceManager = nullptr;
 		bool* bEnableVolumetricLighting = nullptr;
 		std::atomic<bool> quitGame{ false };
+
+		bool isVR = false;
 
 		RE::BSGraphics::PixelShader** currentPixelShader = nullptr;
 		RE::BSGraphics::VertexShader** currentVertexShader = nullptr;
@@ -221,6 +225,7 @@ namespace globals
 		{
 			using namespace game;
 
+			isVR = REL::Module::IsVR();
 			shadowState = RE::BSGraphics::RendererShadowState::GetSingleton();
 			graphicsState = RE::BSGraphics::State::GetSingleton();
 			renderer = RE::BSGraphics::Renderer::GetSingleton();
