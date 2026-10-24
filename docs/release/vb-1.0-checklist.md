@@ -32,7 +32,7 @@ Branch `bearforj/vb-1.0` from `bearforj/1-base` (`967ea4c`). Feature histories w
 
 ## Still absent
 
-- Open Shaders `dev` has no `features/Terrain Variation/Default.json`. `TerrainVariation::LoadSettings` only assigns the settings JSON, here and in Open Shaders. No default file was added.
+- Terrain Variation `Default.json` is not in Bottled `CommunityShaders_AIO-2026-10-21T07-10Z.7z`, Jiaye `CommunityShaders_AIO-2026-10-08T11-42Z.7z`, or mainline `CommunityShaders_AIO-2026-10-24T13-39Z.7z` (the v1.9.1 feature package is the same). `LoadSettings` only assigns the settings JSON. No file was added. Open Shaders v2.19.0 shipped `TerrainVariation/MeshRules/Default.json`; commit `4bd1db0` removed that file and its loader to match upstream.
 - `rgbnoise.dds` and `starburst.dds` are in this tree and in Open Shaders Post Processing textures. No shader or C++ file in either tree loads those names.
 - The plan lists a Jiaye Physical Sky LUT as a file. Jiaye `pp` has no Physical Sky feature or LUT, and this branch has no shader that samples one. The feature is not in the vb 1.0 integration order, so it was not ported. `default ll psky.json` is a post-processing preset already in the tree.
 

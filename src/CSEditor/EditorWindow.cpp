@@ -2778,8 +2778,8 @@ void EditorWindow::ResetCellLightingWidget()
 	if (!oldWidget)
 		return;
 
-	if (lastFocusedWidget == oldWidget)
-		lastFocusedWidget = nullptr;
+	if (lastFocusedWidgetKey && *lastFocusedWidgetKey == oldWidget->GetFormKey())
+		lastFocusedWidgetKey.reset();
 	if (pendingDeleteWidget == oldWidget)
 		pendingDeleteWidget = nullptr;
 	WeatherUtils::SetCurrentWidget(nullptr);
