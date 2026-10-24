@@ -3,9 +3,9 @@
 #define COPY_BLOCKS ((TILE_TEXELS + 2 + 7) / 8)
 
 StructuredBuffer<int4> TileList : register(t3);
-Texture2D<float> Source : register(t0);
+Texture2D<float2> Source : register(t0);
 
-RWTexture2D<float> Before : register(u0);
+RWTexture2D<float2> Before : register(u0);
 
 [numthreads(8, 8, 1)] void main(uint3 groupThreadID : SV_GroupThreadID, uint3 groupID : SV_GroupID) {
 	const int4 entry = TileList[groupID.y];

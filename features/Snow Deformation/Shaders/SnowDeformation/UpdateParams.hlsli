@@ -24,6 +24,8 @@ cbuffer UpdateParams : register(b0)
 	float4 StampMotion[MAX_STAMPS];
 	float4 StampSurface[MAX_STAMPS];
 	float4 StampBounds[MAX_STAMPS];
+	float4 GroundControl;
+	float4 StampGround[MAX_STAMPS];
 };
 
 #endif

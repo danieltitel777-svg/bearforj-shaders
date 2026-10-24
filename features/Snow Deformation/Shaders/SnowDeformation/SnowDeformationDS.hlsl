@@ -9,9 +9,13 @@ ControlPoint main(PatchConstants constants, float3 bary : SV_DomainLocation, con
 
 	precise float4 clipPosition = patch[0].Position * bary.x + patch[1].Position * bary.y + patch[2].Position * bary.z;
 	precise float2 windowPosition = ToWindow(ToCameraRelative(clipPosition));
-	precise float raise = BlanketAt(windowPosition);
-	precise float field = SampleField(windowPosition);
-	precise float displacement = SnowSurface(raise, field);
+	float groundScale = GroundLayer1.z;
+#if !defined(DEPTH_ONLY)
+	float4 blendWeights1 = patch[0].LandBlendWeights1 * bary.x + patch[1].LandBlendWeights1 * bary.y + patch[2].LandBlendWeights1 * bary.z;
+	float4 blendWeights2 = patch[0].LandBlendWeights2 * bary.x + patch[1].LandBlendWeights2 * bary.y + patch[2].LandBlendWeights2 * bary.z;
+	groundScale = dot(blendWeights1, GroundLayer0) + dot(blendWeights2.xy, GroundLayer1.xy);
+#endif
+	precise float displacement = DisplacedSurface(windowPosition, groundScale);
 	precise float4 displacedPosition = DisplaceClipPosition(clipPosition, displacement);
 	output.Position = displacedPosition;
 
@@ -33,8 +37,8 @@ ControlPoint main(PatchConstants constants, float3 bary : SV_DomainLocation, con
 
 	float gradientStep = GradientStep(windowPosition);
 	float2 gradient = float2(
-						  SnowSurface(raise, SampleField(windowPosition + float2(gradientStep, 0.0))) - SnowSurface(raise, SampleField(windowPosition - float2(gradientStep, 0.0))),
-						  SnowSurface(raise, SampleField(windowPosition + float2(0.0, gradientStep))) - SnowSurface(raise, SampleField(windowPosition - float2(0.0, gradientStep)))) *
+						  DisplacedSurface(windowPosition + float2(gradientStep, 0.0), groundScale) - DisplacedSurface(windowPosition - float2(gradientStep, 0.0), groundScale),
+						  DisplacedSurface(windowPosition + float2(0.0, gradientStep), groundScale) - DisplacedSurface(windowPosition - float2(0.0, gradientStep), groundScale)) *
 	                  (0.5 / gradientStep);
 
 	float3 normal = float3(output.TBN0.z, output.TBN1.z, output.TBN2.z);
