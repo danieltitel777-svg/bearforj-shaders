@@ -1,6 +1,7 @@
 #include "Composite.h"
 
 #include "CODBloom.h"
+#include "NativeBloom.h"
 #include "Features/PostProcessing.h"
 #include "HistogramAutoExposure.h"
 #include "LensFlare.h"
@@ -19,12 +20,13 @@ void Composite::UpdateAutoEnabled()
 		return;
 
 	auto* bloom = owner->GetPipelineFeature<CODBloom>(PostProcessing::FeaturePipelineIndex::CODBloom);
+	auto* nativeBloom = owner->GetPipelineFeature<NativeBloom>(PostProcessing::FeaturePipelineIndex::NativeBloom);
 	auto* flare = owner->GetPipelineFeature<LensFlare>(PostProcessing::FeaturePipelineIndex::LensFlare);
 	auto* glare = owner->GetPipelineFeature<PhysicalGlare>(PostProcessing::FeaturePipelineIndex::PhysicalGlare);
 	auto* exposure = owner->GetPipelineFeature<HistogramAutoExposure>(PostProcessing::FeaturePipelineIndex::AutoExposure);
 	auto* localExposure = owner->GetPipelineFeature<LocalExposure>(PostProcessing::FeaturePipelineIndex::LocalExposure);
 
-	enabled = (bloom && bloom->enabled) || (flare && flare->enabled) || (glare && glare->enabled) || (exposure && exposure->IsActive()) || (localExposure && localExposure->enabled);
+	enabled = (bloom && bloom->enabled) || (nativeBloom && nativeBloom->enabled) || (flare && flare->enabled) || (glare && glare->enabled) || (exposure && exposure->IsActive()) || (localExposure && localExposure->enabled);
 }
 
 void Composite::SetupResources()
@@ -109,12 +111,21 @@ void Composite::Draw(TextureInfo& inout_tex)
 		return;
 
 	auto* bloom = owner->GetPipelineFeature<CODBloom>(PostProcessing::FeaturePipelineIndex::CODBloom);
+	auto* nativeBloom = owner->GetPipelineFeature<NativeBloom>(PostProcessing::FeaturePipelineIndex::NativeBloom);
 	auto* flare = owner->GetPipelineFeature<LensFlare>(PostProcessing::FeaturePipelineIndex::LensFlare);
 	auto* glare = owner->GetPipelineFeature<PhysicalGlare>(PostProcessing::FeaturePipelineIndex::PhysicalGlare);
 	auto* exposure = owner->GetPipelineFeature<HistogramAutoExposure>(PostProcessing::FeaturePipelineIndex::AutoExposure);
 	auto* localExposure = owner->GetPipelineFeature<LocalExposure>(PostProcessing::FeaturePipelineIndex::LocalExposure);
 
-	bool hasBloom = bloom && bloom->enabled && bloom->GetBloomOutput().srv;
+	// Native compute bloom replaces the COD Bloom sample while it is on and ready.
+	// While it is off, the COD Bloom sample is the original path.
+	PostProcessFeature::TextureInfo bloomOutput{};
+	if (nativeBloom && nativeBloom->enabled)
+		bloomOutput = nativeBloom->GetBloomOutput();
+	if (!bloomOutput.srv && bloom && bloom->enabled)
+		bloomOutput = bloom->GetBloomOutput();
+
+	bool hasBloom = bloomOutput.srv != nullptr;
 	bool hasFlare = flare && flare->enabled && flare->GetFlareOutput().srv;
 	bool hasGlare = glare && glare->enabled && glare->GetGlareOutput().srv;
 	bool hasExposure = exposure && exposure->IsActive() && exposure->GetAdaptationSRV();
@@ -152,10 +163,8 @@ void Composite::Draw(TextureInfo& inout_tex)
 
 	srvs[0] = inout_tex.srv;
 
-	if (hasBloom) {
-		auto bloomOutput = bloom->GetBloomOutput();
+	if (hasBloom)
 		srvs[1] = bloomOutput.srv;
-	}
 	if (hasFlare) {
 		auto flareOutput = flare->GetFlareOutput();
 		srvs[2] = flareOutput.srv;

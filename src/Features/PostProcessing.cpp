@@ -422,6 +422,7 @@ void PostProcessing::BuildPipeline()
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::DoF)] = std::make_shared<DoF>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::PhysicalGlare)] = std::make_shared<PhysicalGlare>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::CODBloom)] = std::make_shared<CODBloom>();
+	pipeline[static_cast<size_t>(FeaturePipelineIndex::NativeBloom)] = std::make_shared<NativeBloom>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::LensFlare)] = std::make_shared<LensFlare>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::Composite)] = std::make_shared<Composite>();
 	pipeline[static_cast<size_t>(FeaturePipelineIndex::Vignette)] = std::make_shared<Vignette>();
@@ -433,7 +434,7 @@ void PostProcessing::BuildPipeline()
 void PostProcessing::ApplyDefaultEnabledStates()
 {
 	using enum FeaturePipelineIndex;
-	constexpr std::array kOffByDefault = { LUT, MotionBlur, PhysicalGlare, Camera, Border };
+	constexpr std::array kOffByDefault = { LUT, MotionBlur, PhysicalGlare, Camera, Border, NativeBloom };
 	for (size_t index = 0; index < pipeline.size(); ++index) {
 		if (auto& pipe = pipeline[index]; pipe && !pipe->IsAutoEnabled())
 			pipe->enabled = std::ranges::find(kOffByDefault, static_cast<FeaturePipelineIndex>(index)) == kOffByDefault.end();
@@ -806,7 +807,7 @@ void PostProcessing::UpdateVanillaEffects(bool active)
 
 	skipVanillaDoF = replaces(FeaturePipelineIndex::DoF);
 	skipVanillaBloom = globals::state->enablePShaders && globals::state->ShaderEnabled(RE::BSShader::Type::ImageSpace) &&
-	                   (replaces(FeaturePipelineIndex::PhysicalGlare) || replaces(FeaturePipelineIndex::CODBloom));
+	                   (replaces(FeaturePipelineIndex::PhysicalGlare) || replaces(FeaturePipelineIndex::CODBloom) || replaces(FeaturePipelineIndex::NativeBloom));
 	if (skipVanillaBloom) {
 		using enum RE::ImageSpaceManager::ImageSpaceEffectEnum;
 		static const std::array<uint32_t, 2> tonemapShaders{

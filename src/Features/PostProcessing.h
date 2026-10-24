@@ -5,6 +5,7 @@
 #include "PostProcessing/BokehResources.h"
 #include "PostProcessing/Border.h"
 #include "PostProcessing/CODBloom.h"
+#include "PostProcessing/NativeBloom.h"
 #include "PostProcessing/Camera.h"
 #include "PostProcessing/CinematicCamera.h"
 #include "PostProcessing/ColorGrading.h"
@@ -90,6 +91,7 @@ struct PostProcessing : Feature
 		MotionBlur,
 		PhysicalGlare,
 		CODBloom,
+		NativeBloom,
 		LensFlare,
 		Composite,
 		ColorGrading,

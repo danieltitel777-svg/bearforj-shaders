@@ -2390,6 +2390,8 @@
     "feature.post_processing.motion_blur.samples": "Samples",
     "feature.post_processing.motion_blur_strength": "Motion Blur Strength: %.3f",
     "feature.post_processing.name": "Post Processing",
+    "feature.post_processing.nativebloom.description": "Compute bloom (bloom.cs). Separate from COD Bloom (pixel) and ENB Bloom. Off leaves those paths unchanged. When on and the compute result is ready, Composite uses it instead of COD Bloom.",
+    "feature.post_processing.nativebloom.name": "Native Bloom",
     "feature.post_processing.open_drt.adjusts_contrast_or_slope_a_constrained_power_function": "Adjusts contrast or slope.\nA constrained power function applied in display linear.",
     "feature.post_processing.open_drt.amount_adjust_highlights_positive_values_increase_highlight_exposure": "Amount adjust highlights.\nPositive values increase highlight exposure, negative values decrease. 0 has no effect.",
     "feature.post_processing.open_drt.amount_of_contrast_to_add_0_0_has": "Amount of contrast to add. 0.0 has no effect.\n1.0 will expose down by 1 stop at the origin (0,0)",
