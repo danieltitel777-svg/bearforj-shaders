@@ -2,8 +2,7 @@
 
 #include "Deferred.h"
 #include "DynamicCubemaps.h"
-#include "JiayeStatement.h"
-#include "Shadercache.h"
+#include "ShaderCache.h"
 #include "State.h"
 
 #include "Effects11.h"
@@ -126,8 +125,6 @@ void IBL::DrawSettings()
 	}
 	ImGui::SliderFloat(T(TKEY("effect_normalization_multiplier"), "Effect Normalization Multiplier"), &settings.EffectNormalizationMult, 0.0f, 100.0f, "%.2f");
 	ImGui::SliderFloat(T(TKEY("minimum_effect_multiplier"), "Minimum Effect Multiplier"), &settings.MinEffectMult, 0.0f, 10.0f, "%.2f");
-
-	JiayeStatement::GetSingleton()->DrawJSInfo();
 }
 
 #undef I18N_KEY_PREFIX

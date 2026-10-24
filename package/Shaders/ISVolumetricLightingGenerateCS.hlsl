@@ -17,7 +17,7 @@ RWTexture3D<float> DensityRW : register(u0);
 
 #	define LinearSampler ShadowmapSampler
 
-#	include "Common/Framebuffer.hlsli"
+#	include "Common/FrameBuffer.hlsli"
 #	include "Common/SharedData.hlsli"
 
 #	include "Common/ShadowSampling.hlsli"

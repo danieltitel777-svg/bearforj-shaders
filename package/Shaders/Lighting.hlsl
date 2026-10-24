@@ -79,6 +79,9 @@ struct VS_INPUT
 #	if defined(EYE)
 	float EyeParameter: TEXCOORD2;
 #	endif  // EYE
+#	if defined(FUR_SHELLS)
+	uint InstanceID: SV_INSTANCEID;
+#	endif
 };
 #endif
 
@@ -179,11 +182,7 @@ float2 GetTreeShiftVector(float4 position, float4 color)
 #		include "TreeLODWind/TreeLODWind.hlsli"
 #	endif
 
-#	if defined(FUR_SHELLS) && defined(TREE_LOD_WIND_VS)
-VS_OUTPUT main(VS_INPUT input, uint instanceID : SV_InstanceID, uint vertexID : SV_VertexID)
-#	elif defined(FUR_SHELLS)
-VS_OUTPUT main(VS_INPUT input, uint instanceID : SV_InstanceID)
-#	elif defined(TREE_LOD_WIND_VS)
+#	if defined(TREE_LOD_WIND_VS)
 VS_OUTPUT main(VS_INPUT input, uint vertexID : SV_VertexID)
 #	else
 VS_OUTPUT main(VS_INPUT input)
@@ -200,7 +199,7 @@ VS_OUTPUT main(VS_INPUT input)
 	precise float4 previousInputPosition = inputPosition;
 
 #	if defined(FUR_SHELLS)
-	float furShell = FurShells::GetShell(FurShells::GetShellIndex(instanceID));
+	float furShell = FurShells::GetShell(FurShells::GetShellIndex(input.InstanceID));
 	float4 furRootPosition = inputPosition;
 #		if defined(MODELSPACENORMALS)
 	float3 furNormal = FurShells::GetModelNormal(input.TexCoord0.xy * TexcoordOffset.zw + TexcoordOffset.xy);
@@ -1126,9 +1125,11 @@ bool UseSkylightingShadowVisibility()
 #	endif
 
 #	if defined(FUR_SHELLS) && !defined(FUR_SHELLS_DEPTH)
-[earlydepthstencil]
+#		define FUR_EARLY_DEPTH_STENCIL [earlydepthstencil]
+#	else
+#		define FUR_EARLY_DEPTH_STENCIL
 #	endif
-PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
+FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 {
 	PS_OUTPUT psout;
 

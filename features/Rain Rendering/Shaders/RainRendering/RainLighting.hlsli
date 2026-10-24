@@ -7,9 +7,6 @@ namespace LightLimitFix
 {
 #	include "LightLimitFix/Common.hlsli"
 }
-#	ifdef RAIN_INVERSE_SQUARE
-#		include "InverseSquareLighting/InverseSquareLighting.hlsli"
-#	endif
 StructuredBuffer<LightLimitFix::Light> RainLights : register(t35);
 StructuredBuffer<uint> RainLightIndices : register(t36);
 StructuredBuffer<LightLimitFix::LightGrid> RainLightCells : register(t37);
@@ -80,11 +77,7 @@ namespace RainLighting
 			float lightDistance = length(toLight);
 			if (lightDistance >= light.radius)
 				continue;
-#	ifdef RAIN_INVERSE_SQUARE
-			float attenuation = InverseSquareLighting::GetAttenuation(max(lightDistance, 1.0f), light);
-#	else
 			float attenuation = saturate(1.0f - lightDistance * lightDistance * light.invRadius * light.invRadius);
-#	endif
 			float3 lightDirection = toLight / max(lightDistance, 1.0f);
 			float3 lightColor = Color::PointLight(light.color, (light.lightFlags & LightLimitFix::LightFlags::Linear) != 0u, light.lightFlags);
 			float3 irradiance = Color::IrradianceToLinear(max(lightColor, 0.0f)) * max(light.fade, 0.0f) * attenuation;

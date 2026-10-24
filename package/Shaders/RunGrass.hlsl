@@ -94,7 +94,7 @@ cbuffer PerGeometry : register(b2)
 #ifdef VSHADER
 
 #	ifdef GRASS_COLLISION
-#		include "GrassCollision\\GrassCollision.hlsli"
+#		include "GrassCollision/GrassCollision.hlsli"
 #	endif  // GRASS_COLLISION
 
 #	ifdef GRASS_OPTIMIZATIONS

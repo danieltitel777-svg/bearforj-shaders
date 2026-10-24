@@ -32,9 +32,13 @@ Branch `bearforj/vb-1.0` from `bearforj/1-base` (`967ea4c`). Feature histories w
 
 ## Still absent
 
-- `features/Terrain Variation` has no `Default.json` on this branch, `bearforj/1-base`, `bearforj-0.6.4`, or `bearforj-0.6.7`. The feature does not load that file.
-- No shader, source file, or commit in this repository contains `Lighting::40100001`.
-- Physical Sky is not in the vb 1.0 integration list, and no shader here samples a Physical Sky LUT. The feature was not ported.
+- Open Shaders `dev` has no `features/Terrain Variation/Default.json`. `TerrainVariation::LoadSettings` only assigns the settings JSON, here and in Open Shaders. No default file was added.
+- `rgbnoise.dds` and `starburst.dds` are in this tree and in Open Shaders Post Processing textures. No shader or C++ file in either tree loads those names.
+- The plan lists a Jiaye Physical Sky LUT as a file. Jiaye `pp` has no Physical Sky feature or LUT, and this branch has no shader that samples one. The feature is not in the vb 1.0 integration order, so it was not ported. `default ll psky.json` is a post-processing preset already in the tree.
+
+## Lighting::40100001
+
+Open Shaders stores `FurShells` at bit 30, so `0x40100001` is vertex color, alpha test, and fur shells. That permutation's vertex shader is `main(VS_INPUT)` with `SV_INSTANCEID` on the input, and the pixel shader uses an `earlydepthstencil` macro. Both now match Open Shaders. In this tree bit 30 is `NoSnowCover`, so the same hex is vertex color, alpha test, and no snow cover. That path already omits `SNOW_COVER` and still compiles actor snow.
 - Source PNGs are 2048. Atlas cells are 512 or 1024. `tools/bearforj/build_particle_atlases.py` integer-box downscales them. Pixel content is not redrawn.
 
 ## Slots
