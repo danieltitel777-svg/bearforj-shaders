@@ -1,0 +1,138 @@
+name: Bearforj vb 1.0 DLL
+
+on:
+    push:
+        branches:
+            - bearforj/vb-1.0
+    workflow_dispatch:
+
+permissions:
+    contents: write
+
+concurrency:
+    group: vb-1.0-dll-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    dll:
+        name: Release DLL and prerelease zip
+        runs-on: windows-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v6
+              with:
+                  submodules: recursive
+
+            - name: Setup Build Environment
+              uses: ./.github/actions/setup-build-environment
+              with:
+                  cache-key-suffix: vb10-dll
+                  cmake-preset: ALL
+                  build-dir: build/ALL
+
+            - name: Configure
+              run: cmake --preset ALL
+
+            - name: Build CommunityShaders (Release)
+              run: cmake --build --preset ALL --config Release --target CommunityShaders
+
+            - name: Pack Bearforj Shaders vb 1.0.zip
+              shell: pwsh
+              run: |
+                  $ErrorActionPreference = "Stop"
+                  $dll = Get-ChildItem -Path build/ALL -Recurse -Filter CommunityShaders.dll |
+                      Where-Object { $_.FullName -match '\\Release\\' -and $_.Length -gt 0 } |
+                      Sort-Object LastWriteTime -Descending |
+                      Select-Object -First 1
+                  if (-not $dll) { throw "Release CommunityShaders.dll was not produced." }
+                  Write-Host "DLL $($dll.FullName) $($dll.Length) bytes"
+                  $pdb = Get-ChildItem -Path build/ALL -Recurse -Filter CommunityShaders.pdb |
+                      Where-Object { $_.FullName -match '\\Release\\' } |
+                      Sort-Object LastWriteTime -Descending |
+                      Select-Object -First 1
+
+                  $stage = Join-Path $env:RUNNER_TEMP "bearforj-mo2"
+                  if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+                  New-Item -ItemType Directory -Path $stage | Out-Null
+                  Copy-Item -Path (Join-Path $env:GITHUB_WORKSPACE "package\*") -Destination $stage -Recurse -Force
+                  Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE "features") -Directory | ForEach-Object {
+                      $shaders = Join-Path $_.FullName "Shaders"
+                      if (Test-Path $shaders) {
+                          $dest = Join-Path $stage "Shaders"
+                          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+                          Copy-Item -Path (Join-Path $shaders "*") -Destination $dest -Recurse -Force
+                      }
+                      foreach ($texName in @("textures", "Textures")) {
+                          $tex = Join-Path $_.FullName $texName
+                          if (Test-Path $tex) {
+                              $dest = Join-Path $stage "textures"
+                              New-Item -ItemType Directory -Force -Path $dest | Out-Null
+                              Copy-Item -Path (Join-Path $tex "*") -Destination $dest -Recurse -Force
+                          }
+                      }
+                  }
+                  Copy-Item -Path (Join-Path $env:GITHUB_WORKSPACE "CREDITS.md") -Destination $stage -Force
+                  $pluginDir = Join-Path $stage "SKSE\Plugins"
+                  New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
+                  Copy-Item -Path $dll.FullName -Destination (Join-Path $pluginDir "CommunityShaders.dll") -Force
+                  if ($pdb) {
+                      Copy-Item -Path $pdb.FullName -Destination (Join-Path $pluginDir "CommunityShaders.pdb") -Force
+                  }
+                  $packed = Join-Path $pluginDir "CommunityShaders.dll"
+                  if (-not (Test-Path $packed)) { throw "DLL missing from SKSE/Plugins after packing." }
+
+                  $zip = Join-Path $env:GITHUB_WORKSPACE "Bearforj Shaders vb 1.0.zip"
+                  if (Test-Path $zip) { Remove-Item -Force $zip }
+                  Push-Location $stage
+                  try {
+                      & tar.exe -a -c -f $zip *
+                      if ($LASTEXITCODE -ne 0) { throw "tar failed with exit $LASTEXITCODE" }
+                  } finally {
+                      Pop-Location
+                  }
+                  $listing = & tar.exe -tf $zip
+                  if ($listing -notmatch 'SKSE[/\\]Plugins[/\\]CommunityShaders\.dll') {
+                      throw "Zip does not contain SKSE/Plugins/CommunityShaders.dll"
+                  }
+                  $item = Get-Item $zip
+                  $hash = (Get-FileHash -Algorithm MD5 $zip).Hash.ToLower()
+                  Write-Host "ZIP_PATH=$($item.FullName)"
+                  Write-Host "ZIP_BYTES=$($item.Length)"
+                  Write-Host "ZIP_MD5=$hash"
+                  "bytes=$($item.Length)" | Out-File -FilePath $env:GITHUB_ENV -Append
+                  "md5=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+            - name: Upload workflow artifact
+              uses: actions/upload-artifact@v7
+              with:
+                  name: Bearforj Shaders vb 1.0
+                  path: Bearforj Shaders vb 1.0.zip
+                  retention-days: 14
+                  if-no-files-found: error
+
+            - name: Publish prerelease vb-1.0
+              shell: bash
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
+              run: |
+                  set -euo pipefail
+                  cat > release-notes.md << EOF
+                  Release build of CommunityShaders.dll for Bearforj Shaders vb 1.0.
+
+                  The DLL and PDB are in \`SKSE/Plugins\`. Shaders ship as source and compile in game.
+
+                  Size: ${bytes} bytes
+                  MD5: ${md5}
+                  Commit: ${GITHUB_SHA}
+                  EOF
+                  if gh release view vb-1.0 >/dev/null 2>&1; then
+                    gh release delete vb-1.0 --yes --cleanup-tag
+                  fi
+                  gh release create vb-1.0 \
+                    --prerelease \
+                    --target "${GITHUB_SHA}" \
+                    --title "Bearforj Shaders vb 1.0" \
+                    --notes-file release-notes.md \
+                    "./Bearforj Shaders vb 1.0.zip"
+                  gh release view vb-1.0 --json url,assets --jq '{url: .url, assets: [.assets[] | {name, size, url: .url}]}'
