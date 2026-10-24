@@ -2810,6 +2810,41 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 
 	// Apply occlusion and distance factors
 	puddle *= saturate(wetnessOcclusion * 2.0) * nearFactor;
+
+	// Volumetric puddles. Enable 0, missing Skylighting, a steep slope, or no height relief
+	// leaves puddle at the original value above.
+#		if defined(LANDSCAPE) && defined(EMAT) && defined(SKYLIGHTING) && !defined(SKINNED)
+	float volumetricCoverage = 0.0;
+	float volumetricEdge = 0.0;
+	float volumetricBottom = 0.0;
+	float2 volumetricUvOffset = 0.0;
+	[branch] if (SharedData::wetnessEffectsSettings.EnableVolumetricPuddles != 0 && LANDSCAPE_PARALLAX_ENABLED) {
+		float puddleRelief = ExtendedMaterials::TerrainMaxWeightedHeightScale(input, displacementParams);
+		[branch] if (puddleRelief > 0.01 && flatnessAmount > 0.0 && wetnessOcclusion >= 0.35) {
+			float puddleHeightWeights[6];
+			float puddleHeight = ExtendedMaterials::GetTerrainHeight(screenNoise, input, uv, mipLevels, displacementParams, 0.0, input.LandBlendWeights1, input.LandBlendWeights2.xy, sharedOffset, puddleHeightWeights);
+			float3 puddleViewTS = normalize(mul(tbnTr, viewDirection));
+			float3 puddleWorld = input.WorldPosition.xyz + FrameBuffer::CameraPosAdjust[eyeIndex].xyz;
+			// Weather puddle amount, not the perlin field, so the pool grows and dries as one water line.
+			float volumetricFill = saturate(SharedData::wetnessEffectsSettings.PuddleWetness) * saturate(wetnessOcclusion * 2.0) * nearFactor;
+			WetnessEffects::VolumetricPuddle puddleVolume = WetnessEffects::EvaluateVolumetricPuddle(puddleHeight, volumetricFill, puddleWorld.xy, puddleViewTS.xy);
+			if (puddleVolume.active != 0) {
+				float rainFilm = wetness * saturate(wetnessOcclusion * 2.0) * nearFactor;
+				puddle = lerp(rainFilm, max(rainFilm, puddleVolume.coverage), puddleVolume.coverage);
+				volumetricCoverage = puddleVolume.coverage;
+				volumetricEdge = puddleVolume.edgeBand;
+				volumetricBottom = puddleVolume.bottomAmount;
+				volumetricUvOffset = puddleVolume.uvOffset;
+				float4 puddleDrop = WetnessEffects::TexPuddleRaindrops.SampleLevel(SampColorSampler, puddleVolume.raindropUv, 0);
+				float3 puddleDropNormal = puddleDrop.rgb * 2.0 - 1.0;
+				puddleDropNormal.xy *= saturate(puddleDrop.a);
+				float3 puddleDropWorld = normalize(mul(tbn, float3(puddleDropNormal.xy, max(puddleDropNormal.z, 0.05))));
+				wetnessNormal = normalize(lerp(wetnessNormal, puddleDropWorld, puddleVolume.coverage * saturate(puddleDrop.a)));
+			}
+		}
+	}
+#		endif
+
 	wetnessNormal = lerp(worldNormal.xyz, wetnessNormal, saturate(puddle));
 
 	// Calculate wetness glossiness factors
@@ -3721,6 +3756,16 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 	{
 		float wetnessDarkeningAmount = porosity * wetnessGlossinessAlbedo;
 		material.BaseColor = lerp(material.BaseColor, pow(abs(material.BaseColor), 1.0 + wetnessDarkeningAmount), 0.5);
+	}
+#		endif
+#		if defined(LANDSCAPE) && defined(EMAT) && defined(SKYLIGHTING) && !defined(SKINNED)
+	[branch] if (volumetricCoverage > 0.001)
+	{
+		float2 bottomShift = WetnessEffects::GetParallaxSampleOffset(volumetricUvOffset, ddx(uv), ddy(uv), volumetricBottom);
+		float3 puddleBottom = material.BaseColor + ddx(material.BaseColor) * bottomShift.x + ddy(material.BaseColor) * bottomShift.y;
+		puddleBottom = max(puddleBottom, 0.0);
+		material.BaseColor = lerp(material.BaseColor, puddleBottom, volumetricBottom);
+		material.BaseColor *= lerp(1.0, 1.0 - SharedData::wetnessEffectsSettings.VolumetricPuddleEdgeDarkening, volumetricEdge);
 	}
 #		endif
 #	endif
