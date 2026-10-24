@@ -1,5 +1,6 @@
 // Elemental Contact v0.3: live settings from the in-game menu (SKSE Menu Framework).
 // The DLL appends 4 float4 (EI0..EI3) to our b13 cbuffer (ActorGrimeCB in Lighting, ShoreWavesWaterfallCB in Water).
+// ShoreWavesWaterfallCB is the live water settings block. EI2.x stays in the layout and is unused.
 // Layout (must match EISettings::GPUBlock in the DLL):
 //   EI0: x shore waves on, y shore strength, z crest spacing (wavelength), w speed
 //   EI1: x foam strength, y foam width (depth), z river waves, w rock foam
@@ -24,7 +25,6 @@
 #define EI_FoamDepth      max(EI_GET(EI1.y, 5.0), 0.1)
 #define EI_River          EI_GET(EI1.z, 1.0)
 #define EI_RockFoam       EI_GET(EI1.w, 1.0)
-#define EI_WaterfallFoam  EI_GET(EI2.x, 1.0)
 #define EI_ActorWet       EI_GET(EI2.y, 0.9)
 #define EI_WetHair        EI_GET(EI2.z, 1.0)
 #define EI_HairSSS        EI_GET(EI2.w, 0.55)

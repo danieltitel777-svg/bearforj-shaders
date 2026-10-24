@@ -4,6 +4,7 @@
 #define __SHOREWAVES_HLSLI__
 
 // Bound by the DLL on every water draw. Unbound reads as zeros.
+// The cbuffer name is historical. The block is the live b13 layout, so it stays.
 cbuffer ShoreWavesWaterfallCB : register(b13)
 {
 	float4 EI0, EI1, EI2, EI3;   // v0.3 live menu settings, see EISettings.hlsli
