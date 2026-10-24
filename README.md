@@ -19,6 +19,10 @@ Base: Bottled Shaders `Bottle-Compendium` `9331699798a006100d3b6b8c20cd3622df813
 
 SKSE core plugin for community-driven advanced graphics modifications.
 
+## Windswept Tree LOD
+
+Tree LOD Wind works with **only** `K747_LodWind.dll` (Windswept, Nexus 195280) installed. Do not install Windswept's `Lighting.hlsl` or `Utility.hlsl`. This package already applies the tree LOD vertex offset in its own shaders, and Windswept's copies would replace them. The feature stays off when that DLL is missing or `WindsweptTreeLOD_GetInterfaceVersion` is not 1. The DLL is not included here.
+
 [Nexus](https://www.nexusmods.com/skyrimspecialedition/mods/86492)
 [User Wiki](https://modding.wiki/en/skyrim/developers/community-shaders)
 

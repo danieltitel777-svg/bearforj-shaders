@@ -154,6 +154,19 @@ void SnowCover::DrawSettings()
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("Applies snow cover to grass, distant tree billboards, and ultra tree LOD.");
 		}
+		if (ImGui::Checkbox("Snow on actors", (bool*)&enableActorSnow)) {
+			if (auto* shaderCache = globals::shaderCache)
+				shaderCache->Clear(RE::BSShader::Type::Lighting);
+		}
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text(
+				"Snowfall on characters and snow kicked onto their legs, using the Snow Cover textures.\n"
+				"Off leaves character lighting unchanged. This does not add world snow, water, or Elemental Contact.");
+		}
+		if (enableActorSnow) {
+			ImGui::SliderFloat("Actor Snow Amount", &actorSnowAmount, 0.0f, 2.0f, "%.2f");
+			ImGui::SliderFloat("Seconds to Full Cover", &actorSnowAccumSeconds, 10.0f, 900.0f, "%.0f");
+		}
 		if (wsettings.EnableSnowCover) {
 			ImGui::Checkbox("Affect Grass Tint", (bool*)&wsettings.AffectGrassTint);
 			if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -330,25 +343,24 @@ SnowCover::PerFrame SnowCover::GetCommonBufferData()
 
 	bool snowing = false;
 	bool raining = false;
-	if (wsettings.EnableSnowCover) {
-		snowingDensity = 0;
-		if (auto sky = RE::Sky::GetSingleton()) {
-			if (auto currentWeather = sky->currentWeather) {
-				if (currentWeather->precipitationData) {
-					float particleDensity = currentWeather->precipitationData->GetSettingValue(RE::BGSShaderParticleGeometryData::DataID::kParticleDensity).f;
-					float particleGravity = currentWeather->precipitationData->GetSettingValue(RE::BGSShaderParticleGeometryData::DataID::kGravityVelocity).f;
-					snowingDensity = particleDensity * particleGravity;
-				}
-				if (currentWeather->data.flags.any(RE::TESWeather::WeatherDataFlag::kSnow)) {
-					snowing = true;
-				} else if (currentWeather->data.flags.any(RE::TESWeather::WeatherDataFlag::kRainy)) {
-					raining = true;
-				}
+	snowingDensity = 0;
+	if (auto sky = RE::Sky::GetSingleton()) {
+		if (auto currentWeather = sky->currentWeather) {
+			if (currentWeather->precipitationData) {
+				float particleDensity = currentWeather->precipitationData->GetSettingValue(RE::BGSShaderParticleGeometryData::DataID::kParticleDensity).f;
+				float particleGravity = currentWeather->precipitationData->GetSettingValue(RE::BGSShaderParticleGeometryData::DataID::kGravityVelocity).f;
+				snowingDensity = particleDensity * particleGravity;
+			}
+			if (currentWeather->data.flags.any(RE::TESWeather::WeatherDataFlag::kSnow)) {
+				snowing = true;
+			} else if (currentWeather->data.flags.any(RE::TESWeather::WeatherDataFlag::kRainy)) {
+				raining = true;
 			}
 		}
-	} else {
-		snowingDensity = 0;
 	}
+	weatherSnowing = snowing;
+	if (!wsettings.EnableSnowCover && !enableActorSnow)
+		snowingDensity = 0;
 	if (auto calendar = RE::Calendar::GetSingleton()) {
 		auto h = calendar->GetHour();
 		auto diff = h < lastHour ? h + 24 - lastHour : h - lastHour;
@@ -680,7 +692,9 @@ void SnowCover::Reload()
 
 void SnowCover::Prepass()
 {
-	if (wsettings.EnableSnowCover) {
+	if (enableActorSnow)
+		UpdateActorSnow();
+	if (wsettings.EnableSnowCover || enableActorSnow) {
 		ID3D11ShaderResourceView* srvs[std::tuple_size_v<decltype(views)>]{};
 		for (size_t i = 0; i < views.size(); ++i)
 			srvs[i] = views[i].get();
@@ -703,6 +717,9 @@ void SnowCover::LoadSettings(json& o_json)
 	fireMeltSettings.Strength = std::clamp(o_json.value("FireMeltStrength", defaults.Strength), 0.0f, 1.0f);
 	survivalEnabled = o_json.value("SurvivalEnabled", true);
 	enableFoliageSnow = o_json.value("EnableFoliageSnow", 1u);
+	enableActorSnow = o_json.value("EnableActorSnow", 0u);
+	actorSnowAmount = std::clamp(o_json.value("ActorSnowAmount", 1.0f), 0.0f, 2.0f);
+	actorSnowAccumSeconds = std::clamp(o_json.value("ActorSnowAccumSeconds", 120.0f), 10.0f, 900.0f);
 }
 
 void SnowCover::SaveSettings(json& o_json)
@@ -713,6 +730,9 @@ void SnowCover::SaveSettings(json& o_json)
 	o_json["FireMeltStrength"] = fireMeltSettings.Strength;
 	o_json["SurvivalEnabled"] = survivalEnabled;
 	o_json["EnableFoliageSnow"] = enableFoliageSnow;
+	o_json["EnableActorSnow"] = enableActorSnow;
+	o_json["ActorSnowAmount"] = actorSnowAmount;
+	o_json["ActorSnowAccumSeconds"] = actorSnowAccumSeconds;
 }
 
 void SnowCover::RestoreDefaultSettings()
@@ -721,6 +741,10 @@ void SnowCover::RestoreDefaultSettings()
 	fireMeltSettings = {};
 	survivalEnabled = true;
 	enableFoliageSnow = 1;
+	enableActorSnow = 0;
+	actorSnowAmount = 1.0f;
+	actorSnowAccumSeconds = 120.0f;
+	actorSnow.clear();
 }
 
 bool SnowCover::IsWorldFireSource(RE::TESBoundObject* a_base)
@@ -935,11 +959,162 @@ void SnowCover::UploadFireMelt()
 	}
 }
 
+void SnowCover::UpdateActorSnow()
+{
+	const float dt = std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, 0.1f);
+	auto* tes = RE::TES::GetSingleton();
+	const bool interior = tes && tes->interiorCell;
+	const float fall = (!interior && weatherSnowing) ? std::max(perFrame.TimeSnowing, 0.15f) : 0.0f;
+	const bool onSnow = fall > 0.0f || (!interior && perFrame.TimeSnowing > 0.2f);
+
+	auto update = [&](RE::Actor* actor) {
+		if (!actor || !actor->Is3DLoaded() || actor->IsDead())
+			return;
+		auto& state = actorSnow[actor->GetFormID()];
+		state.unseen = 0.0f;
+		const auto pos = actor->GetPosition();
+		if (state.hasPos) {
+			const float dx = pos.x - state.lastPos.x;
+			const float dy = pos.y - state.lastPos.y;
+			const float dist = std::sqrt(dx * dx + dy * dy);
+			if (dist > 3000.0f && fall <= 0.0f) {
+				state.snowCover = 0.0f;
+				state.feetSnow = 0.0f;
+				state.slide = 0.0f;
+				state.speed = 0.0f;
+			} else {
+				state.speed = dist / std::max(dt, 1e-3f);
+			}
+		}
+		state.lastPos = pos;
+		state.hasPos = true;
+
+		const float height = std::max(actor->GetHeight(), 32.0f);
+		state.coatHeight = std::clamp(height * 0.30f, 8.0f, height * 0.45f);
+		const float moving = std::clamp(state.speed / 300.0f, 0.0f, 2.0f);
+		const float gain = 0.05f * moving * dt;
+		bool swimming = false;
+		if (auto* actorState = actor->AsActorState())
+			swimming = actorState->IsSwimming();
+		if (!swimming && onSnow)
+			state.feetSnow = std::min(1.0f, state.feetSnow + gain);
+		if (swimming) {
+			state.feetSnow = std::max(0.0f, state.feetSnow - 0.35f * dt);
+			state.snowCover = std::max(0.0f, state.snowCover - 0.5f * dt);
+		}
+		if ((onSnow && state.feetSnow > 0.0f) || swimming)
+			state.slide = std::max(0.0f, state.slide - dt * 0.5f);
+		else if (state.feetSnow > 0.01f) {
+			state.slide = std::min(1.0f, state.slide + dt / 40.0f);
+			state.feetSnow = std::max(0.0f, state.feetSnow - dt * state.slide * 0.006f * (0.3f + moving));
+		} else {
+			state.slide = 0.0f;
+		}
+
+		float warmth = interior ? 0.5f : 0.0f;
+		for (uint32_t i = 0; i < perFrame.fireMelt.Count; ++i) {
+			const auto& fire = perFrame.fireMelt.Spheres[i];
+			const float fx = pos.x - fire.x;
+			const float fy = pos.y - fire.y;
+			const float fz = pos.z - fire.z;
+			if (fx * fx + fy * fy + fz * fz < fire.w * fire.w)
+				warmth = std::max(warmth, 1.0f);
+		}
+		if (fall > 0.0f && !swimming && warmth < 0.3f)
+			state.snowCover = std::min(1.0f, state.snowCover + fall * dt / std::max(actorSnowAccumSeconds, 1.0f));
+		const float shake = std::clamp((state.speed - 350.0f) / 300.0f, 0.0f, 1.0f) * 0.006f;
+		state.snowCover = std::max(0.0f, state.snowCover - shake * dt);
+		if (warmth > 0.05f || interior || fall <= 0.0f) {
+			const float melt = (warmth * 4.0f + (interior ? 0.5f : 0.05f)) / 60.0f * dt;
+			state.snowCover = std::max(0.0f, state.snowCover - melt);
+		}
+	};
+
+	if (auto* player = RE::PlayerCharacter::GetSingleton())
+		update(player);
+	if (auto* lists = RE::ProcessLists::GetSingleton()) {
+		for (auto& handle : lists->highActorHandles) {
+			auto actor = handle.get();
+			if (actor)
+				update(actor.get());
+		}
+	}
+	for (auto it = actorSnow.begin(); it != actorSnow.end();) {
+		it->second.unseen += dt;
+		if (it->second.unseen > 30.0f)
+			it = actorSnow.erase(it);
+		else
+			++it;
+	}
+}
+
+void SnowCover::BindActorSnow(RE::BSRenderPass* a_pass)
+{
+	if (!globals::d3d::context || !globals::d3d::device)
+		return;
+
+	struct GPUData
+	{
+		float snowCover;
+		float snowAmount;
+		float coatSnow;
+		float coatMud;
+		float coatHeight;
+		float slide;
+		float snowScale;
+		float mudScale;
+		float enabled;
+		float strength;
+		float pad0;
+		float pad1;
+	} gpu{};
+
+	RE::Actor* actor = nullptr;
+	if (a_pass && a_pass->geometry) {
+		if (auto* ref = a_pass->geometry->GetUserData())
+			actor = ref->As<RE::Actor>();
+	}
+	if (actor) {
+		if (const auto it = actorSnow.find(actor->GetFormID()); it != actorSnow.end()) {
+			const auto& state = it->second;
+			gpu.snowCover = state.snowCover;
+			gpu.snowAmount = actorSnowAmount;
+			gpu.coatSnow = state.feetSnow;
+			gpu.coatMud = state.feetMud;
+			gpu.coatHeight = state.coatHeight;
+			gpu.slide = state.slide;
+			gpu.snowScale = 1.0f;
+			gpu.mudScale = 1.0f;
+			gpu.enabled = (state.feetSnow + state.feetMud) > 0.001f ? 1.0f : 0.0f;
+			gpu.strength = 1.0f;
+		}
+	}
+
+	if (!actorSnowCB) {
+		D3D11_BUFFER_DESC desc{};
+		desc.Usage = D3D11_USAGE_DYNAMIC;
+		desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+		desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		desc.ByteWidth = sizeof(GPUData);
+		try {
+			actorSnowCB = std::make_unique<ConstantBuffer>(desc, "ActorSnowCB");
+		} catch (const std::exception& e) {
+			logger::error("[Snow Cover] Actor snow constant buffer failed: {}", e.what());
+			return;
+		}
+	}
+	actorSnowCB->Update(&gpu, sizeof(gpu));
+	ID3D11Buffer* buffer = actorSnowCB->CB();
+	globals::d3d::context->PSSetConstantBuffers(ACTOR_SNOW_CB_SLOT, 1, &buffer);
+}
+
 void SnowCover::Hooks::BSLightingShader_SetupGeometry::thunk(RE::BSShader* This, RE::BSRenderPass* Pass, uint32_t RenderFlags)
 {
 	if (globals::features::snowCover.wsettings.EnableSnowCover) {
 		globals::features::snowCover.BSLightingShader_Setup(Pass);
 	}
+	if (globals::features::snowCover.IsActorSnowEnabled())
+		globals::features::snowCover.BindActorSnow(Pass);
 	func(This, Pass, RenderFlags);
 }
 

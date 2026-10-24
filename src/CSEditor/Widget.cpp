@@ -260,6 +260,8 @@ bool Widget::BeginWidgetWindow(bool showApply, bool showSaveLoadRevert, bool sho
 	if (result && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
 		EditorWindow::GetSingleton()->lastFocusedWidget = this;
 	UpdateWidgetTypeSize(GetWidgetTypeName());
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+		EditorWindow::GetSingleton()->SetFocusedWidget(*this);
 	return result;
 }
 

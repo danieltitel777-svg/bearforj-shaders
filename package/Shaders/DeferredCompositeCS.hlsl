@@ -38,48 +38,52 @@ SamplerState LinearSampler : register(s0);
 #	include "Skylighting/Skylighting.hlsli"
 #endif
 
-#if defined(SSGI)
-Texture2D<float4> SsgiAoTexture : register(t10);
-Texture2D<float4> SsgiYTexture : register(t11);
-Texture2D<float4> SsgiCoCgTexture : register(t12);
-Texture2D<float4> SsgiSpecularTexture : register(t13);
+#if defined(SSGI) || defined(SSR)
+#	include "NRD/NRDReblurSH.hlsli"
+#endif
 
-void SampleSSGI(uint2 pixCoord, float3 normalWS, out float ao, out float3 il)
+float GetSpecularOcclusionFromAmbientOcclusion(float NdotV, float ao, float roughness)
 {
-	ao = 1 - SsgiAoTexture[pixCoord];
-	float4 ssgiIlYSh = SsgiYTexture[pixCoord];
-	// without ZH hallucination
-	// float ssgiIlY = SphericalHarmonics::FuncProductIntegral(ssgiIlYSh, SphericalHarmonics::EvaluateCosineLobe(normalWS));
-	float ssgiIlY = SphericalHarmonics::SHHallucinateZH3Irradiance(ssgiIlYSh, normalWS);
-	float2 ssgiIlCoCg = SsgiCoCgTexture[pixCoord];
-	il = max(0, Color::YCoCgToRGB(float3(ssgiIlY, ssgiIlCoCg)));
+	return saturate(pow(abs(NdotV + ao), exp2(-16.0 * roughness - 1.0)) - 1.0 + ao);
 }
 
-void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il, in float3 normal, in float3 view, in float roughness)
+#if defined(SSGI)
+Texture2D<float4> SsgiTexture : register(t10);
+#	if defined(SSGI_SH)
+Texture2D<float4> SsgiSH1Texture : register(t11);
+#	endif
+
+float SampleSSGIAO(uint2 pixCoord)
 {
-	float NdotV = dot(normal, view);
-	float alpha = roughness * roughness;
-	ao = SpecularOcclusion(saturate(NdotV), alpha, ao);
+#	if defined(SSGI_SH)
+	NRD_SG sg = REBLUR_BackEnd_UnpackSh(SsgiTexture[pixCoord], SsgiSH1Texture[pixCoord]);
+	return saturate(sg.normHitDist);
+#	else
+	float4 data = SsgiTexture[pixCoord];
+	float normHitDist;
+	float3 radiance;
+	REBLUR_BackEnd_UnpackRadianceAndNormHitDist(data, radiance, normHitDist);
+	return saturate(normHitDist);
+#	endif
+}
+#endif
 
-	uint hqSpecWidth, hqSpecHeight;
-	SsgiSpecularTexture.GetDimensions(hqSpecWidth, hqSpecHeight);
+#if defined(SSR)
+Texture2D<float4> SsrTexture : register(t13);
 
+void SampleSSRTracedSpecular(uint2 pixCoord, out float3 specularRadiance, out float normHitDist)
+{
+	float4 data = SsrTexture[pixCoord];
+	REBLUR_BackEnd_UnpackRadianceAndNormHitDist(data, specularRadiance, normHitDist);
+}
+#endif
+
+#if defined(SSGI)
+void SampleSSGI(uint2 pixCoord, float3 normalWS, out float ao, out float3 il)
+{
+	ao = SampleSSGIAO(pixCoord);
 	il = 0;
-	if (hqSpecWidth == 0) {
-		float4 ssgiIlYSh = SsgiYTexture[pixCoord];
-		float ssgiIlY = SphericalHarmonics::FuncProductIntegral(ssgiIlYSh, lobe);
-		float2 ssgiIlCoCg = SsgiCoCgTexture[pixCoord].xy;
-
-		// pi to compensate for the /pi in specularLobe
-		// i don't think there really should be a 1/PI but without it the specular is too strong
-		// reflectance being ambient reflectance doesn't help either
-		il = max(0, Color::YCoCgToRGB(float3(ssgiIlY, ssgiIlCoCg / Math::PI)));
-	}
-
-	// HQ spec
-	float4 hq_spec = SsgiSpecularTexture[pixCoord];
-	ao *= 1 - hq_spec.a;
-	il += hq_spec.rgb;
+	(void)normalWS;
 }
 #endif
 
@@ -286,20 +290,20 @@ void SampleSSGISpecular(uint2 pixCoord, sh2 lobe, inout float ao, out float3 il,
 #	endif
 		}
 
-#	if defined(SSGI)
-		float3 ssgiIlSpecular;
-		SampleSSGISpecular(dispatchID.xy, specularLobe, ssgiAo, ssgiIlSpecular, normalWS, V, roughness);
-
-		finalIrradiance = (finalIrradiance * ssgiAo);
-
-		ssgiIlSpecular = Color::RGBToYCoCg(ssgiIlSpecular);
-		if (ssgiIlSpecular.x > 0.0) {
-			ssgiIlSpecular = max(0, Color::YCoCgToRGB(float3(ssgiIlSpecular.x, lerp(ssgiIlSpecular.yz, Color::RGBToYCoCg(finalIrradiance).yz, 0.5))));
-		} else {
-			ssgiIlSpecular = 0;
+#	if defined(SSR)
+		if (SharedData::ssrSettings.Enabled != 0) {
+			float3 tracedSpecular;
+			float specNormHitDist;
+			SampleSSRTracedSpecular(dispatchID.xy, tracedSpecular, specNormHitDist);
+			float tracedAvailability = saturate(specNormHitDist / NRD_EPS);
+			float3 fallbackIrradiance = finalIrradiance * SharedData::ssrSettings.SpecCubemapMult;
+			finalIrradiance = lerp(fallbackIrradiance, tracedSpecular, tracedAvailability);
 		}
+#	endif
 
-		finalIrradiance += ssgiIlSpecular;
+#	if defined(SSGI)
+		if (SharedData::ssgiSettings.Enabled != 0)
+			finalIrradiance *= GetSpecularOcclusionFromAmbientOcclusion(saturate(dot(normalWS, V)), ssgiAo, roughness);
 #	endif
 
 		color += reflectance * finalIrradiance;

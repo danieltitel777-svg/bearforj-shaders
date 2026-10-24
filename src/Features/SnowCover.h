@@ -7,6 +7,8 @@
 #include "Utils/FormIdParser.h"
 #include "Utils/Game.h"
 #include <DirectXTex.h>
+#include <memory>
+#include <unordered_map>
 
 #pragma warning(push)
 #pragma warning(disable: 4324)
@@ -162,6 +164,11 @@ public:
 	WorldSettings wsettings;
 	FireMeltSettings fireMeltSettings;
 	uint enableFoliageSnow = 1;
+	// Off leaves character shaders unchanged. On adds the ACTOR_SNOW lighting define.
+	uint enableActorSnow = 0;
+	float actorSnowAmount = 1.0f;
+	float actorSnowAccumSeconds = 120.0f;
+	bool IsActorSnowEnabled() const { return enableActorSnow != 0; }
 	PerFrame perFrame;
 
 	struct TrackedFire
@@ -301,10 +308,29 @@ public:
 	virtual inline void PostPostLoad() override { Hooks::Install(); }
 
 	void BSLightingShader_Setup(RE::BSRenderPass* Pass);
+	void UpdateActorSnow();
+	void BindActorSnow(RE::BSRenderPass* a_pass);
 	static bool IsHarvestableFlora(RE::TESObjectREFR* a_ref);
 	bool IsBuilding(RE::TESObjectREFR* a_ref);
 
 	std::unordered_map<RE::FormID, bool> buildingBaseCache;
+
+	struct ActorSnowState
+	{
+		float snowCover = 0.0f;
+		float feetSnow = 0.0f;
+		float feetMud = 0.0f;
+		float slide = 0.0f;
+		float coatHeight = 48.0f;
+		float speed = 0.0f;
+		RE::NiPoint3 lastPos{};
+		bool hasPos = false;
+		float unseen = 0.0f;
+	};
+	std::unordered_map<RE::FormID, ActorSnowState> actorSnow;
+	bool weatherSnowing = false;
+	std::unique_ptr<ConstantBuffer> actorSnowCB;
+	static constexpr uint32_t ACTOR_SNOW_CB_SLOT = 13;
 
 	struct Hooks
 	{

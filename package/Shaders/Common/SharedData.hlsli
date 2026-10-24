@@ -672,6 +672,22 @@ namespace SharedData
 		float4 Neutral;
 	};
 
+	struct SSGISettings
+	{
+		uint Enabled;
+		uint EnableIL;
+		uint DebugMode;
+		float AOPower;
+	};
+
+	struct SSRSettings
+	{
+		uint Enabled;
+		float SpecularMult;
+		float SpecCubemapMult;
+		uint pad0;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		GrassLightingSettings grassLightingSettings;
@@ -703,6 +719,8 @@ namespace SharedData
 		RainRefractionSettings rainRefractionSettings;
 		NightEyeSettings nightEyeSettings;
 		ProceduralAuroraSettings proceduralAuroraSettings;
+		SSGISettings ssgiSettings;
+		SSRSettings ssrSettings;
 	};
 
 	Texture2D<float4> DepthTexture : register(t17);

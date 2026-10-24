@@ -798,13 +798,14 @@ void EditorWindow::ShowViewportWindow()
 void EditorWindow::ShowWidgetWindow()
 {
 	const auto& io = ImGui::GetIO();
-	if (io.KeyCtrl && !io.WantTextInput && lastFocusedWidget && lastFocusedWidget->IsOpen()) {
+	auto* focusedWidget = io.KeyCtrl && !io.WantTextInput && lastFocusedWidgetKey ? FindWidget(*lastFocusedWidgetKey) : nullptr;
+	if (focusedWidget && focusedWidget->IsOpen()) {
 		// Ctrl+W closes the focused widget; Ctrl+R discards its unsaved changes.
 		if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
-			lastFocusedWidget->SetOpen(false);
-			lastFocusedWidget = nullptr;
+			focusedWidget->SetOpen(false);
+			lastFocusedWidgetKey.reset();
 		} else if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
-			DiscardWidgetChanges(*lastFocusedWidget);
+			DiscardWidgetChanges(*focusedWidget);
 		}
 	}
 

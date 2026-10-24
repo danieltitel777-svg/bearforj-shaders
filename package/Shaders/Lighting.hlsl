@@ -1041,6 +1041,10 @@ bool UseSkylightingShadowVisibility()
 #		include "SnowCover/SnowCover.hlsli"
 #	endif
 
+#if defined(ACTOR_SNOW) && !defined(TREE_LOD_WIND_VS)
+#	include "SnowCover/ActorSnow.hlsli"
+#endif
+
 #	if defined(CS_HAIR_SHADING)
 #		include "Hair/Hair.hlsli"
 #	endif
@@ -2519,6 +2523,12 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	}
 #	endif  // SNOW_COVER
 
+#if defined(ACTOR_SNOW) && !defined(LANDSCAPE) && !defined(EYE) && !defined(TREE_LOD_WIND_VS)
+#	if defined(SKINNED) || !defined(MODELSPACENORMALS)
+	ActorSnow::Apply(material, worldNormal, vertexNormal, input.ModelPosition.xyz, tbn);
+#	endif
+#endif
+
 	// Deferred glint precompute (after Snow Cover so it can override glint params); skip when disabled (density<=1.1), matching the BRDF gate in Common/PBR.hlsli.
 #	if defined(GLINT)
 	if (material.GlintLogMicrofacetDensity > 1.1) {
@@ -3153,9 +3163,14 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL) {
 		if (!(SharedData::iblSettings.UseStaticIBL && !inWorld && !inReflection)) {
-			directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -ambientNormal);
+			directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(directionalAmbientColor, -ambientNormal, input.WorldPosition.xyz);
 		}
 	}
+#	endif
+
+#	if defined(DEFERRED)
+	if (SharedData::ssgiSettings.EnableIL != 0 && !inReflection)
+		directionalAmbientColor = 0;
 #	endif
 
 	float3 reflectionDiffuseColor = diffuseColor + directionalAmbientColor;
@@ -3324,7 +3339,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	float fogFactor = input.FogParam.w;
 #		if defined(IBL)
 	if (SharedData::iblSettings.EnableIBL) {
-		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor);
+		fogColor = ImageBasedLighting::GetFogIBLColor(fogColor, input.WorldPosition.xyz);
 	}
 #		endif
 #		if defined(EXP_HEIGHT_FOG)
