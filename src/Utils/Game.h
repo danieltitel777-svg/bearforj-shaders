@@ -1,0 +1,247 @@
+// functions that get or set game data
+
+#pragma once
+
+#include <cstdint>
+
+namespace Util
+{
+	/** @brief Forces weather and refreshes its cloud passes and sky model. */
+	void ForceWeather(RE::Sky* a_sky, RE::TESWeather* a_weather, bool a_override);
+
+	/** @brief Pending celestial synchronization requests consumed by the sky update hook. */
+	struct CelestialTransitionRequest
+	{
+		bool timeJump = false;
+		bool gameLoad = false;
+	};
+
+	/** @brief Sets whether a sky update hook can synchronize celestial transitions. */
+	void SetCelestialTransitionHandlerAvailable(bool a_available);
+	/** @brief Requests celestial synchronization after an abrupt game-time change. */
+	void RequestTimeJumpTransition();
+	/** @brief Requests celestial synchronization after loading an existing save. */
+	void RequestGameLoadTransition();
+	/** @brief Consumes pending celestial synchronization requests. */
+	[[nodiscard]] CelestialTransitionRequest ConsumeCelestialTransitionRequest();
+	/** @brief Marks a celestial transition ready for dependent rendering updates. */
+	void CompleteCelestialTransition();
+	/** @brief Returns the latest completed celestial-transition generation. */
+	[[nodiscard]] std::uint32_t GetCompletedCelestialTransitionGeneration();
+
+	float4 TryGetWaterData(float offsetX, float offsetY);
+	float4 GetCameraData();
+	bool GetTemporal();
+	// Toggle the ISTemporalAA scene-resolve flag (companion to GetTemporal).
+	void SetTemporal(bool enabled);
+	// Disable vanilla TAA (bUseTAA:Display). CS drives TAA itself.
+	void DisableVanillaTAA();
+	float GetVerticalFOVRad();
+
+	RE::NiPoint3 GetEyePosition();
+
+	float2 ConvertToDynamic(float2 a_size, bool a_ignoreLock = false);
+
+	// Game unit conversions
+	namespace Units
+	{
+		// Conversion constants
+		constexpr float GAME_UNIT_TO_CM = 1.428f;
+		constexpr float GAME_UNIT_TO_M = GAME_UNIT_TO_CM / 100.0f;
+		constexpr float GAME_UNIT_TO_FEET = GAME_UNIT_TO_CM / 30.48f;
+		constexpr float GAME_UNIT_TO_INCHES = GAME_UNIT_TO_CM / 2.54f;
+
+		// Wind speed conversions
+		constexpr float WIND_RAW_TO_NORMALIZED = 1.0f / 255.0f;  // Raw to 0-1 scale
+		constexpr float WIND_RAW_TO_PERCENT = 100.0f / 255.0f;   // Raw to percentage
+
+		// Direction conversions
+		constexpr float DIR_RAW_TO_DEGREES = 360.0f / 256.0f;    // Raw 0-256 to 0-360 degrees
+		constexpr float DIR_RANGE_TO_DEGREES = 180.0f / 256.0f;  // Range 0-256 to 0-180 degrees
+		constexpr float RADIANS_TO_DEGREES = 180.0f / DirectX::XM_PI;
+
+		// Distance conversions
+		inline float GameUnitsToMeters(float gameUnits) { return gameUnits * GAME_UNIT_TO_M; }
+		inline float GameUnitsToCm(float gameUnits) { return gameUnits * GAME_UNIT_TO_CM; }
+		inline float GameUnitsToFeet(float gameUnits) { return gameUnits * GAME_UNIT_TO_FEET; }
+		inline float GameUnitsToInches(float gameUnits) { return gameUnits * GAME_UNIT_TO_INCHES; }
+
+		// Wind speed conversions
+		inline float WindRawToNormalized(uint8_t rawWind) { return rawWind * WIND_RAW_TO_NORMALIZED; }
+		inline float WindRawToPercent(uint8_t rawWind) { return rawWind * WIND_RAW_TO_PERCENT; }
+
+		// Direction conversions
+		inline float DirectionRawToDegrees(uint8_t rawDirection) { return rawDirection * DIR_RAW_TO_DEGREES; }
+		inline float DirectionRangeToDegrees(uint8_t rawRange) { return rawRange * DIR_RANGE_TO_DEGREES; }
+		inline float RadiansToDegrees(float radians) { return radians * RADIANS_TO_DEGREES; }
+
+		// Angle normalization helpers
+		inline float NormalizeDegrees0To360(float degrees)
+		{
+			if (!std::isfinite(degrees))
+				return 0.0f;
+			degrees = std::fmod(degrees, 360.0f);
+			if (degrees < 0.0f)
+				degrees += 360.0f;
+			if (degrees >= 360.0f)
+				degrees -= 360.0f;
+			return degrees;
+		}
+
+		inline float NormalizeDegreesToSignedRange(float degrees)
+		{
+			if (!std::isfinite(degrees))
+				return 0.0f;
+			degrees = std::fmod(degrees, 360.0f);
+			if (degrees > 180.0f)
+				degrees -= 360.0f;
+			if (degrees < -180.0f)
+				degrees += 360.0f;
+			return degrees;
+		}
+
+		// Formatted string helpers for tooltips
+		inline std::string FormatDistance(float gameUnits)
+		{
+			return std::format("{:.1f} units ({:.2f} m, {:.1f} ft)",
+				gameUnits, GameUnitsToMeters(gameUnits), GameUnitsToFeet(gameUnits));
+		}
+		inline std::string FormatWindSpeed(uint8_t rawWind)
+		{
+			return std::format("{:.1f}% (raw {}, {:.2f} normalized)",
+				WindRawToPercent(rawWind), rawWind, WindRawToNormalized(rawWind));
+		}
+
+		inline std::string FormatDirection(uint8_t rawDirection)
+		{
+			return std::format("{:.1f}° (raw {})",
+				DirectionRawToDegrees(rawDirection), rawDirection);
+		}
+	}
+
+	struct DispatchCount
+	{
+		uint x;
+		uint y;
+	};
+	DispatchCount GetScreenDispatchCount(bool a_dynamic = true);
+
+	/**
+	 * @brief Checks if dynamic resolution is currently enabled.
+	 *
+	 * @return true if dynamic resolution is enabled, false otherwise.
+	 */
+	bool IsDynamicResolution();
+
+	/**
+	 * Usage:
+	 * static FrameChecker frame_checker;
+	 * if(frame_checker.isNewFrame())
+	 *     ...
+	*/
+	class FrameChecker
+	{
+	private:
+		uint32_t last_frame = UINT32_MAX;
+
+	public:
+		bool IsNewFrame(uint32_t frame)
+		{
+			bool retval = last_frame != frame;
+			last_frame = frame;
+			return retval;
+		}
+		bool IsNewFrame();
+	};
+
+	/**
+	 * @brief Limits a graph to one sample per frame. Graphs only sample while drawn, so
+	 * after a skipped frame the next samples carry the hidden gap and the open hitch;
+	 * the first kWarmupFrames are dropped so they don't dominate the graph's scale.
+	 */
+	class GraphSampleGate
+	{
+	private:
+		uint32_t lastFrame = UINT32_MAX;
+		uint32_t warmupFrames = 0;
+
+	public:
+		// Covers the open hitch plus the profiler's 3-frame readback latency.
+		static constexpr uint32_t kWarmupFrames = 10;
+
+		/**
+		 * @brief Whether the graph should record a sample this frame.
+		 * @param frame Current frame number.
+		 * @return False for repeat calls within a frame and while warming up after a skipped frame.
+		 */
+		bool ShouldSample(uint32_t frame)
+		{
+			if (frame == lastFrame)
+				return false;
+			if (frame != lastFrame + 1)
+				warmupFrames = kWarmupFrames;
+			lastFrame = frame;
+			if (warmupFrames == 0)
+				return true;
+			warmupFrames--;
+			return false;
+		}
+
+		/** @brief ShouldSample() for the current render frame. */
+		bool ShouldSample();
+	};
+
+	/**
+     * @brief Retrieves the seasonal texture swap for a given texture set, if available.
+     *
+     * This function checks if a given texture set has been swapped by Seasons of Skyrim.
+     * If swapped, pad12C will be > 0 and will be the formid of the swapped texture set.
+     *
+     * @param textureSet Pointer to the original BGSTextureSet to check for seasonal swaps.
+     *                   Can be nullptr.
+     *
+     * @return Pointer to the seasonal swap texture set if found and valid, otherwise
+     *         returns the original textureSet parameter. Returns nullptr if the input
+     *         textureSet is nullptr.
+     */
+	[[nodiscard]] RE::BGSTextureSet* GetSeasonalSwap(RE::BGSTextureSet* textureSet);
+
+	// TESForm formatting helpers
+	std::string FormatTESForm(const RE::TESForm* form);
+	std::string FormatWeather(const RE::TESWeather* weather);
+
+	bool IsInterior();
+
+	/**
+	 * @brief Converts a 2D world position to cell coordinates.
+	 *
+	 * @param worldPos The world position as a 2D point.
+	 * @param x Output parameter for the cell X coordinate.
+	 * @param y Output parameter for the cell Y coordinate.
+	 */
+	void WorldToCell(const RE::NiPoint2& worldPos, int32_t& x, int32_t& y);
+
+	/**
+	 * @brief Converts a 3D world position to cell coordinates.
+	 *
+	 * @param worldPos The world position as a 3D point.
+	 * @param x Output parameter for the cell X coordinate.
+	 * @param y Output parameter for the cell Y coordinate.
+	 */
+	void WorldToCell(const RE::NiPoint3& worldPos, int32_t& x, int32_t& y);
+
+	/**
+	 * @brief Converts a four-character string to a uint32_t for efficient comparison.
+	 *
+	 * Four Character Code (FCC) allows representing section names in plugin files
+	 * as human-readable strings in code, while compiling to simple integer comparisons
+	 * with no runtime cost compared to string comparisons.
+	 *
+	 * @param s A null-terminated array of exactly 4 characters.
+	 * @return The four characters packed into a uint32_t (little-endian).
+	 */
+	constexpr uint32_t FCC(const char s[4]) noexcept
+	{
+		return s[0] | s[1] << 8 | s[2] << 16 | s[3] << 24;
+	}
+}  // namespace Util

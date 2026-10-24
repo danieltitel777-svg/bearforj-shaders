@@ -1,0 +1,286 @@
+#pragma once
+
+#include "Feature.h"
+#include "Upscaling/DX12SwapChain.h"
+#include "Upscaling/FidelityFX.h"
+#include "Upscaling/RCAS/RCAS.h"
+#include "Upscaling/Streamline.h"
+#include <d3d11_4.h>
+#include <d3d12.h>
+#include <winrt/base.h>
+
+/**
+ * @brief Provides upscaling functionality including DLSS, FSR and TAA.
+ *
+ * This feature handles various upscaling methods and frame generation technologies
+ * to improve performance while maintaining visual quality.
+ */
+struct Upscaling : Feature
+{
+private:
+	static constexpr std::string_view MOD_ID = "156952";
+
+public:
+	// Feature interface
+	virtual inline std::string GetName() override { return "Upscaling"; }
+	virtual std::string GetDisplayName() override { return T("feature.upscaling.name", "Upscaling"); }
+	virtual inline std::string GetShortName() override { return "Upscaling"; }
+	virtual inline std::string GetFeatureModLink() override { return MakeNexusModURL(MOD_ID); }
+	virtual inline bool IsCore() const override { return false; }
+	virtual inline std::string_view GetCategory() const override { return FeatureCategories::kDisplay; }
+
+	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
+	{
+		return { T("feature.upscaling.description", "Advanced upscaling and frame generation technologies for improved performance"),
+			{ T("feature.upscaling.key_feature_1", "DLSS (Deep Learning Super Sampling) support"),
+				T("feature.upscaling.key_feature_2", "FSR (FidelityFX Super Resolution) support"),
+				T("feature.upscaling.key_feature_3", "TAA (Temporal Anti-Aliasing) support"),
+				T("feature.upscaling.key_feature_4", "Frame generation for supported systems") } };
+	};
+
+	float2 jitter = { 0, 0 };
+
+	enum class UpscaleMethod
+	{
+		kNONE,
+		kTAA,
+		kFSR,
+		kDLSS
+	};
+
+	static constexpr uint32_t kFsr4RuntimeSelectionSchemaVersion = 1;
+
+	struct Settings
+	{
+		uint upscaleMethod = (uint)UpscaleMethod::kDLSS;
+		uint upscaleMethodNoDLSS = (uint)UpscaleMethod::kFSR;
+		uint qualityMode = 1;  // Default to Quality (1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance, 0=Native AA)
+		uint frameLimitMode = 1;
+		uint frameGenerationMode = 1;
+		uint frameGenerationForceEnable = 0;
+		bool frameGenerationAllowInMenus = false;
+		uint streamlineLogLevel = 0;  // 0=Off, 1=Default, 2=Verbose
+		float sharpnessFSR = 0.0f;
+		bool sharpnessEnabledDLSS = false;
+		float sharpnessDLSS = 0.0f;
+		uint presetDLSS = 0;  // 0=Default, 1=J, 2=K, 3=L, 4=M
+		bool reflexLowLatencyMode = false;
+		bool reflexLowLatencyBoost = false;
+		bool reflexUseMarkersToOptimize = false;
+		bool reflexUseFPSLimit = false;
+		float reflexFPSLimit = 60.0f;
+
+		// Opt in to AMD's runtime FSR4 upscaler DLL on eligible AMD hardware instead of the
+		// host-linked FSR3 SDK; falls back to FSR3 on any failure.
+		bool fsr4RuntimeEnable = false;
+
+		// Tracks whether fsr4RuntimeEnable has been auto-migrated for the detected adapter.
+		// Defaults to current so a fresh config needs no migration; LoadSettings resets it to
+		// 0 when absent from JSON so pre-existing configs run the migration once.
+		uint32_t fsr4RuntimeSelectionSchemaVersion = kFsr4RuntimeSelectionSchemaVersion;
+	};
+
+	Settings settings;
+
+	// fsr4RuntimeEnable requires a restart: CreateUpscalingTextureResources (which allocates
+	// runtimeFsrDepthTexture) only runs on an upscale-method change, so a mid-session flip
+	// could otherwise select the runtime provider with no typed depth texture to feed it.
+	// Latched in SetupResources, after the D3D device hook has run the adapter probe and the
+	// one-shot migration -- LoadSettings is too early for both.
+	bool fsr4RuntimeEnableBoot = false;
+
+	struct JitterCB
+	{
+		float2 jitter;
+		float useWideKernel;
+		float pad0;
+	};
+
+	struct UpscalingDataCB
+	{
+		float2 trueSamplingDim;
+		float2 pad0;
+	};
+
+	ConstantBuffer* jitterCB = nullptr;
+	ConstantBuffer* upscalingDataCB = nullptr;
+
+	// Runtime state
+	bool isWindowed = false;
+	bool lowRefreshRate = false;
+	bool fidelityFXMissing = false;
+	bool d3d12SwapChainActive = false;
+	// Set by Main_PostProcessing when frame-generation inputs were copied; cleared after Present.
+	bool frameGenerationPrepared = false;
+
+	globals::FrameBufferCache worldCameraFrame{};
+	bool worldCameraFrameValid = false;
+
+	// Timing and scaling
+	double refreshRate = 0.0f;
+	float2 resolutionScale = { 1.0f, 1.0f };
+	LARGE_INTEGER qpf;
+
+	// FG FPS Measurement for Overlay
+	bool IsFrameGenerationDx12PathActive() const;
+	bool IsFrameGenerationActive() const;
+	/** @brief Returns whether settings and menu state permit preparing frame-generation inputs this frame. */
+	bool ShouldPrepareFrameGeneration() const;
+	/** @brief Returns the frame-generation decision made in post-processing, held until the frame is presented. */
+	bool ShouldUseFrameGenerationThisFrame() const;
+	bool IsUpscalingActive() const;
+
+	// Feature interface overrides
+	virtual void DrawSettings() override;
+	virtual void SaveSettings(json& o_json) override;
+	void WriteGameIniSettings();
+	virtual void LoadSettings(json& o_json) override;
+	virtual void RestoreDefaultSettings() override;
+	virtual void DataLoaded() override;
+
+	/**
+	 * @brief Installs Direct3D-related hooks for device and factory creation.
+	 *
+	 * Loads FidelityFX support and patches the import address table (IAT) to redirect D3D11 device and DXGI factory creation functions to custom hook implementations.
+	**/
+	virtual void Load() override;
+	virtual void PostPostLoad() override;
+	virtual void SetupResources() override;
+
+	UpscaleMethod GetUpscaleMethod() const;
+
+	void CaptureWorldCamera();
+	const globals::FrameBufferCache& GetConstantsCamera() const;
+
+	void CheckResources(UpscaleMethod a_upscalemethod);
+	void CreateUpscalingTextureResources(UpscaleMethod a_upscalemethod);
+	void DestroyUpscalingTextureResources(UpscaleMethod a_upscalemethod);
+
+	winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCS[4];          // One for each UpscaleMethod (kNONE, kTAA, kFSR, kDLSS)
+	winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCSDepthOutput;  // FSR: converts R24G8_TYPELESS depth to R32_FLOAT
+	ID3D11ComputeShader* GetEncodeTexturesCS();
+
+	winrt::com_ptr<ID3D11PixelShader> depthRefractionUpscalePS;
+	ID3D11PixelShader* GetDepthRefractionUpscalePS();
+
+	winrt::com_ptr<ID3D11PixelShader> underwaterMaskUpscalePS;
+	ID3D11PixelShader* GetUnderwaterMaskUpscalePS();
+
+	winrt::com_ptr<ID3D11VertexShader> upscaleVS;
+	ID3D11VertexShader* GetUpscaleVS();
+
+	winrt::com_ptr<ID3D11DepthStencilState> upscaleDepthStencilState;
+	winrt::com_ptr<ID3D11BlendState> upscaleBlendState;
+	winrt::com_ptr<ID3D11RasterizerState> upscaleRasterizerState;
+
+	// Helper: Create a Texture2D matching source format at a given size
+	static eastl::unique_ptr<Texture2D> CreateTextureFromSource(ID3D11Resource* src, uint32_t width, uint32_t height,
+		bool copyBindFlags = false, bool createSRV = false, bool createUAV = false, const char* name = nullptr);
+
+	void ConfigureTAA();
+	void ConfigureUpscaling(RE::BSGraphics::State* a_state);
+	void Upscale();
+
+	// D3D11 textures
+	Texture2D* reactiveMaskTexture = nullptr;
+	Texture2D* transparencyCompositionMaskTexture = nullptr;
+	Texture2D* motionVectorCopyTexture = nullptr;
+	Texture2D* sharpenerTexture = nullptr;
+	Texture2D* runtimeFsrDepthTexture = nullptr;
+
+	virtual void ClearShaderCache() override;
+
+	// Static instances instead of singletons
+	static inline Streamline streamline;
+	static inline FidelityFX fidelityFX;  ///< AMD FSR frame generation
+	static inline DX12SwapChain dx12SwapChain;
+	static inline RCAS rcas;  ///< Standalone RCAS sharpening for DLSS
+
+	winrt::com_ptr<ID3D11PixelShader> copyDepthToSharedBufferPS;
+
+	float projectionPosScaleX = 0.0f;
+	float projectionPosScaleY = 0.0f;
+
+	float dynamicResolutionWidthRatio = 1.0f;
+	float dynamicResolutionHeightRatio = 1.0f;
+
+	bool previousUpscalingWasActive = false;
+	bool depthUpscaleUseWideKernel = false;
+
+	/** @brief Copies depth and motion vectors for frame generation; returns false if its shaders or shared buffers are unavailable. */
+	bool CopySharedD3D12Resources();
+	void PostDisplay();
+	void PerformUpscaling();
+	void UpscaleDepth();
+
+	/**
+	 * @brief Applies RCAS sharpening to the main render target after DLSS upscaling.
+	 *
+	 * Runs in HDR space before tonemapping. Only called when DLSS is active and sharpness > 0.
+	 */
+	void ApplySharpening();
+
+	static void TimerSleepQPC(int64_t targetQPC);
+
+	void FrameLimiter();
+
+	static double GetRefreshRate(HWND a_window);
+
+	// Unified interface methods - external code should use these instead of direct access
+	void LoadUpscalingSDKs();  // Loads all SDKs at once
+	HANDLE GetFrameLatencyWaitableObject() const;
+	float GetFrameTime() const;
+
+	// Backend interface methods
+	bool IsBackendInitialized() const;
+	void CheckBackendFeatures(IDXGIAdapter* adapter);
+	void UpgradeBackendInterface(void** ppInterface);
+	void SetBackendD3DDevice(ID3D11Device* device);
+	void PostBackendDevice();
+
+	// Module availability methods
+	bool HasFrameGenModule() const;
+
+	// Proxy interface methods
+	void SetProxyD3D11Device(ID3D11Device* device);
+	void SetProxyD3D11DeviceContext(ID3D11DeviceContext* context);
+	void CreateProxySwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC swapChainDesc);
+	void CreateProxyInterop();
+	IDXGISwapChain* GetProxySwapChain();
+
+	using BlurResources = DX12SwapChain::BlurResources;
+
+	// Get all D3D11 resources needed for background blur when D3D12 swap chain is active
+	BlurResources GetBlurResources() const;
+
+private:
+	struct Main_UpdateJitter
+	{
+		static void thunk(RE::BSGraphics::State* a_state);
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct MenuManagerDrawInterfaceStartHook
+	{
+		static void thunk(int64_t a1);
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct Main_PostProcessing
+	{
+		static void thunk(RE::ImageSpaceManager* a_this, uint32_t a3, RE::RENDER_TARGET a_target, void* a_4, bool a_5);
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct Main_RenderPrecipitation
+	{
+		static void thunk();
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct BSFaceGenManager_UpdatePendingCustomizationTextures
+	{
+		static void thunk();
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+};

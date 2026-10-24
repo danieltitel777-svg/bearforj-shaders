@@ -1,0 +1,1375 @@
+#include "Hooks.h"
+
+#include "ShaderTools/BSShaderHooks.h"
+#include "ShaderTools/LegacyGraphicsCompatibility.h"
+#include "Utils/ExternalEmittance.h"
+#include "Utils/VersionedRelocation.h"
+
+#include "EngineFix.h"
+#include "Feature.h"
+#include "Globals.h"
+#include "Menu.h"
+#include "Menu/BackgroundBlur.h"
+#include "ShaderCache.h"
+#include "State.h"
+#include "TruePBR.h"
+#include "Util.h"
+#include "Utils/ShaderDescriptor.h"
+#include "VanillaBinding.h"
+
+#include "CSEditor/SceneManager/WeatherTransition.h"
+#include "Features/Effects11.h"
+#include "Features/GrassOptimizations.h"
+#include "Features/HDRDisplay.h"
+#include "Features/HiZOcclusion.h"
+#include "Features/InteriorSun.h"
+#include "Features/LandscapeSeams.h"
+#include "Features/LightLimitFix.h"
+#include "Features/ProceduralAurora.h"
+#include "Features/NightEye.h"
+#include "Features/PostProcessing.h"
+#include "Features/RainRefraction.h"
+#include "Features/ReverseZ.h"
+#include "Features/RemoteControl/NvPerf.h"
+#include "Features/RenderDoc.h"
+#include "Features/ScreenshotFeature.h"
+#include "Features/Skin.h"
+#include "Features/SkySync.h"
+#include "Features/Skylighting.h"
+#include "Features/Upscaling.h"
+#include "Features/VolumetricLighting.h"
+
+#include <unordered_map>
+
+namespace
+{
+	using ShaderBytecode = std::vector<std::uint8_t>;
+
+	std::unordered_map<void*, std::shared_ptr<const ShaderBytecode>> ShaderBytecodeMap;
+	std::mutex ShaderBytecodeMutex;
+	std::mutex ShaderDumpMutex;
+
+	void NormalizeLegacyUtilityDescriptors(const RE::BSShader& a_shader, uint& a_vertexDescriptor, uint& a_pixelDescriptor)
+	{
+		if (a_shader.shaderType.get() != RE::BSShader::Type::Utility ||
+			!LegacyGraphicsCompatibility::IsLegacyVersion()) {
+			return;
+		}
+		a_vertexDescriptor = LegacyGraphicsCompatibility::NormalizeLegacyUtilityDescriptor(a_vertexDescriptor);
+		a_pixelDescriptor = LegacyGraphicsCompatibility::NormalizeLegacyUtilityDescriptor(a_pixelDescriptor);
+	}
+}
+
+void RegisterShaderBytecode(void* Shader, const void* Bytecode, size_t BytecodeLength)
+{
+	if (!Shader || !Bytecode || BytecodeLength == 0) {
+		logger::warn("Ignoring invalid shader bytecode capture (shader {}, bytecode {}, size {})", Shader, Bytecode, BytecodeLength);
+		return;
+	}
+
+	// Grab a copy since the pointer isn't going to be valid forever
+	auto codeCopy = std::make_shared<ShaderBytecode>(BytecodeLength);
+	memcpy(codeCopy->data(), Bytecode, BytecodeLength);
+	logger::debug(fmt::runtime("Saving shader at index {:x} with {} bytes:\t{:x}"), (std::uintptr_t)Shader, BytecodeLength, (std::uintptr_t)Bytecode);
+	std::scoped_lock lock(ShaderBytecodeMutex);
+	ShaderBytecodeMap.insert_or_assign(Shader, std::move(codeCopy));
+}
+
+std::shared_ptr<const ShaderBytecode> GetShaderBytecode(void* Shader)
+{
+	logger::debug(fmt::runtime("Loading shader at index {:x}"), (std::uintptr_t)Shader);
+	std::scoped_lock lock(ShaderBytecodeMutex);
+	const auto entry = ShaderBytecodeMap.find(Shader);
+	return entry == ShaderBytecodeMap.end() ? nullptr : entry->second;
+}
+
+template <class ShaderType>
+void DumpShader(const RE::BSShader* thisClass, const ShaderType* shader, std::span<const std::uint8_t> bytecode)
+{
+	static_assert(std::is_same_v<ShaderType, RE::BSGraphics::VertexShader> || std::is_same_v<ShaderType, RE::BSGraphics::PixelShader>);
+
+	constexpr auto shaderExtStr = std::is_same_v<ShaderType, RE::BSGraphics::VertexShader> ? "vs" : "ps";
+	constexpr auto shaderTypeStr = std::is_same_v<ShaderType, RE::BSGraphics::VertexShader> ? "vertex" : "pixel";
+	const std::string_view loaderType = thisClass->fxpFilename ? thisClass->fxpFilename : "Unknown";
+	const auto dumpPath = std::format("Data\\ShaderDump\\{}\\{:X}.{}.bin", loaderType, shader->id, shaderExtStr);
+	const auto directoryPath = std::format("Data\\ShaderDump\\{}", loaderType);
+	logger::debug("Dumping {} shader {} with id {:x} at {}", shaderTypeStr, loaderType, shader->id, dumpPath);
+
+	std::scoped_lock lock(ShaderDumpMutex);
+	if (!std::filesystem::is_directory(directoryPath)) {
+		try {
+			std::filesystem::create_directories(directoryPath);
+		} catch (const std::filesystem::filesystem_error& ex) {
+			logger::error("Failed to create folder: {}", ex.what());
+			return;
+		}
+	}
+
+	if (FILE* file; fopen_s(&file, dumpPath.c_str(), "wb") == 0) {
+		fwrite(bytecode.data(), 1, bytecode.size(), file);
+		fclose(file);
+	}
+}
+
+struct BSShader_LoadShaders
+{
+	static void thunk(RE::BSShader* shader, std::uintptr_t stream)
+	{
+		func(shader, stream);
+
+		auto state = globals::state;
+		auto shaderCache = globals::shaderCache;
+		if (shaderCache->IsDiskCache() || shaderCache->IsDump()) {
+			shaderCache->SetPrecompiling(true);
+			const SKSE::stl::scope_exit endPrecompile([shaderCache]() noexcept { shaderCache->SetPrecompiling(false); });
+
+			if (shaderCache->IsDiskCache()) {
+				Feature::ForEachLoadedFeature("GenerateShaderPermutations", [shader](Feature* feature) {
+					feature->GenerateShaderPermutations(shader);
+				});
+				EngineFix::GenerateAllShaderPermutations(shader);
+			}
+
+			for (const auto& entry : shader->vertexShaders) {
+				if (entry->shader && shaderCache->IsDump()) {
+					if (const auto bytecode = GetShaderBytecode(entry->shader)) {
+						DumpShader(shader, entry, std::span(*bytecode));
+					} else {
+						logger::warn("No captured bytecode for vertex shader {} descriptor {:X}", shader->fxpFilename ? shader->fxpFilename : "Unknown", entry->id);
+					}
+				}
+				auto vertexShaderDesriptor = entry->id;
+				auto pixelShaderDescriptor = entry->id;
+				NormalizeLegacyUtilityDescriptors(*shader, vertexShaderDesriptor, pixelShaderDescriptor);
+				state->ModifyShaderLookup(*shader, vertexShaderDesriptor, pixelShaderDescriptor);
+				shaderCache->GetVertexShader(*shader, vertexShaderDesriptor);
+			}
+			for (const auto& entry : shader->pixelShaders) {
+				if (entry->shader && shaderCache->IsDump()) {
+					if (const auto bytecode = GetShaderBytecode(entry->shader)) {
+						DumpShader(shader, entry, std::span(*bytecode));
+					} else {
+						logger::warn("No captured bytecode for pixel shader {} descriptor {:X}", shader->fxpFilename ? shader->fxpFilename : "Unknown", entry->id);
+					}
+				}
+				auto vertexShaderDesriptor = entry->id;
+				auto pixelShaderDescriptor = entry->id;
+				NormalizeLegacyUtilityDescriptors(*shader, vertexShaderDesriptor, pixelShaderDescriptor);
+				state->ModifyShaderLookup(*shader, vertexShaderDesriptor, pixelShaderDescriptor);
+				shaderCache->GetPixelShader(*shader, pixelShaderDescriptor);
+				state->ModifyShaderLookup(*shader, vertexShaderDesriptor, pixelShaderDescriptor, true);
+				shaderCache->GetPixelShader(*shader, pixelShaderDescriptor);
+			}
+
+			if (shaderCache->IsDiskCache() && shader->shaderType.get() == RE::BSShader::Type::Effect) {
+				constexpr auto sharedRuntimeUnionDescriptor =
+					static_cast<std::uint32_t>(SIE::ShaderCache::EffectShaderFlags::MultBlend) |
+					static_cast<std::uint32_t>(SIE::ShaderCache::EffectShaderFlags::MotionVectorsNormals);
+				shaderCache->GetPixelShader(*shader, sharedRuntimeUnionDescriptor);
+				shaderCache->GetPixelShader(*shader,
+					sharedRuntimeUnionDescriptor |
+						static_cast<std::uint32_t>(SIE::ShaderCache::EffectShaderFlags::Deferred));
+			}
+		}
+		BSShaderHooks::hk_LoadShaders(shader, stream);
+	};
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+bool Hooks::BSShader_BeginTechnique::thunk(RE::BSShader* shader, uint32_t vertexDescriptor, uint32_t pixelDescriptor, bool skipPixelShader)
+{
+	auto state = globals::state;
+	auto shaderCache = globals::shaderCache;
+
+	// Landscape Seams: draw the vanilla terrain permutation while the seams one is compiling or failed.
+	constexpr auto landscapeSeamsFlag = static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::LandscapeSeams);
+	if (shader->shaderType.get() == RE::BSShader::Type::Lighting && (pixelDescriptor & landscapeSeamsFlag) != 0) {
+		auto probeVertexDescriptor = vertexDescriptor;
+		auto probePixelDescriptor = pixelDescriptor;
+		state->ModifyShaderLookup(*shader, probeVertexDescriptor, probePixelDescriptor);
+		if (!globals::features::landscapeSeams.IsRenderable() ||
+			shaderCache->GetVertexShader(*shader, probeVertexDescriptor) == nullptr ||
+			shaderCache->GetPixelShader(*shader, probePixelDescriptor) == nullptr) {
+			vertexDescriptor &= ~landscapeSeamsFlag;
+			pixelDescriptor &= ~landscapeSeamsFlag;
+		}
+	}
+
+	state->updateShader = true;
+	state->currentShader = shader;
+
+	state->currentVertexDescriptor = vertexDescriptor;
+	state->currentPixelDescriptor = pixelDescriptor;
+
+	state->permutationData.VertexShaderDescriptor = vertexDescriptor;
+	state->permutationData.PixelShaderDescriptor = pixelDescriptor;
+
+	state->modifiedVertexDescriptor = vertexDescriptor;
+	state->modifiedPixelDescriptor = pixelDescriptor;
+
+	NormalizeLegacyUtilityDescriptors(*shader, state->modifiedVertexDescriptor, state->modifiedPixelDescriptor);
+	state->ModifyShaderLookup(*shader, state->modifiedVertexDescriptor, state->modifiedPixelDescriptor);
+
+	constexpr auto reflectionsFlag = static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::Reflections);
+	constexpr auto deferredFlag = static_cast<uint32_t>(SIE::ShaderCache::LightingShaderFlags::Deferred);
+	if (shader->shaderType.get() == RE::BSShader::Type::Lighting && !skipPixelShader &&
+		(state->permutationData.ExtraShaderDescriptor & static_cast<uint32_t>(State::ExtraShaderDescriptors::IsReflections)) != 0 &&
+		(state->modifiedPixelDescriptor & deferredFlag) == 0 &&
+		shaderCache->IsEnabled() && state->ShaderEnabled(RE::BSShader::Type::Lighting) &&
+		shaderCache->FindPixelShader(*shader, state->modifiedPixelDescriptor | reflectionsFlag) != nullptr) {
+		state->modifiedPixelDescriptor |= reflectionsFlag;
+	}
+
+	// Only check against non-shader bits
+	state->permutationData.PixelShaderDescriptor = Util::ShaderDescriptor::UploadedPixelDescriptor(state->permutationData.PixelShaderDescriptor, state->modifiedPixelDescriptor, State::GetRuntimePixelBits(*shader));
+
+	state->customVertexShader = nullptr;
+	state->customPixelShader = nullptr;
+	if (shader->shaderType.get() == RE::BSShader::Type::Sky && globals::features::reverseZ.IsActive() &&
+		(!state->ShaderEnabled(RE::BSShader::Type::Sky) || !shaderCache->GetVertexShader(*shader, state->modifiedVertexDescriptor)))
+		return false;
+
+	bool shaderFound = func(shader, vertexDescriptor, pixelDescriptor, skipPixelShader);
+
+	const auto type = shader->shaderType.get();
+	if (!shaderFound && shaderCache->IsEnabled() && type > 0 && type < RE::BSShader::Type::Total &&
+		state->enabledClasses[type - 1] && type != RE::BSShader::Type::Effect) {
+		RE::BSGraphics::VertexShader* vertexShader = shaderCache->GetVertexShader(*shader, state->modifiedVertexDescriptor);
+		RE::BSGraphics::PixelShader* pixelShader = shaderCache->GetPixelShader(*shader, state->modifiedPixelDescriptor);
+		if (vertexShader == nullptr || (!skipPixelShader && pixelShader == nullptr)) {
+			shaderFound = false;
+		} else {
+			state->settingCustomShader = true;
+			globals::d3d::context->VSSetShader(reinterpret_cast<ID3D11VertexShader*>(vertexShader->shader), NULL, NULL);
+			state->customVertexShader = vertexShader;
+			*globals::game::currentVertexShader = vertexShader;
+			globals::game::stateUpdateFlags->set(RE::BSGraphics::DIRTY_VERTEX_DESC);
+			if (skipPixelShader) {
+				pixelShader = nullptr;
+			}
+			*globals::game::currentPixelShader = pixelShader;
+			state->customPixelShader = pixelShader;
+			if (pixelShader)
+				globals::d3d::context->PSSetShader(reinterpret_cast<ID3D11PixelShader*>(pixelShader->shader), NULL, NULL);
+			state->settingCustomShader = false;
+			shaderFound = true;
+		}
+	}
+
+	state->lastModifiedVertexDescriptor = state->modifiedVertexDescriptor;
+	state->lastModifiedPixelDescriptor = state->modifiedPixelDescriptor;
+
+	state->BeginLightingVariants(shader, skipPixelShader, shaderFound);
+
+	return shaderFound;
+}
+
+namespace LightingExtensions
+{
+	struct BSLightingShader_SetupGeometry
+	{
+		static void thunk(RE::BSShader* shader, RE::BSRenderPass* pass, uint32_t renderFlags)
+		{
+			globals::state->UpdateLightingShaderPermutation(pass);
+			func(shader, pass, renderFlags);
+			globals::state->UpdateLightingVariant(pass);
+			if (globals::features::nightEye.loaded)
+				globals::features::nightEye.SetupGeometry(pass);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+}
+
+namespace EffectExtensions
+{
+	struct BSEffectShader_SetupGeometry
+	{
+		static void thunk(RE::BSShader* shader, RE::BSRenderPass* pass, uint32_t renderFlags)
+		{
+			func(shader, pass, renderFlags);
+			ExternalEmittance::UpdatePermutation(pass);
+			globals::state->UpdateEffectShaderPermutation(pass);
+			globals::state->permutationData.EffectRadius = pass->geometry->worldBound.radius;
+			if (globals::features::nightEye.loaded)
+				globals::features::nightEye.SetupGeometry(pass);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+}
+
+namespace SkyExtensions
+{
+	struct BSSkyShader_SetupGeometry
+	{
+		static void thunk(RE::BSShader* shader, RE::BSRenderPass* pass, uint32_t renderFlags)
+		{
+			globals::state->UpdateSkyShaderPermutation(pass);
+			VanillaBinding::BindSkyResources(pass);
+			func(shader, pass, renderFlags);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+}
+
+namespace GrassExtensions
+{
+	struct BSGrassShaderProperty_ctor
+	{
+		static RE::BSLightingShaderProperty* thunk(RE::BSLightingShaderProperty* property)
+		{
+			const uint64_t stackPointer = reinterpret_cast<uint64_t>(_AddressOfReturnAddress());
+			const uint64_t lightingPropertyAddress = stackPointer + (REL::Module::IsAE() ? 0x68 : 0x70);
+			auto* lightingProperty = *reinterpret_cast<RE::BSLightingShaderProperty**>(lightingPropertyAddress);
+
+			RE::BSLightingShaderProperty* grassProperty = func(property);
+			globals::features::truePBR.SetupGrassMaterial(lightingProperty, grassProperty);
+
+			if (lightingProperty->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kEffectLighting)) {
+				grassProperty->SetFlags(RE::BSShaderProperty::EShaderPropertyFlag8::kEffectLighting, true);
+			}
+
+			return grassProperty;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct BSGrassShader_SetupGeometry
+	{
+		static void thunk(RE::BSShader* shader, RE::BSRenderPass* pass, uint32_t renderFlags)
+		{
+			// Replace vanilla setup and pixel constants for passes handled by Grass Optimizations.
+			if (!globals::features::grassOptimizations.SetupGrassPass(shader, pass)) {
+				func(shader, pass, renderFlags);
+				LegacyGraphicsCompatibility::BindLegacyGrassPerGeometryToPixelShader();
+			}
+
+			auto state = globals::state;
+
+			state->permutationData.ExtraShaderDescriptor &= ~static_cast<uint32_t>(State::ExtraShaderDescriptors::GrassSphereNormal);
+
+			if (auto* shaderProperty = static_cast<RE::BSShaderProperty*>(pass->geometry->GetGeometryRuntimeData().shaderProperty.get())) {
+				if (shaderProperty->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kEffectLighting)) {
+					state->permutationData.ExtraShaderDescriptor |= static_cast<uint32_t>(State::ExtraShaderDescriptors::GrassSphereNormal);
+				}
+			}
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+}
+
+namespace WaterBlendHistory
+{
+	struct BSImagespaceShader_Render
+	{
+		static void thunk(void* imageSpaceShader, RE::BSTriShape* shape, RE::ImageSpaceEffectParam* param)
+		{
+			auto& renderTargets = globals::game::shadowState->GetRuntimeData().renderTargets;
+
+			// Clear stale coverage left by discarded non-water pixels
+			const float clearColor[4] = { 0.f, 0.f, 0.f, 0.f };
+			const auto target = renderTargets[1];
+			globals::d3d::context->ClearRenderTargetView(
+				globals::game::renderer->GetRuntimeData().renderTargets[target].RTV,
+				clearColor);
+
+			func(imageSpaceShader, shape, param);
+		}
+
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+}
+
+namespace WeatherExtensions
+{
+	void DetachRetiredPrecipitation(const RE::NiPointer<RE::BSGeometry>& geometry, const RE::Precipitation* precipitation)
+	{
+		if (!geometry || (precipitation && (geometry == precipitation->currentPrecip || geometry == precipitation->lastPrecip)))
+			return;
+		if (auto* parent = geometry->parent) {
+			parent->DetachChild(geometry.get());
+			logger::warn("[Precipitation] Detached retired geometry {:X} from parent {:X}",
+				reinterpret_cast<std::uintptr_t>(geometry.get()), reinterpret_cast<std::uintptr_t>(parent));
+		}
+	}
+
+	struct Precipitation_Restore
+	{
+		static void thunk(RE::NiPointer<RE::BSGeometry>* geometry, RE::BGSShaderParticleGeometryData* data, float* cubeSize, float* density)
+		{
+			const auto previous = *geometry;
+			func(geometry, data, cubeSize, density);
+			if (previous != *geometry) {
+				auto* sky = RE::Sky::GetSingleton();
+				DetachRetiredPrecipitation(previous, sky ? sky->precip : nullptr);
+			}
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct Sky_UpdateColors
+	{
+		static void thunk(RE::Sky* sky, float a_delta)
+		{
+			func(sky, a_delta);
+			globals::features::volumetricLighting.BeginSkyUpdate();
+			// Moonlight colours feed Effects11's grading; the dim must follow it, as its colour filter lifts zero
+			globals::features::skySync.ApplyMoonlightColors(sky);
+			globals::features::volumetricLighting.DetectNightRenderData();
+			if (globals::features::effects11.loaded)
+				globals::features::effects11.OnSkyUpdateColors(sky);
+			globals::features::skySync.OnSkyUpdateColors(sky);
+			globals::features::proceduralAurora.OnSkyUpdate(sky);
+			if (globals::features::effects11.loaded)
+				globals::features::effects11.FinishSkyUpdateColors(sky);
+			if (globals::features::volumetricLighting.loaded)
+				globals::features::volumetricLighting.ApplyGodRaySettings();
+			globals::features::volumetricLighting.FinishSkyUpdate(sky);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct Sky_UpdateWeather
+	{
+		static void thunk(RE::Sky* sky)
+		{
+			WeatherTransition::BeforeUpdate(sky);
+			func(sky);
+			WeatherTransition::AfterUpdate(sky);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct Sky_SetDirectionalAmbientColors
+	{
+		static void thunk(Effects11::DirectionalAmbientColors& DirectionalAmbientColors, RE::NiColor* AmbientSpecularTint, float AmbientSpecularFresnel)
+		{
+			if (globals::features::effects11.loaded) {
+				globals::features::effects11.CheckCommonData();
+				if (globals::features::effects11.enableEffect) {
+					// The engine passes Sky's own cube by reference, so overriding in place would
+					// compound on every call Sky has not recomputed colors for.
+					Effects11::DirectionalAmbientColors overridden = DirectionalAmbientColors;
+					globals::features::effects11.OverrideAmbientLighting(overridden);
+					func(overridden, AmbientSpecularTint, AmbientSpecularFresnel);
+					return;
+				}
+			}
+
+			func(DirectionalAmbientColors, AmbientSpecularTint, AmbientSpecularFresnel);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+}
+
+namespace PostProcessingExtensions
+{
+	struct Main_HDRTonemapBlendCinematic_Render
+	{
+		static void thunk(RE::ImageSpaceManager* a1, RE::ImageSpaceEffect* a2, uint32_t a3, uint32_t a4, RE::ImageSpaceShaderParam* a5)
+		{
+			auto* state = globals::state;
+			const auto input = static_cast<RE::RENDER_TARGET>(a3);
+			const auto output = static_cast<RE::RENDER_TARGET>(a4);
+
+			auto& nightEye = globals::features::nightEye;
+
+			// Effects11 replaces the pass outright; when it does, the vanilla call is skipped
+			// and HandlePostProcessing fixes up the render-target state the pass would have set.
+			if (state->HandlePostProcessing(input, output)) {
+				nightEye.RenderPostProcess(output);
+				return;
+			}
+
+			// Post Processing runs its pipeline into kMAIN/kMAIN_COPY, then lets the vanilla
+			// pass run so ISHDR can take its POSTPROCESS passthrough branch.
+			auto& postProcessing = globals::features::postProcessing;
+			if (postProcessing.loaded)
+				postProcessing.PreProcess(input);
+
+			func(a1, a2, a3, a4, a5);
+			nightEye.RenderPostProcess(output);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct BSParticleShader_SetupGeometry
+	{
+		static void thunk(RE::BSShader* This, RE::BSRenderPass* Pass, uint32_t RenderFlags)
+		{
+			func(This, Pass, RenderFlags);
+			if (globals::features::rainRefraction.loaded)
+				globals::features::rainRefraction.ModifyParticle();
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+}
+
+// DXGI rejects ResizeBuffers while any view of the back buffer is alive, leaving the old buffers in place.
+struct IDXGISwapChain_ResizeBuffers
+{
+	static HRESULT WINAPI thunk(IDXGISwapChain* This, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags)
+	{
+		BackgroundBlur::ReleaseSourceCache();
+
+		const HRESULT hr = func(This, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+		if (FAILED(hr)) {
+			logger::warn("IDXGISwapChain::ResizeBuffers({}x{}) failed (HRESULT: 0x{:08X})", Width, Height, static_cast<uint32_t>(hr));
+		} else {
+			DXGI_SWAP_CHAIN_DESC desc{};
+			This->GetDesc(&desc);
+			logger::info("Swap chain resized to {}x{}", desc.BufferDesc.Width, desc.BufferDesc.Height);
+		}
+
+		return hr;
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+struct IDXGISwapChain_Present
+{
+	static HRESULT WINAPI thunk(IDXGISwapChain* This, UINT SyncInterval, UINT Flags)
+	{
+		// Nsight Perf passes span one frame's rendering: ended before the overlay and Present, begun after.
+		NvPerf::OnPresentBegin();
+
+		HRESULT retval = globals::features::hdrDisplay.HandleSwapChainPresent(
+			This,
+			SyncInterval,
+			Flags,
+			[&](IDXGISwapChain* swapChain, UINT syncInterval, UINT presentFlags) {
+				return func(swapChain, syncInterval, presentFlags);
+			});
+
+		globals::state->Reset();
+
+		NvPerf::OnPresentEnd();
+
+		TracyD3D11Collect(globals::state->tracyCtx);
+
+		return retval;
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+decltype(&CreateDXGIFactory) ptrCreateDXGIFactory;
+
+HRESULT WINAPI hk_CreateDXGIFactory(REFIID, void** ppFactory)
+{
+	return ptrCreateDXGIFactory(__uuidof(IDXGIFactory4), ppFactory);
+}
+
+decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChain;
+
+HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
+	IDXGIAdapter* pAdapter,
+	D3D_DRIVER_TYPE DriverType,
+	HMODULE Software,
+	UINT Flags,
+	[[maybe_unused]] const D3D_FEATURE_LEVEL* pFeatureLevels,
+	[[maybe_unused]] UINT FeatureLevels,
+	UINT SDKVersion,
+	DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
+	IDXGISwapChain** ppSwapChain,
+	ID3D11Device** ppDevice,
+	D3D_FEATURE_LEVEL* pFeatureLevel,
+	ID3D11DeviceContext** ppImmediateContext)
+{
+	DXGI_ADAPTER_DESC adapterDesc;
+	pAdapter->GetDesc(&adapterDesc);
+	globals::state->SetAdapterDescription(adapterDesc.Description);
+
+	const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
+
+	DXGI_SWAP_CHAIN_DESC modifiedDesc = *pSwapChainDesc;
+
+	if (globals::features::hdrDisplay.loaded) {
+		modifiedDesc.BufferDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
+		modifiedDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+		if (modifiedDesc.BufferCount < 2)
+			modifiedDesc.BufferCount = 2;
+
+		HDRDisplay::wasExclusiveFullscreen = !modifiedDesc.Windowed;
+
+		logger::info("[HDR] Upgraded swap chain: R10G10B10A2_UNORM + FLIP_DISCARD");
+	}
+
+	auto ret = ptrD3D11CreateDeviceAndSwapChain(pAdapter,
+		DriverType,
+		Software,
+		Flags,
+		&featureLevel,
+		1,
+		SDKVersion,
+		&modifiedDesc,
+		ppSwapChain,
+		ppDevice,
+		pFeatureLevel,
+		ppImmediateContext);
+
+	return ret;
+}
+
+void Hooks::BSGraphics_SetDirtyStates::thunk(bool isCompute)
+{
+	func(isCompute);
+	globals::state->Draw();
+	if (!isCompute)
+		VanillaBinding::BindDrawResources();
+}
+
+struct ID3D11Device_CreateVertexShader
+{
+	static HRESULT thunk(ID3D11Device* This, const void* pShaderBytecode, SIZE_T BytecodeLength, ID3D11ClassLinkage* pClassLinkage, ID3D11VertexShader** ppVertexShader)
+	{
+		HRESULT hr = func(This, pShaderBytecode, BytecodeLength, pClassLinkage, ppVertexShader);
+
+		if (SUCCEEDED(hr))
+			RegisterShaderBytecode(ppVertexShader ? *ppVertexShader : nullptr, pShaderBytecode, BytecodeLength);
+
+		return hr;
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+struct ID3D11Device_CreatePixelShader
+{
+	static HRESULT STDMETHODCALLTYPE thunk(ID3D11Device* This, const void* pShaderBytecode, SIZE_T BytecodeLength, ID3D11ClassLinkage* pClassLinkage, ID3D11PixelShader** ppPixelShader)
+	{
+		HRESULT hr = func(This, pShaderBytecode, BytecodeLength, pClassLinkage, ppPixelShader);
+
+		if (SUCCEEDED(hr))
+			RegisterShaderBytecode(ppPixelShader ? *ppPixelShader : nullptr, pShaderBytecode, BytecodeLength);
+
+		return hr;
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+struct ID3D11Device_CreateSamplerState
+{
+	static HRESULT STDMETHODCALLTYPE thunk(ID3D11Device* This, D3D11_SAMPLER_DESC* pSamplerDesc, ID3D11SamplerState** ppSamplerState)
+	{
+		// Limit Anisotropy to 8x for performance
+		D3D11_SAMPLER_DESC descCopy = *pSamplerDesc;  // make a copy, pSamplerDesc is supposed to be immutable
+		descCopy.MaxAnisotropy = std::min(descCopy.MaxAnisotropy, 8u);
+		return func(This, &descCopy, ppSamplerState);
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+/** @brief Nulls the output buffer on failure like the native runtime; RenderDoc leaves it untouched and the game uses it unchecked (e.g. zero-triangle skin partitions). */
+struct ID3D11Device_CreateBuffer
+{
+	static HRESULT STDMETHODCALLTYPE thunk(ID3D11Device* This, const D3D11_BUFFER_DESC* pDesc, const D3D11_SUBRESOURCE_DATA* pInitialData, ID3D11Buffer** ppBuffer)
+	{
+		const HRESULT hr = func(This, pDesc, pInitialData, ppBuffer);
+		if (FAILED(hr) && ppBuffer)
+			*ppBuffer = nullptr;
+		return hr;
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+struct BSShaderRenderTargets_Create
+{
+	/**
+	 * @brief Calls the original render target creation function and reinitializes global rendering state.
+	 *
+	 * Invokes the original function, then reinitializes global state and performs necessary setup for rendering targets.
+	 */
+	static inline Util::GameSetting iNumFocusShadow{ "Number of Focus Shadows (INI)",
+		"Controls the number of focus shadows.",
+		static_cast<uintptr_t>(0), 4, 0, 4 };
+
+	static void thunk()
+	{
+		Util::SetGameSettingValue<std::int32_t>("iNumFocusShadow:Display", iNumFocusShadow, 0);
+		func();
+		globals::ReInit();
+		globals::features::reverseZ.SetupDepthTargets();
+		globals::state->Setup();
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+struct BSInputDeviceManager_PollInputDevices
+{
+	static void thunk(RE::BSTEventSource<RE::InputEvent*>* a_dispatcher, RE::InputEvent* const* a_events)
+	{
+		// Reflex sleep/cap runs here by design: this executes before rendering work for the frame.
+		// UpdateReflex() enforces "once per frame" internally in case this hook is hit multiple times.
+		globals::features::upscaling.streamline.UpdateReflex();
+
+		bool blockedDevice = true;
+
+		auto menu = globals::menu;
+
+		if (a_events) {
+			if (auto* inputManager = RE::BSInputDeviceManager::GetSingleton()) {
+				if (const auto* mouse = inputManager->GetMouse())
+					menu->RecordDirectInputWheelDelta(mouse->GetRuntimeData().dInputNextState.z);
+			}
+			menu->ProcessInputEvents(a_events);
+
+			if (*a_events) {
+				if (auto device = (*a_events)->GetDevice()) {
+					// Block all devices except gamepad when menu is open
+					blockedDevice = (device != RE::INPUT_DEVICES::INPUT_DEVICE::kGamepad);
+				}
+			}
+		}
+
+		if (blockedDevice && menu->ShouldSwallowInput()) {  //the menu is open, eat all keypresses
+			// During active flying preview, let input reach the game for movement/camera
+			if (menu->IsPreviewFlying()) {
+				func(a_dispatcher, a_events);
+				return;
+			}
+			constexpr RE::InputEvent* const dummy[] = { nullptr };
+			func(a_dispatcher, dummy);
+			return;
+		}
+
+		func(a_dispatcher, a_events);
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+namespace Hooks
+{
+	struct BSGraphics_Renderer_Init_InitD3D
+	{
+		static void thunk()
+		{
+			// Detour the pre-call Present so plugins hooking it during this call run before our HDR composite.
+			const auto swapChain = RE::BSGraphics::Renderer::GetSingleton()->GetRuntimeData().renderWindows->swapChain;
+			const auto originalPresent = (*reinterpret_cast<std::uintptr_t**>(swapChain))[8];
+
+			logger::info("Calling original Init3D");
+
+			func();
+
+			logger::info("Accessing render device information");
+			globals::ReInit();
+
+			logger::info("Detouring virtual function tables");
+			stl::detour_vfunc<13, IDXGISwapChain_ResizeBuffers>(globals::d3d::swapChain);
+			// InstallSwapChainPresentHooks installs SwapChainPresentBottom (suppression) and OMSetBlendState first.
+			// IDXGISwapChain_Present is installed last so it sits above SwapChainPresentBottom and fires first of the two.
+			HDRDisplay::InstallSwapChainPresentHooks(globals::d3d::swapChain, originalPresent);
+			stl::detour_vfunc<8, IDXGISwapChain_Present>(globals::d3d::swapChain, originalPresent);
+
+			auto shaderCache = globals::shaderCache;
+			if (shaderCache->IsDump()) {
+				stl::detour_vfunc<12, ID3D11Device_CreateVertexShader>(globals::d3d::device);
+				stl::detour_vfunc<15, ID3D11Device_CreatePixelShader>(globals::d3d::device);
+			}
+
+			stl::detour_vfunc<23, ID3D11Device_CreateSamplerState>(globals::d3d::device);
+
+			if (RenderDoc::IsLoaded())
+				stl::detour_vfunc<3, ID3D11Device_CreateBuffer>(globals::d3d::device);
+
+			globals::InstallD3DHooks(globals::d3d::context);
+
+			globals::menu->Init();
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct WndProcHandler_Hook
+	{
+		static LRESULT thunk(HWND a_hwnd, UINT a_msg, WPARAM a_wParam, LPARAM a_lParam)
+		{
+			auto menu = globals::menu;
+			if ((a_msg == WM_KILLFOCUS || a_msg == WM_SETFOCUS) && menu->initialized) {
+				menu->focusChanged = true;
+			}
+			if (a_msg == WM_CLOSE) {
+				globals::OnGameWindowClose();
+			}
+			return func(a_hwnd, a_msg, a_wParam, a_lParam);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct RegisterClassA_Hook
+	{
+		static ATOM thunk(WNDCLASSA* a_wndClass)
+		{
+			WndProcHandler_Hook::func = reinterpret_cast<uintptr_t>(a_wndClass->lpfnWndProc);
+			a_wndClass->lpfnWndProc = &WndProcHandler_Hook::thunk;
+
+			return func(a_wndClass);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	// Disable scene TAA for the duration of the menu interface render, then restore it.
+	struct MenuManagerDrawInterfaceStart
+	{
+		static void thunk(int64_t a1)
+		{
+			const bool temporal = Util::GetTemporal();
+			Util::SetTemporal(false);
+			func(a1);
+			Util::SetTemporal(temporal);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct CreateRenderTarget_Main
+	{
+		static void thunk(RE::BSGraphics::Renderer* This, RE::RENDER_TARGETS::RENDER_TARGET a_target, RE::BSGraphics::RenderTargetProperties* a_properties)
+		{
+			// Modify in place and restore so chained hooks keep a stable pointer.
+			const auto saved = *a_properties;
+			globals::state->ModifyRenderTarget(a_target, *a_properties);
+			func(This, a_target, a_properties);
+			*a_properties = saved;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	// kSNOW / kSNOW_SWAP are created at R8G8B8A8_UNORM by vanilla; the snow shader
+	// writes accumulated wetness/sparkle values that exceed the 8-bit range and
+	// quantize into visible banding on tessellated snow. Promote to fp16 for headroom.
+	struct CreateRenderTarget_Snow
+	{
+		static void thunk(RE::BSGraphics::Renderer* This, RE::RENDER_TARGETS::RENDER_TARGET a_target, RE::BSGraphics::RenderTargetProperties* a_properties)
+		{
+			const auto saved = *a_properties;
+			a_properties->format.set(RE::BSGraphics::Format::kR16G16B16A16_FLOAT);
+			func(This, a_target, a_properties);
+			*a_properties = saved;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct CreateRenderTarget_SnowSwap
+	{
+		static void thunk(RE::BSGraphics::Renderer* This, RE::RENDER_TARGETS::RENDER_TARGET a_target, RE::BSGraphics::RenderTargetProperties* a_properties)
+		{
+			const auto saved = *a_properties;
+			a_properties->format.set(RE::BSGraphics::Format::kR16G16B16A16_FLOAT);
+			func(This, a_target, a_properties);
+			*a_properties = saved;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	// kNORMAL_TAAMASK_SSRMASK and its swap need UAV bind because DeferredCompositeCS
+	// writes vanilla-encoded normals through UAV1 (`normals.UAV` in Deferred::DeferredPasses),
+	// which feeds the post-pass vanilla SSAO chain (ISSAORawAO -> ISSAOComposite). Without
+	// these hooks the UAV is null, the CS write is silently dropped, and vanilla SSAO reads
+	// uninitialized data and produces hard wedge-shaped shadow artifacts.
+	struct CreateRenderTarget_Normals
+	{
+		static void thunk(RE::BSGraphics::Renderer* This, RE::RENDER_TARGETS::RENDER_TARGET a_target, RE::BSGraphics::RenderTargetProperties* a_properties)
+		{
+			const auto saved = *a_properties;
+			globals::state->ModifyRenderTarget(a_target, *a_properties);
+			func(This, a_target, a_properties);
+			*a_properties = saved;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct CreateRenderTarget_NormalsSwap
+	{
+		static void thunk(RE::BSGraphics::Renderer* This, RE::RENDER_TARGETS::RENDER_TARGET a_target, RE::BSGraphics::RenderTargetProperties* a_properties)
+		{
+			const auto saved = *a_properties;
+			globals::state->ModifyRenderTarget(a_target, *a_properties);
+			func(This, a_target, a_properties);
+			*a_properties = saved;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct CreateRenderTarget_MotionVectors
+	{
+		static void thunk(RE::BSGraphics::Renderer* This, RE::RENDER_TARGETS::RENDER_TARGET a_target, RE::BSGraphics::RenderTargetProperties* a_properties)
+		{
+			const auto saved = *a_properties;
+			globals::state->ModifyRenderTarget(a_target, *a_properties);
+			func(This, a_target, a_properties);
+			*a_properties = saved;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct CreateRenderTarget_RefractionNormals
+	{
+		static void thunk(RE::BSGraphics::Renderer* This, RE::RENDER_TARGETS::RENDER_TARGET a_target, RE::BSGraphics::RenderTargetProperties* a_properties)
+		{
+			const auto saved = *a_properties;
+			a_properties->copyable = true;
+			func(This, a_target, a_properties);
+			*a_properties = saved;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct CreateRenderTarget_UnderwaterMask
+	{
+		static void thunk(RE::BSGraphics::Renderer* This, RE::RENDER_TARGETS::RENDER_TARGET a_target, RE::BSGraphics::RenderTargetProperties* a_properties)
+		{
+			const auto saved = *a_properties;
+			a_properties->copyable = true;
+			func(This, a_target, a_properties);
+			*a_properties = saved;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct BSShader__BeginTechnique_SetVertexShader
+	{
+		static void thunk(RE::BSGraphics::Renderer*, RE::BSGraphics::VertexShader* a_vertexShader)
+		{
+			auto state = globals::state;
+			auto shaderCache = globals::shaderCache;
+
+			if (!state->settingCustomShader) {
+				if (shaderCache->IsEnabled()) {
+					auto currentShader = state->currentShader;
+					auto type = currentShader->shaderType.get();
+					if (state->ShaderEnabled(type)) {
+						RE::BSGraphics::VertexShader* vertexShader = shaderCache->GetVertexShader(*currentShader, state->modifiedVertexDescriptor);
+						if (vertexShader) {
+							globals::d3d::context->VSSetShader(reinterpret_cast<ID3D11VertexShader*>(vertexShader->shader), NULL, NULL);
+							state->customVertexShader = vertexShader;
+							*globals::game::currentVertexShader = a_vertexShader;
+							globals::game::stateUpdateFlags->set(RE::BSGraphics::DIRTY_VERTEX_DESC);
+							return;
+						}
+					}
+				}
+			}
+
+			globals::game::stateUpdateFlags->set(RE::BSGraphics::DIRTY_VERTEX_DESC);
+
+			state->customVertexShader = nullptr;
+			*globals::game::currentVertexShader = a_vertexShader;
+			globals::d3d::context->VSSetShader(reinterpret_cast<ID3D11VertexShader*>(a_vertexShader->shader), NULL, NULL);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct BSShader__BeginTechnique_SetPixelShader
+	{
+		static void thunk(RE::BSGraphics::Renderer*, RE::BSGraphics::PixelShader* a_pixelShader)
+		{
+			auto state = globals::state;
+			auto shaderCache = globals::shaderCache;
+
+			if (!state->settingCustomShader) {
+				if (shaderCache->IsEnabled()) {
+					auto currentShader = state->currentShader;
+					auto type = currentShader->shaderType.get();
+					if (state->ShaderEnabled(type)) {
+						RE::BSGraphics::PixelShader* pixelShader = shaderCache->GetPixelShader(*currentShader, state->modifiedPixelDescriptor);
+						if (pixelShader) {
+							globals::d3d::context->PSSetShader(reinterpret_cast<ID3D11PixelShader*>(pixelShader->shader), NULL, NULL);
+							state->customPixelShader = pixelShader;
+							*globals::game::currentPixelShader = a_pixelShader;
+							return;
+						}
+					}
+				}
+			}
+
+			*globals::game::currentPixelShader = a_pixelShader;
+			state->customPixelShader = nullptr;
+
+			if (a_pixelShader)
+				globals::d3d::context->PSSetShader(reinterpret_cast<ID3D11PixelShader*>(a_pixelShader->shader), NULL, NULL);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct CreateDepthStencil_PrecipitationMask
+	{
+		static void thunk(RE::BSGraphics::Renderer* This, uint32_t a_target, RE::BSGraphics::DepthStencilTargetProperties* a_properties)
+		{
+			a_properties->use16BitsDepth = true;
+			a_properties->stencil = false;
+			func(This, a_target, a_properties);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct CreateCubemapRenderTarget_Reflections
+	{
+		static void thunk(RE::BSGraphics::Renderer* This, uint32_t a_target, RE::BSGraphics::CubeMapRenderTargetProperties* a_properties)
+		{
+			a_properties->height = 256;
+			a_properties->width = 256;
+			func(This, a_target, a_properties);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct CreateDepthStencil_Reflections
+	{
+		static void thunk(RE::BSGraphics::Renderer* This, uint32_t a_target, RE::BSGraphics::DepthStencilTargetProperties* a_properties)
+		{
+			a_properties->height = 256;
+			a_properties->width = 256;
+			func(This, a_target, a_properties);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	// Sky Reflection Fix
+	struct TESWaterReflections_Update_Actor_GetLOSPosition
+	{
+		static RE::NiPoint3* thunk(RE::PlayerCharacter* a_player, RE::NiPoint3* a_target, int unk1, float unk2)
+		{
+			auto ret = func(a_player, a_target, unk1, unk2);
+
+			auto camera = RE::PlayerCamera::GetSingleton();
+			ret->x = camera->cameraRoot->world.translate.x;
+			ret->y = camera->cameraRoot->world.translate.y;
+			ret->z = camera->cameraRoot->world.translate.z;
+
+			return ret;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+#ifdef TRACY_ENABLE
+	struct Main_Update
+	{
+		static void thunk(RE::Main* a_this, float a2)
+		{
+			func(a_this, a2);
+			FrameMark;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+#endif
+
+	struct BSAccumProcess_RegisterObject
+	{
+		static uint64_t thunk(RE::BSGraphics::BSShaderAccumulator* accum, RE::NiAVObject* object, uint64_t flags)
+		{
+			auto& hiz = globals::features::hiZOcclusion;
+			if (hiz.loaded && hiz.settings.enableHiZCulling) {
+				auto* geo = netimmerse_cast<RE::BSGeometry*>(object);
+
+				if (!geo || geo->worldBound.radius <= 0.0f) {
+					return func(accum, object, flags);
+				}
+
+				auto* refr = object->GetUserData();
+				if (!refr) {
+					return func(accum, object, flags);
+				}
+
+				hiz.stats.accumRegisterCalls.fetch_add(1, std::memory_order_relaxed);
+
+				const uint32_t renderMode = accum->GetRuntimeData().renderMode;
+
+				if (renderMode >= 30) {
+					return func(accum, object, flags);
+				}
+
+				hiz.stats.renderModeCalls[renderMode].fetch_add(1, std::memory_order_relaxed);
+
+				const uint8_t pass = HiZOcclusion::GetPassKind(renderMode);
+				const bool allowCulling = pass != 0 && hiz.settings.cullRenderMode[renderMode] &&
+				                          (pass != HiZOcclusion::kCameraPass || HiZOcclusion::IsMainViewRegistration(renderMode, accum)) &&
+				                          !globals::features::skylighting.inOcclusion &&
+				                          !(globals::state->permutationData.ExtraShaderDescriptor & static_cast<uint32_t>(State::ExtraShaderDescriptors::IsReflections)) &&
+				                          !hiz.IsPlayerAttachedGeometry(geo, refr) &&
+				                          !globals::features::lightLimitFix.IsParticleLightEmitter(geo);
+
+				if (allowCulling) {
+					// Initialize the thread-local registration if this thread is calling the hook for the first time
+					[[maybe_unused]] static thread_local bool threadRegistered = [&hiz]() {
+						std::lock_guard<std::mutex> lock(hiz.threadVectorsMutex);
+						hiz.allThreadVectors.push_back(&HiZOcclusion::localPendingGeometry);
+						return true;
+					}();
+
+					// Append to local list with zero thread synchronization
+					HiZOcclusion::localPendingGeometry.push_back({ geo, pass });
+
+					if (pass == HiZOcclusion::kSunShadowPass)
+						hiz.CaptureSunShadowDirection(accum->camera);
+
+					if (pass == HiZOcclusion::kCameraPass ? hiz.IsGeometryOccluded(geo) : hiz.IsShadowCasterOccluded(geo)) {
+						hiz.stats.earlyCulledCount.fetch_add(1, std::memory_order_relaxed);
+						return 0;
+					}
+				}
+			}
+
+			return func(accum, object, flags);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	namespace CSShadersSupport
+	{
+		RE::BSImagespaceShader* CurrentlyDispatchedShader = nullptr;
+		RE::BSComputeShader* CurrentlyDispatchedComputeShader = nullptr;
+		uint32_t CurrentComputeShaderTechniqueId = 0;
+
+		struct BSImagespaceShader_DispatchComputeShader
+		{
+			static void thunk(RE::BSImagespaceShader* shader, uint32_t threadGroupCountX, uint32_t threadGroupCountY, uint32_t threadGroupCountZ)
+			{
+				CurrentlyDispatchedShader = shader;
+				func(shader, threadGroupCountX, threadGroupCountY, threadGroupCountZ);
+				CurrentlyDispatchedShader = nullptr;
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct BSComputeShader_Dispatch
+		{
+			static void thunk(RE::BSComputeShader* shader, uint32_t techniqueId, uint32_t threadGroupCountX, uint32_t threadGroupCountY, uint32_t threadGroupCountZ)
+			{
+				CurrentlyDispatchedComputeShader = shader;
+				CurrentComputeShaderTechniqueId = techniqueId;
+				func(shader, techniqueId, threadGroupCountX, threadGroupCountY, threadGroupCountZ);
+				CurrentlyDispatchedComputeShader = nullptr;
+				CurrentComputeShaderTechniqueId = 0;
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct Renderer_DispatchCSShader
+		{
+			static void thunk(RE::BSGraphics::Renderer* renderer, RE::BSGraphics::ComputeShader* shader, uint32_t threadGroupCountX, uint32_t threadGroupCountY, uint32_t threadGroupCountZ)
+			{
+				auto state = globals::state;
+				auto shaderCache = globals::shaderCache;
+				auto& vl = globals::features::volumetricLighting;
+
+				if (shaderCache->IsEnabled() && state->ShaderEnabled(RE::BSShader::Type::ImageSpace)) {
+					RE::BSImagespaceShader* isShader = CurrentlyDispatchedShader;
+					uint32_t techniqueId = CurrentComputeShaderTechniqueId;
+					if (vl.loaded) {
+						if (CurrentlyDispatchedShader == nullptr) {
+							techniqueId = 0;
+							if (CurrentlyDispatchedComputeShader->name == "ISVolumetricLightingGenerateCS"sv) {
+								isShader = vl.GetOrCreateGenerateCS(CurrentlyDispatchedComputeShader);
+							} else if (CurrentlyDispatchedComputeShader->name == "ISVolumetricLightingRaymarchCS"sv) {
+								isShader = vl.GetOrCreateRaymarchCS(CurrentlyDispatchedComputeShader);
+							}
+						} else if (CurrentlyDispatchedComputeShader->name == "ISVolumetricLightingBlurHCS"sv) {
+							techniqueId = 0;
+							isShader = vl.GetOrCreateBlurHCS(CurrentlyDispatchedComputeShader);
+							vl.SetDimensionsCB();
+							vl.SetGroupCountsHCS(threadGroupCountX, threadGroupCountY);
+						} else if (CurrentlyDispatchedComputeShader->name == "ISVolumetricLightingBlurVCS"sv) {
+							techniqueId = 0;
+							isShader = vl.GetOrCreateBlurVCS(CurrentlyDispatchedComputeShader);
+							vl.SetDimensionsCB();
+							vl.SetGroupCountsVCS(threadGroupCountX, threadGroupCountY);
+						}
+					}
+					if (isShader != nullptr) {
+						if (auto* computeShader = shaderCache->GetComputeShader(*isShader, techniqueId)) {
+							shader = computeShader;
+						}
+					}
+				}
+				func(renderer, shader, threadGroupCountX, threadGroupCountY, threadGroupCountZ);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+	}
+
+	void PatchMemory(uintptr_t Address, const uint8_t* Data, size_t Size)
+	{
+		DWORD d = 0;
+		VirtualProtect(reinterpret_cast<LPVOID>(Address), Size, PAGE_EXECUTE_READWRITE, &d);
+
+		for (uintptr_t i = Address; i < (Address + Size); i++) {
+			*reinterpret_cast<volatile uint8_t*>(i) = *Data++;
+		}
+
+		VirtualProtect(reinterpret_cast<LPVOID>(Address), Size, d, &d);
+		FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<LPVOID>(Address), Size);
+	}
+
+	void PatchMemory(uintptr_t Address, std::initializer_list<uint8_t> Data)
+	{
+		PatchMemory(Address, Data.begin(), Data.size());
+	}
+
+	struct BSLightingShader_SetupGeometry_GeometrySetupConstantPointLights
+	{
+		static void thunk(RE::BSGraphics::PixelShader* PixelShader, RE::BSRenderPass* Pass, DirectX::XMMATRIX& Transform, uint32_t LightCount, uint32_t ShadowLightCount, float WorldScale, uint32_t)
+		{
+			if (globals::features::lightLimitFix.loaded)
+				globals::features::lightLimitFix.BSLightingShader_SetupGeometry_GeometrySetupConstantPointLights(Pass);
+			else
+				func(PixelShader, Pass, Transform, LightCount, ShadowLightCount, WorldScale, 0);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	struct BSImageSpace_Init_IBLF
+	{
+		static void thunk(char* a1,
+			void* a2,
+			void* a3,
+			void* a4,
+			void* a5,
+			void* a6,
+			void* a7)
+		{
+			auto* enableIBLF = reinterpret_cast<float*>(REL::RelocationID(513510, 391362).address());
+			*enableIBLF = 0.0f;
+
+			func(a1, a2, a3, a4, a5, a6, a7);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	/**
+	 * @brief Installs hooks, detours, and memory patches for graphics, input, and rendering subsystems.
+	 *
+	 * Sets up function hooks and virtual method overrides for shader management, input polling, rendering pipeline stages, compute shader dispatch, material setup, batch rendering, and window procedure handling. Applies memory patches to adjust render pass cache sizes and offsets. Installs additional update hooks for frame timing and Reflex frame pacing where applicable.
+	 */
+	void Install()
+	{
+		logger::info("Hooking BSImageSpace::Init::IBLF");
+		stl::detour_thunk<BSImageSpace_Init_IBLF>(REL::RelocationID(100480, 107198));
+
+		// This input hook also drives per-frame Reflex update (see BSInputDeviceManager_PollInputDevices::thunk).
+		logger::info("Hooking BSInputDeviceManager::PollInputDevices");
+		stl::write_thunk_call<BSInputDeviceManager_PollInputDevices>(REL::RelocationID(67315, 68617).address() + REL::Relocate(0x7B, 0x7B));
+
+		logger::info("Hooking BSShader::LoadShaders");
+		stl::detour_thunk<BSShader_LoadShaders>(REL::RelocationID(101339, 108326));
+
+		logger::info("Hooking BSShader::BeginTechnique");
+		stl::detour_thunk<BSShader_BeginTechnique>(REL::RelocationID(101341, 108328));
+
+		stl::write_thunk_call<BSShader__BeginTechnique_SetVertexShader>(REL::RelocationID(101341, 108328).address() + REL::Relocate(0xC3, 0xD5));
+		stl::write_thunk_call<BSShader__BeginTechnique_SetPixelShader>(REL::RelocationID(101341, 108328).address() + REL::Relocate(0xD7, 0xEB));
+
+		logger::info("Hooking BSGraphics::SetDirtyStates");
+		stl::detour_thunk<BSGraphics_SetDirtyStates>(REL::RelocationID(75580, 77386));
+
+		logger::info("Hooking BSGraphics::Renderer::InitD3D");
+		stl::write_thunk_call<BSGraphics_Renderer_Init_InitD3D>(REL::RelocationID(75595, 77226).address() + REL::Relocate(0x50, 0x2BC));
+
+		logger::info("Hooking WndProcHandler");
+		stl::write_thunk_call<RegisterClassA_Hook, 6>(REL::VariantID(75591, 77226, 0xDC4B90).address() + REL::VariantOffset(0x8E, 0x15C, 0x99).offset());
+
+		logger::info("Hooking BSShaderRenderTargets::Create");
+		stl::detour_thunk<BSShaderRenderTargets_Create>(REL::RelocationID(100458, 107175));
+
+		logger::info("Hooking BSShaderRenderTargets::Create::CreateRenderTarget(s)");
+		stl::write_thunk_call<CreateRenderTarget_Main>(REL::RelocationID(100458, 107175).address() + REL::Relocate(0x3F0, 0x3F3));
+		stl::write_thunk_call<CreateRenderTarget_Snow>(REL::RelocationID(100458, 107175).address() + REL::Relocate(0x406, 0x409));
+		stl::write_thunk_call<CreateRenderTarget_SnowSwap>(REL::RelocationID(100458, 107175).address() + REL::Relocate(0x41C, 0x41F));
+		stl::write_thunk_call<CreateRenderTarget_Normals>(REL::RelocationID(100458, 107175).address() + REL::Relocate(0x458, 0x45B));
+		stl::write_thunk_call<CreateRenderTarget_NormalsSwap>(REL::RelocationID(100458, 107175).address() + REL::Relocate(0x46B, 0x46E));
+		stl::write_thunk_call<CreateRenderTarget_MotionVectors>(REL::RelocationID(100458, 107175).address() + REL::Relocate(0x4F0, 0x4EF));
+
+		stl::write_thunk_call<CreateRenderTarget_RefractionNormals>(REL::RelocationID(100458, 107175).address() + REL::Relocate(0x503, 0x502));
+		stl::write_thunk_call<CreateRenderTarget_UnderwaterMask>(REL::RelocationID(100458, 107175).address() + REL::Relocate(0xB19, 0xB19));
+
+		stl::write_thunk_call<CreateDepthStencil_PrecipitationMask>(REL::RelocationID(100458, 107175).address() + REL::Relocate(0x1245, 0x123B));
+		stl::write_thunk_call<CreateCubemapRenderTarget_Reflections>(REL::RelocationID(100458, 107175).address() + REL::Relocate(0xA25, 0xA25));
+		stl::write_thunk_call<CreateDepthStencil_Reflections>(REL::RelocationID(100458, 107175).address() + REL::Relocate(0xA59, 0xA59));
+
+#ifdef TRACY_ENABLE
+		stl::write_thunk_call<Main_Update>(REL::RelocationID(35551, 36544).address() + REL::Relocate(0x11F, 0x160));
+#endif
+
+		logger::info("Hooking BSImagespaceShader");
+		stl::detour_thunk<CSShadersSupport::BSImagespaceShader_DispatchComputeShader>(REL::RelocationID(100952, 107734));
+		stl::write_vfunc<0x1, WaterBlendHistory::BSImagespaceShader_Render>(RE::VTABLE_BSImagespaceShaderISWaterBlend[3]);
+
+		LegacyGraphicsCompatibility::Install();
+
+		logger::info("Hooking BSComputeShader");
+		stl::write_vfunc<0x02, CSShadersSupport::BSComputeShader_Dispatch>(RE::VTABLE_BSComputeShader[0]);
+
+		logger::info("Hooking Renderer::DispatchCSShader");
+		stl::detour_thunk<CSShadersSupport::Renderer_DispatchCSShader>(REL::RelocationID(75532, 77329));
+
+		logger::info("Hooking TESWaterReflections::Update_Actor::GetLOSPosition for Sky Reflection Fix");
+		stl::write_thunk_call<TESWaterReflections_Update_Actor_GetLOSPosition>(REL::RelocationID(31373, 32160).address() + REL::Relocate(0x1AD, 0x1CA));
+
+		logger::info("Hooking weather extensions");
+		stl::detour_thunk<WeatherExtensions::Precipitation_Restore>(REL::RelocationID(25640, 26181));
+		stl::detour_thunk<WeatherExtensions::Sky_UpdateColors>(REL::RelocationID(25686, 26233));
+		stl::detour_thunk<WeatherExtensions::Sky_UpdateWeather>(REL::RelocationID(25684, 26231));
+		stl::detour_thunk<WeatherExtensions::Sky_SetDirectionalAmbientColors>(REL::RelocationID(98989, 105643));
+
+		logger::info("Hooking MenuManager::DrawInterfaceStart for menu TAA");
+		stl::detour_thunk<MenuManagerDrawInterfaceStart>(REL::RelocationID(79947, 82084));
+
+		logger::info("Installing SetupGeometry hooks");
+		stl::write_vfunc<0x6, LightingExtensions::BSLightingShader_SetupGeometry>(RE::VTABLE_BSLightingShader[0]);
+		stl::write_vfunc<0x6, EffectExtensions::BSEffectShader_SetupGeometry>(RE::VTABLE_BSEffectShader[0]);
+		stl::write_vfunc<0x6, SkyExtensions::BSSkyShader_SetupGeometry>(RE::VTABLE_BSSkyShader[0]);
+		stl::write_thunk_call<GrassExtensions::BSGrassShaderProperty_ctor>(REL::RelocationID(15214, 15383).address() + Util::VersionedRelocation::Select(0x45B, 0x4F5, 0x4FD));
+		stl::write_vfunc<0x6, GrassExtensions::BSGrassShader_SetupGeometry>(RE::VTABLE_BSGrassShader[0]);
+		stl::write_vfunc<0x6, PostProcessingExtensions::BSParticleShader_SetupGeometry>(RE::VTABLE_BSParticleShader[0]);
+
+		logger::info("Installing post-processing hooks");
+		stl::write_thunk_call<PostProcessingExtensions::Main_HDRTonemapBlendCinematic_Render>(REL::RelocationID(99023, 105674).address() + REL::Relocate(0x1EA, 0x178));
+		if (REL::Module::IsSE())
+			stl::write_thunk_call<PostProcessingExtensions::Main_HDRTonemapBlendCinematic_Render>(REL::RelocationID(99023, 105674).address() + REL::Relocate(0x230, 0x178));
+
+		// Patch render space in BSLightingShader::SetupGeometry to always use world space
+		// The variable updateEyePosition is set to 1 when not skinned. By patching to be 0 it will always use world space
+		// We offset from the base address of the containing function to the start of the patch
+		{
+			logger::info("Patching BSLightingShader::SetupGeometry::updateEyePosition");
+			auto setupGeometryUpdateRenderSpace = REL::RelocationID(100565, 107300).address();
+
+			if (REL::Module::IsAE()) {
+				std::uint8_t patch[] = { 0x41, 0x83, 0xE7, 0x00 };  // and r15d, 0
+				REL::safe_write(setupGeometryUpdateRenderSpace + 0x71, patch, sizeof(patch));
+			} else {
+				std::uint8_t patch1[] = { 0x83, 0xE0, 0x00 };  // and eax, 0
+				REL::safe_write(setupGeometryUpdateRenderSpace + 0x73, patch1, sizeof(patch1));
+
+				std::uint8_t patch2[] = { 0x45, 0x31, 0xC9 };  // xor r9d, r9d (zeros r9d)
+				REL::safe_write(setupGeometryUpdateRenderSpace + 0x36D, patch2, sizeof(patch2));
+
+				std::uint8_t patch3[] = { 0x45, 0x31, 0xC0 };  // xor r8d, r8d (zeros r8d)
+				REL::safe_write(setupGeometryUpdateRenderSpace + 0x378, patch3, sizeof(patch3));
+			}
+		}
+
+		stl::write_thunk_call<BSLightingShader_SetupGeometry_GeometrySetupConstantPointLights>(REL::RelocationID(100565, 107300).address() + Util::VersionedRelocation::Select(0x523, 0xB0E, 0xB30));
+
+		// Hook engine primary object registration for HIZ Occlusion
+		if (REL::Module::IsAE() && !Util::VersionedRelocation::IsAtLeastAE1799()) {
+			const auto registerObjectCall = REL::RelocationID(0, 76558).address() + 0xD3;
+			if (*reinterpret_cast<const std::uint8_t*>(registerObjectCall) == 0xE8) {
+				logger::info("Hooking BSAccumProcess::RegisterObject for HiZ Occlusion");
+				stl::write_thunk_call<BSAccumProcess_RegisterObject>(registerObjectCall);
+				globals::features::hiZOcclusion.cullingHookInstalled = true;
+			} else {
+				logger::warn("HiZ Occlusion: unexpected code at BSAccumProcess::RegisterObject call site, early culling disabled");
+			}
+		} else {
+			logger::info("HiZ Occlusion: culling is only supported on AE before 1.7.99, skipping it on this game version");
+		}
+	}
+
+	void InstallEarlyHooks()
+	{
+		if (!globals::features::upscaling.loaded) {
+			logger::info("Hooking D3D11CreateDeviceAndSwapChain");
+			*(uintptr_t*)&ptrD3D11CreateDeviceAndSwapChain = SKSE::PatchIAT(hk_D3D11CreateDeviceAndSwapChain, "d3d11.dll", "D3D11CreateDeviceAndSwapChain");
+		}
+
+		logger::info("Hooking CreateDXGIFactory");
+		*(uintptr_t*)&ptrCreateDXGIFactory = SKSE::PatchIAT(hk_CreateDXGIFactory, "dxgi.dll", "CreateDXGIFactory");
+	}
+}

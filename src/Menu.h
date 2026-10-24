@@ -1,0 +1,561 @@
+
+#pragma once
+#include "Feature.h"
+#include "Menu/FontAtlasState.h"
+#include "Menu/ThemeManager.h"
+#include "Utils/Input.h"
+#include "Utils/Serialize.h"
+#include <array>
+#include <atomic>
+#include <cstdint>
+#include <dxgi1_4.h>
+#include <nlohmann/json.hpp>
+#include <optional>
+#include <shared_mutex>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#include <winrt/base.h>
+
+using json = nlohmann::json;
+
+struct ImFont;
+
+class Menu
+{
+public:
+	/**
+	 * @brief Semantic font roles for hierarchical UI typography
+	 *
+	 * FONT ROLE SYSTEM:
+	 * =================
+	 * Replaces legacy single-font approach with semantic typography system.
+	 * Each role can use different font family, style, and size scaling.
+	 *
+	 * Roles:
+	 * - Body (0):       Default UI text, setting labels, general content
+	 * - Heading (1):    Feature section headers
+	 * - Subheading (2): Subsection headers within features
+	 * - Subtitle (3):   Secondary descriptive text, tooltips
+	 *
+	 * Theme JSON Configuration:
+	 * "FontRoles": [
+	 *   { "Family": "Jost", "Style": "Regular", "File": "Jost/Jost-Regular.ttf", "SizeScale": 1.0 },
+	 *   { "Family": "Jost", "Style": "Regular", "File": "Jost/Jost-Regular.ttf", "SizeScale": 1.0 },
+	 *   { "Family": "Jost", "Style": "Regular", "File": "Jost/Jost-Regular.ttf", "SizeScale": 1.0 },
+	 *   { "Family": "Jost", "Style": "Regular", "File": "Jost/Jost-Regular.ttf", "SizeScale": 1.0 }
+	 * ]
+	 *
+	 * SizeScale multiplies the base FontSize for each role.
+	 * Example: FontSize=27, Heading SizeScale=1.05 → 28.35px rendered size
+	 *
+	 * Migration from Legacy:
+	 * Old "FontName" field auto-populates Body role on theme load.
+	 * Themes without FontRoles get defaults (Jost family).
+	 */
+	enum class FontRole : std::uint8_t
+	{
+		Body = 0,    // Default UI text
+		Title,       // Large title text (e.g. the product name in the header)
+		Heading,     // Section headers (tabs, category labels)
+		Subheading,  // Subsection headers (feature names, separators)
+		Subtext,     // Smaller secondary text (descriptions, about content)
+		Count        // Total number of roles
+	};
+
+	struct FontRoleDescriptor
+	{
+		std::string_view key;
+		std::string_view displayName;
+		float defaultScale;
+	};
+
+	static inline constexpr std::array<FontRoleDescriptor, static_cast<size_t>(FontRole::Count)> FontRoleDescriptors = {
+		FontRoleDescriptor{ "Body", "Body Text", 1.0f },
+		FontRoleDescriptor{ "Title", "Title", 1.0f },
+		FontRoleDescriptor{ "Heading", "Headings", 1.0f },
+		FontRoleDescriptor{ "Subheading", "Subheadings", 1.0f },
+		FontRoleDescriptor{ "Subtext", "Subtext", 0.9f }
+	};
+
+	/** @brief Gets the serialization key for a font role */
+	static constexpr std::string_view GetFontRoleKey(FontRole role)
+	{
+		return FontRoleDescriptors[static_cast<size_t>(role)].key;
+	}
+
+	/** @brief Gets the human-readable display name for a font role */
+	static constexpr std::string_view GetFontRoleDisplayName(FontRole role)
+	{
+		return FontRoleDescriptors[static_cast<size_t>(role)].displayName;
+	}
+
+	/** @brief Gets the default size scale multiplier for a font role */
+	static constexpr float GetFontRoleDefaultScale(FontRole role)
+	{
+		return FontRoleDescriptors[static_cast<size_t>(role)].defaultScale;
+	}
+
+	/**
+	 * @brief Resolves a serialization key string to a FontRole enum value.
+	 * @param key The key string to look up (e.g. "Body", "Heading").
+	 * @return The matching FontRole, or std::nullopt if not found.
+	 */
+	static std::optional<FontRole> ResolveFontRole(std::string_view key);
+
+	~Menu();
+	Menu(const Menu&) = delete;
+	Menu& operator=(const Menu&) = delete;
+
+	/** @brief Gets the singleton Menu instance */
+	static Menu* GetSingleton()
+	{
+		static Menu menu;
+		return &menu;
+	}
+
+	bool initialized = false;
+	bool IsEnabled = false;
+
+	/** @brief Loads menu settings from JSON, including legacy migration */
+	void Load(json& o_json);
+	/** @brief Saves menu settings to JSON */
+	void Save(json& o_json);
+
+	/** @brief Loads theme settings from a JSON object */
+	void LoadTheme(json& o_json);
+	/** @brief Saves current theme settings to a JSON object */
+	void SaveTheme(json& o_json);
+
+	// Multi-theme support
+	std::vector<std::string> DiscoverThemes();
+	/**
+	 * @brief Loads a theme preset by name from the themes directory.
+	 * @param themeName Name of the theme file (without extension).
+	 * @return True if the theme was loaded successfully.
+	 */
+	bool LoadThemePreset(const std::string& themeName);
+	/** @brief Creates built-in default theme files if they don't exist */
+	void CreateDefaultThemes();
+
+	/** @brief Initializes ImGui, loads fonts/icons, and sets up the rendering backend */
+	void Init();
+	/** @brief Draws the main settings window with all tabs and feature panels */
+	void DrawSettings();
+
+	// Search bar state
+	std::string featureSearch;  // For left pane feature search
+	bool focusFeatureSearch = false;
+	/** @brief Draws the in-game performance/debug overlay */
+	void DrawOverlay();
+	/** @brief Draws the detached weather details editor window */
+	void DrawWeatherDetailsWindow();
+
+	/** @brief Translates raw Skyrim input events into the internal key event queue */
+	void ProcessInputEvents(RE::InputEvent* const* a_events);
+	/** Records the raw DirectInput mouse-wheel delta before Skyrim reduces it to pseudo-buttons. */
+	void RecordDirectInputWheelDelta(std::int32_t delta);
+	/** @brief Returns true if the menu should consume all input (menu open or capturing hotkey) */
+	bool ShouldSwallowInput();
+	/** @brief Keeps Skyrim's AFK vanity camera off while any CS UI is open (settings, editor, first-time setup). */
+	void SyncVanityCamera();
+	/** @brief Returns true if the free camera preview is in flying mode */
+	bool IsPreviewFlying();
+	/**
+	 * @brief Builds a deterministic string signature from current font configuration.
+	 * @param baseFontSize The base pixel size before per-role scaling.
+	 * @return A signature string used to detect when fonts need reloading.
+	 */
+	std::string BuildFontSignature(float baseFontSize) const;
+
+public:
+	// Input handling flags (made public for InputEventHandler access)
+	bool settingToggleKey = false;
+	bool settingSkipCompilationKey = false;
+	bool settingsEffectsToggle = false;
+	bool settingOverlayToggleKey = false;
+	bool settingShaderBlockPrevKey = false;  // Debug: capture shader block prev key
+	bool settingShaderBlockNextKey = false;  // Debug: capture shader block next key
+	bool settingCSEditorToggleKey = false;   // CS Editor toggle key
+	bool settingScreenshotKey = false;       // Screenshot capture key
+	bool settingEffects11ToggleKey = false;  // Effects 11 toggle key
+	bool settingEffects11EditorKey = false;  // Effects 11 editor key
+
+	// Deferred reload systems (public for SettingsTabRenderer access)
+	bool pendingCursorReload = false;
+
+	// Display size tracking for cross-session resolution change detection
+	float2 lastDisplaySize{};
+	bool resetLayout = false;
+
+	// Used for resetting input keys to solve alt-tab stuck issue
+	std::atomic<bool> focusChanged = false;
+	/** @brief Called on window focus change to reset stuck modifier key state */
+	void OnFocusChanged();
+
+	struct Constants
+	{
+		static constexpr std::uint16_t KEY_PRESSED_MASK = 0x8000;
+	};
+
+	struct ThemeSettings
+	{
+		struct FontRoleSettings
+		{
+			std::string Family;
+			std::string Style;
+			std::string File;
+			float SizeScale = 1.0f;
+		};
+
+		float FontSize = ThemeManager::Constants::DEFAULT_FONT_SIZE;
+		std::string FontName = "Jost/Jost-Regular.ttf";  // Default font file name (legacy)
+		float GlobalScale = 0.f;                         // exponential
+		std::array<FontRoleSettings, static_cast<size_t>(FontRole::Count)> FontRoles = []() {
+			std::array<FontRoleSettings, static_cast<size_t>(FontRole::Count)> roles{};
+			auto setRole = [&roles](FontRole role, std::string family, std::string style, std::string file, float sizeScale) {
+				auto index = static_cast<size_t>(role);
+				roles[index].Family = std::move(family);
+				roles[index].Style = std::move(style);
+				roles[index].File = std::move(file);
+				roles[index].SizeScale = sizeScale;
+			};
+
+			setRole(FontRole::Body, "Jost", "Regular", "Jost/Jost-Regular.ttf", 1.0f);
+			setRole(FontRole::Title, "Jost", "Regular", "Jost/Jost-Regular.ttf", 1.0f);
+			setRole(FontRole::Heading, "Jost", "Regular", "Jost/Jost-Regular.ttf", 1.0f);
+			setRole(FontRole::Subheading, "Jost", "Regular", "Jost/Jost-Regular.ttf", 1.0f);
+			setRole(FontRole::Subtext, "Jost", "Regular", "Jost/Jost-Regular.ttf", 0.9f);
+
+			return roles;
+		}();
+
+		bool UseSimplePalette = false;      // DEPRECATED: No longer affects behavior. UI now shows both Simple and Advanced controls.
+		float TooltipHoverDelay = 0.5f;     // tooltip hover delay in seconds
+		bool BackgroundBlurEnabled = true;  // enable background blur effect
+		bool UseCustomCursor = false;       // use theme cursor images instead of default ImGui cursors
+		struct CursorImageSettings
+		{
+			std::string File;
+			float HotspotX = 0.0f;
+			float HotspotY = 0.0f;
+		};
+		struct CursorSettings
+		{
+			float Scale = 1.0f;
+			std::string File;  // legacy arrow file (migrated into Types[Arrow] on load)
+			float HotspotX = 0.0f;
+			float HotspotY = 0.0f;
+			std::array<CursorImageSettings, ImGuiMouseCursor_COUNT> Types = {};
+		} Cursor;
+		// Scrollbar opacity settings
+		struct ScrollbarOpacitySettings
+		{
+			float Background = 0.0f;     // Background of the scrollbar area
+			float Thumb = 0.5f;          // The draggable thumb/grip
+			float ThumbHovered = 0.75f;  // Thumb when hovered
+			float ThumbActive = 0.9f;    // Thumb when being dragged
+		} ScrollbarOpacity;
+		struct PaletteColors
+		{
+			ImVec4 Background{ 0.04f, 0.04f, 0.05f, 0.88f };
+			ImVec4 Text{ 0.92f, 0.92f, 0.94f, 1.0f };
+			// Separated border controls for better theming granularity
+			ImVec4 WindowBorder{ 0.0f, 0.0f, 0.0f, 1.0f };   // Outer window borders
+			ImVec4 FrameBorder{ 0.13f, 0.13f, 0.15f, 0.9f };  // Button, slider, input field borders
+			ImVec4 Separator{ 0.0f, 0.0f, 0.0f, 0.9f };       // Internal separators and dividers
+			ImVec4 ResizeGrip{ 0.35f, 0.35f, 0.38f, 0.8f };   // Window resize grips
+		} Palette;
+		struct StatusPaletteColors
+		{
+			ImVec4 Disable{ 0.5f, 0.5f, 0.5f, 1.0f };
+			ImVec4 Error{ 1.0f, 0.4f, 0.4f, 1.0f };
+			ImVec4 Warning{ 1.0f, 0.6f, 0.2f, 1.0f };
+			ImVec4 RestartNeeded{ 0.45f, 0.78f, 0.48f, 1.0f };
+			ImVec4 CurrentHotkey{ 1.0f, 1.0f, 0.0f, 1.0f };
+			ImVec4 SuccessColor{ 0.32f, 0.68f, 0.42f, 1.0f };
+			ImVec4 InfoColor{ 0.2f, 0.6f, 1.0f, 1.0f };
+		} StatusPalette;
+		struct FeatureHeadingColors
+		{
+			ImVec4 ColorDefault{ 0.8f, 0.8f, 0.8f, 1.0f };
+			ImVec4 ColorHovered{ 0.6f, 0.6f, 0.6f, 1.0f };
+			float MinimizedFactor = 0.7f;    // 70% of original alpha for when the header is minimized
+			float FeatureTitleScale = 1.5f;  // Scale multiplier for feature title text in settings tab
+		} FeatureHeading;
+
+		ImGuiStyle Style = []() {
+			ImGuiStyle style = {};
+			style.WindowBorderSize = 2.0f;
+			style.ChildBorderSize = 0.0f;
+			style.FrameBorderSize = 1.0f;
+			style.WindowPadding = { 8.0f, 8.0f };
+			style.WindowRounding = 12.0f;
+			style.IndentSpacing = 8.0f;
+			style.FramePadding = { 8.0f, 4.0f };
+			style.CellPadding = { 8.0f, 2.0f };
+			style.ItemSpacing = { 4.0f, 8.0f };
+			style.FrameRounding = 4.0f;
+			style.TabRounding = 4.0f;
+			style.ScrollbarRounding = 9.0f;
+			style.ScrollbarSize = 12.0f;
+			style.GrabRounding = 3.0f;
+			style.GrabMinSize = 12.0f;
+			return std::move(style);
+		}();
+		// Theme by @Maksasj, edited by FiveLimbedCat
+		// url: https://github.com/ocornut/imgui/issues/707#issuecomment-1494706165
+		// Entries ordered to match imgui 1.92+ ImGuiCol_ enum (62 entries).
+		// 7 new slots were inserted in the middle of the 1.90 enum; all subsequent
+		// indices shifted — corrected here to prevent colour mismatches.
+		std::array<ImVec4, ImGuiCol_COUNT> FullPalette = {
+			ImVec4(0.92f, 0.92f, 0.94f, 1.0f),   // [0]  Text
+			ImVec4(0.50f, 0.50f, 0.54f, 1.0f),   // [1]  TextDisabled
+			ImVec4(0.04f, 0.04f, 0.05f, 0.88f),  // [2]  WindowBg
+			ImVec4(0.0f, 0.0f, 0.0f, 0.0f),      // [3]  ChildBg
+			ImVec4(0.03f, 0.03f, 0.04f, 0.97f),  // [4]  PopupBg
+			ImVec4(0.0f, 0.0f, 0.0f, 1.0f),      // [5]  Border
+			ImVec4(0.0f, 0.0f, 0.0f, 0.0f),      // [6]  BorderShadow
+			ImVec4(0.13f, 0.13f, 0.15f, 0.90f),  // [7]  FrameBg
+			ImVec4(0.20f, 0.20f, 0.23f, 0.95f),  // [8]  FrameBgHovered
+			ImVec4(0.26f, 0.26f, 0.30f, 1.0f),   // [9]  FrameBgActive
+			ImVec4(0.02f, 0.02f, 0.03f, 0.95f),  // [10] TitleBg
+			ImVec4(0.02f, 0.02f, 0.03f, 0.98f),  // [11] TitleBgActive
+			ImVec4(0.02f, 0.02f, 0.03f, 0.70f),  // [12] TitleBgCollapsed
+			ImVec4(0.06f, 0.06f, 0.07f, 0.95f),  // [13] MenuBarBg
+			ImVec4(0.0f, 0.0f, 0.0f, 0.0f),      // [14] ScrollbarBg
+			ImVec4(0.28f, 0.28f, 0.32f, 0.60f),  // [15] ScrollbarGrab
+			ImVec4(0.38f, 0.38f, 0.43f, 0.80f),  // [16] ScrollbarGrabHovered
+			ImVec4(0.48f, 0.48f, 0.54f, 0.95f),  // [17] ScrollbarGrabActive
+			ImVec4(0.92f, 0.92f, 0.94f, 1.0f),   // [18] CheckMark
+			ImVec4(0.45f, 0.45f, 0.50f, 1.0f),   // [19] SliderGrab
+			ImVec4(0.62f, 0.62f, 0.68f, 1.0f),   // [20] SliderGrabActive
+			ImVec4(0.16f, 0.16f, 0.19f, 0.95f),  // [21] Button
+			ImVec4(0.24f, 0.24f, 0.28f, 1.0f),   // [22] ButtonHovered
+			ImVec4(0.32f, 0.32f, 0.37f, 1.0f),   // [23] ButtonActive
+			ImVec4(0.18f, 0.18f, 0.21f, 0.90f),  // [24] Header
+			ImVec4(0.26f, 0.26f, 0.30f, 0.95f),  // [25] HeaderHovered
+			ImVec4(0.33f, 0.33f, 0.38f, 1.0f),   // [26] HeaderActive
+			ImVec4(0.0f, 0.0f, 0.0f, 0.90f),     // [27] Separator
+			ImVec4(0.40f, 0.40f, 0.45f, 0.90f),  // [28] SeparatorHovered
+			ImVec4(0.55f, 0.55f, 0.60f, 1.0f),   // [29] SeparatorActive
+			ImVec4(0.35f, 0.35f, 0.38f, 0.80f),  // [30] ResizeGrip
+			ImVec4(0.50f, 0.50f, 0.54f, 0.90f),  // [31] ResizeGripHovered
+			ImVec4(0.65f, 0.65f, 0.70f, 1.0f),   // [32] ResizeGripActive
+			ImVec4(0.92f, 0.92f, 0.94f, 1.0f),   // [33] InputTextCursor        (new in 1.92)
+			ImVec4(0.26f, 0.26f, 0.30f, 1.0f),   // [34] TabHovered
+			ImVec4(0.09f, 0.09f, 0.11f, 0.95f),  // [35] Tab
+			ImVec4(0.18f, 0.18f, 0.21f, 1.0f),   // [36] TabSelected
+			ImVec4(0.75f, 0.75f, 0.80f, 1.0f),   // [37] TabSelectedOverline     (new in 1.91)
+			ImVec4(0.06f, 0.06f, 0.07f, 0.95f),  // [38] TabDimmed
+			ImVec4(0.13f, 0.13f, 0.15f, 1.0f),   // [39] TabDimmedSelected
+			ImVec4(0.5f, 0.5f, 0.5f, 0.0f),      // [40] TabDimmedSelectedOverline (new in 1.91)
+			ImVec4(0.45f, 0.45f, 0.50f, 0.50f),  // [41] DockingPreview
+			ImVec4(0.0f, 0.0f, 0.0f, 0.0f),      // [42] DockingEmptyBg
+			ImVec4(0.85f, 0.85f, 0.88f, 1.0f),   // [43] PlotLines
+			ImVec4(1.0f, 1.0f, 1.0f, 1.0f),      // [44] PlotLinesHovered
+			ImVec4(0.60f, 0.60f, 0.65f, 1.0f),   // [45] PlotHistogram
+			ImVec4(0.85f, 0.85f, 0.90f, 1.0f),   // [46] PlotHistogramHovered
+			ImVec4(0.10f, 0.10f, 0.12f, 1.0f),   // [47] TableHeaderBg
+			ImVec4(0.0f, 0.0f, 0.0f, 1.0f),      // [48] TableBorderStrong
+			ImVec4(0.0f, 0.0f, 0.0f, 0.60f),     // [49] TableBorderLight
+			ImVec4(0.0f, 0.0f, 0.0f, 0.0f),      // [50] TableRowBg              (transparent)
+			ImVec4(1.0f, 1.0f, 1.0f, 0.04f),     // [51] TableRowBgAlt           (subtle tint)
+			ImVec4(0.75f, 0.75f, 0.80f, 1.0f),   // [52] TextLink                (new in 1.92)
+			ImVec4(0.40f, 0.40f, 0.45f, 0.45f),  // [53] TextSelectedBg
+			ImVec4(0.35f, 0.35f, 0.38f, 0.60f),  // [54] TreeLines               (new in 1.92)
+			ImVec4(0.90f, 0.90f, 0.95f, 0.90f),  // [55] DragDropTarget
+			ImVec4(0.0f, 0.0f, 0.0f, 0.0f),      // [56] DragDropTargetBg        (new in 1.92)
+			ImVec4(1.0f, 1.0f, 1.0f, 1.0f),      // [57] UnsavedMarker           (new in 1.92)
+			ImVec4(0.55f, 0.55f, 0.60f, 1.0f),   // [58] NavCursor
+			ImVec4(0.40f, 0.40f, 0.40f, 0.60f),  // [59] NavWindowingHighlight
+			ImVec4(0.0f, 0.0f, 0.0f, 0.45f),     // [60] NavWindowingDimBg
+			ImVec4(0.0f, 0.0f, 0.0f, 0.55f),     // [61] ModalWindowDimBg
+		};
+	};
+
+	/** @brief Gets the built-in default font role settings for the given role */
+	static const ThemeSettings::FontRoleSettings& GetDefaultFontRole(FontRole role);
+
+	// Named-map palette serialization (resilient to ImGui enum changes)
+	static void PaletteToJson(json& themeJson, const std::array<ImVec4, ImGuiCol_COUNT>& palette);
+	/** @brief Deserializes palette from named color map or legacy positional array */
+	static void PaletteFromJson(const json& themeJson, std::array<ImVec4, ImGuiCol_COUNT>& palette);
+
+	/** @brief Serializes cursor settings to JSON using named cursor type keys */
+	static void CursorToJson(json& cursorJson, const ThemeSettings::CursorSettings& cursorSettings);
+	/** @brief Deserializes cursor settings from named-key or legacy sparse-array format */
+	static void CursorFromJson(const json& cursorJson, ThemeSettings::CursorSettings& cursor);
+
+	/** @brief Order of the feature list in the left menu column. */
+	enum class FeatureSortMode : std::uint8_t
+	{
+		Category = 0,  // Grouped under collapsible category headers
+		Alphabetical   // Flat A-Z list
+	};
+
+	struct Settings
+	{
+		std::vector<InputCombo> ToggleKey = { InputCombo::Keyboard(VK_END) };
+		std::vector<InputCombo> SkipCompilationKey = { InputCombo::Keyboard(VK_ESCAPE) };
+		std::vector<InputCombo> EffectToggleKey = { InputCombo::Keyboard(VK_MULTIPLY) };                                     // toggle all effects
+		std::vector<InputCombo> OverlayToggleKey = { InputCombo::Keyboard(VK_F10) };                                         // Global overlay toggle key for all overlays
+		std::vector<InputCombo> ShaderBlockPrevKey = { InputCombo::Keyboard(VK_PRIOR) };                                     // Debug: cycle backward through shaders (PageUp)
+		std::vector<InputCombo> ShaderBlockNextKey = { InputCombo::Keyboard(VK_NEXT) };                                      // Debug: cycle forward through shaders (PageDown)
+		std::vector<InputCombo> CSEditorToggleKey = { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(VK_END) };        // CS Editor toggle key
+		std::vector<InputCombo> ScreenshotKey = { InputCombo::Keyboard(VK_SNAPSHOT) };                                       // Screenshot capture key
+		std::vector<InputCombo> Effects11ToggleKey = { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(VK_MULTIPLY) };  // Effects 11 toggle key
+		std::vector<InputCombo> Effects11EditorKey = { InputCombo::Keyboard(VK_SHIFT), InputCombo::Keyboard(VK_RETURN) };    // Effects 11 editor key
+		bool EnableShaderBlocking = false;                                                                                   // Enable shader blocking hotkeys for debugging
+		bool FirstTimeSetupCompleted = false;                                                                                // Track if first-time setup has been completed
+		bool SkipClearCacheConfirmation = false;                                                                             // Skip confirmation dialog when clearing shader cache
+		bool AutoHideFeatureList = false;                                                                                    // Auto-hide left feature list panel, show on hover
+		FeatureSortMode FeatureListSort = FeatureSortMode::Category;                                                         // Feature list order in the left menu column
+		bool SkipConstraintWarning = false;                                                                                  // Skip popup when a setting change creates new constraints
+		bool RequireShiftToDock = true;                                                                                      // Require holding Shift to dock windows
+		bool UseResolutionFont = true;                                                                                       // When true, runtime font size scales with screen resolution; when persisted to theme files, FontSize is zeroed for backward compatibility
+		ThemeSettings Theme;
+		std::string SelectedThemePreset = "";  // Currently selected theme preset (empty = custom/user theme)
+	};
+	/** @brief Gets the current theme settings */
+	const ThemeSettings& GetTheme() const { return settings.Theme; }
+	/** @brief Gets the mutable menu settings */
+	Settings& GetSettings() { return settings; }
+	/** @brief Gets the menu settings */
+	const Settings& GetSettings() const { return settings; }
+	/** @brief Gets the DXGI adapter for GPU memory queries */
+	winrt::com_ptr<IDXGIAdapter3> GetDXGIAdapter3() const { return dxgiAdapter3; }
+	/** @brief Gets the mutable font role settings for the given role */
+	ThemeSettings::FontRoleSettings& GetFontRoleSettings(FontRole role) { return settings.Theme.FontRoles[static_cast<size_t>(role)]; }
+	/** @brief Gets the font role settings for the given role */
+	const ThemeSettings::FontRoleSettings& GetFontRoleSettings(FontRole role) const { return settings.Theme.FontRoles[static_cast<size_t>(role)]; }
+	/** @brief Gets the loaded ImFont pointer for the given role */
+	ImFont* GetFont(FontRole role) const { return MenuFonts::GetAtlasState().GetFont(static_cast<size_t>(role)); }
+
+	/** @brief Queues a feature to be selected in the left panel on the next frame.
+	 *  @param featureName Feature short name, or a built-in page's display name such as Presets. */
+	void SelectFeatureMenu(const std::string& featureName);
+
+	bool HasUnsavedChanges() const;
+	void MarkUnsavedChanges() { unsavedChanges = true; }
+	void ClearUnsavedChanges() { unsavedResetPending.store(true, std::memory_order_relaxed); }
+	void IgnoreSettingEditsThisFrame() { ignoreEditsThisFrame = true; }
+	bool AreSettingEditsIgnored() const { return ignoreEditsThisFrame; }
+	void BeginFeatureEditTracking(Feature* feature);
+	void EndFeatureEditTracking(Feature* feature, bool edited);
+	void SaveSettings();
+
+	bool IsFeaturePinned(const std::string& shortName) const;
+	void SetFeaturePinned(const std::string& shortName, bool pinned);
+	const std::vector<std::string>& GetPinnedFeatures() const { return pinnedFeatures; }
+
+	bool IsSidePanelLayout() const { return sidePanelLayout; }
+	void SetSidePanelLayout(bool enabled);
+
+	bool overlayVisible = false;
+
+public:
+	// Move KeyEvent struct here
+	class CharEvent : public RE::InputEvent
+	{
+	public:
+		uint32_t keyCode;  // 18 (ascii code)
+	};
+	struct KeyEvent
+	{
+		explicit KeyEvent(const RE::ButtonEvent* a_event) :
+			keyCode(a_event->GetIDCode()),
+			device(a_event->GetDevice()),
+			eventType(a_event->GetEventType()),
+			value(a_event->Value()),
+			heldDownSecs(a_event->HeldDuration()),
+			thumbstickX(0.0f),
+			thumbstickY(0.0f) {}
+
+		explicit KeyEvent(const CharEvent* a_event) :
+			keyCode(a_event->keyCode),
+			device(a_event->GetDevice()),
+			eventType(a_event->GetEventType()),
+			value(0),
+			heldDownSecs(0),
+			thumbstickX(0.0f),
+			thumbstickY(0.0f) {}
+
+		explicit KeyEvent(const RE::ThumbstickEvent* a_event) :
+			keyCode(0),  // For thumbstick events, keyCode/value are replaced by x/y floats
+			device(a_event->GetDevice()),
+			eventType(a_event->GetEventType()),
+			value(0),
+			heldDownSecs(0),
+			thumbstickX(a_event->xValue),
+			thumbstickY(a_event->yValue)
+		{}
+		// For thumbstick events, keyCode/value are replaced by x/y floats
+		uint32_t keyCode;
+		RE::INPUT_DEVICE device;
+		RE::INPUT_EVENT_TYPE eventType;
+		float value = 0;
+		float heldDownSecs = 0;
+		float thumbstickX = 0.0f;
+		float thumbstickY = 0.0f;
+		[[nodiscard]] constexpr bool IsPressed() const noexcept { return value > 0.0F; }
+		[[nodiscard]] constexpr bool IsRepeating() const noexcept { return heldDownSecs > 0.0F; }
+		[[nodiscard]] constexpr bool IsDown() const noexcept { return IsPressed() && (heldDownSecs == 0.0F); }
+		[[nodiscard]] constexpr bool IsHeld() const noexcept { return IsPressed() && IsRepeating(); }
+		[[nodiscard]] constexpr bool IsUp() const noexcept { return (value == 0.0F) && IsRepeating(); }
+	};
+
+private:
+	Settings settings;
+
+	std::string cachedIniPath;  // io.IniFilename must point to a string that lives for the duration of the runtime
+
+	// Menu navigation
+	std::string pendingFeatureSelection;  // Feature to select on next frame
+	std::vector<std::string> pinnedFeatures;
+	bool sidePanelLayout = false;
+	bool layoutChangeRequested = false;
+	bool unsavedChanges = false;
+	bool ignoreEditsThisFrame = false;
+	uint64_t settingsGeneration = 1;
+	struct FeatureBaseline
+	{
+		uint64_t generation = 0;
+		json state;
+	};
+	std::unordered_map<std::string, FeatureBaseline> featureBaselines;
+	std::unordered_set<std::string> unsavedFeatures;
+	std::string pendingDiffFeature;
+	std::atomic<bool> unsavedResetPending = false;
+	bool suppressNextEscape = false;
+	bool popupOpenLastFrame = false;
+
+	// Input event handling
+	std::vector<KeyEvent> _keyEventQueue;
+	mutable std::shared_mutex _inputEventMutex;
+	std::atomic<int64_t> _directInputWheelDelta = 0;
+
+	// Keys whose key-down already fired a combo hotkey. Their matching key-up is
+	// suppressed so a shared single-key binding (e.g. End) doesn't also fire once
+	// the modifier is released first.
+	std::unordered_set<uint32_t> _comboFiredKeys;
+
+	// Skyrim AFK vanity camera: delayed spin while idle. Held off while any CS UI is open.
+	bool vanityCameraDisabled = false;
+	float savedVanityCameraDelay = 180.0f;
+
+	Menu() = default;
+
+	void DrawGeneralSettings();
+	void DrawAdvancedSettings();
+	void DrawDisableAtBootSettings();
+	void ApplyWindowLayout();
+	void HandleMenuShortcuts();
+
+	void addToEventQueue(KeyEvent e);
+	void ProcessInputEventQueue();
+	bool IsCapturingHotkeyInput() const;
+	winrt::com_ptr<IDXGIAdapter3> dxgiAdapter3;
+};

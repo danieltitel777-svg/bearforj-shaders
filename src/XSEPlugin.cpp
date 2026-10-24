@@ -1,0 +1,258 @@
+#include "Deferred.h"
+#include "Features/Upscaling.h"
+#include "FrameAnnotations.h"
+#include "Globals.h"
+#include "Hooks.h"
+#include "I18n/I18n.h"
+#include "Menu.h"
+#include "Menu/ThemeManager.h"
+#include "ShaderCache.h"
+#include "State.h"
+
+#define DLLEXPORT __declspec(dllexport)
+
+std::list<std::string> errors;
+
+bool Load();
+
+void InitializeLog([[maybe_unused]] spdlog::level::level_enum a_level = spdlog::level::info)
+{
+#ifndef NDEBUG
+	auto sink = std::make_shared<spdlog::sinks::msvc_sink_mt>();
+#else
+	auto path = logger::log_directory();
+	if (!path) {
+		util::report_and_fail("Failed to find standard logging directory"sv);
+	}
+
+	*path /= "BearforjShaders.log"sv;
+	auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
+#endif
+
+#ifndef NDEBUG
+	const auto level = spdlog::level::trace;
+#else
+	const auto level = a_level;
+#endif
+
+	auto log = std::make_shared<spdlog::logger>("global log"s, std::move(sink));
+	log->set_level(level);
+	log->flush_on(spdlog::level::info);
+
+	spdlog::set_default_logger(std::move(log));
+	spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%t] [%s:%#] %v");
+}
+
+extern "C" DLLEXPORT bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadInterface* a_skse)
+{
+#ifndef NDEBUG
+	while (!REX::W32::IsDebuggerPresent()) {};
+#endif
+	InitializeLog();
+	logger::info("Loaded {}", Plugin::PRODUCT_TITLE);
+	logger::info("Runtime {} {}", Plugin::NAME, Plugin::VERSION.string());
+	SKSE::Init(a_skse, false);
+	SKSE::AllocTrampoline(1 << 10);
+	return Load();
+}
+
+extern "C" DLLEXPORT constinit auto SKSEPlugin_Version = []() noexcept {
+	SKSE::PluginVersionData v;
+	v.PluginName(Plugin::NAME.data());
+	v.PluginVersion(Plugin::VERSION);
+	v.UsesAddressLibrary();
+	v.UsesNoStructs();
+	return v;
+}();
+
+extern "C" DLLEXPORT bool SKSEAPI SKSEPlugin_Query(const SKSE::QueryInterface*, SKSE::PluginInfo* pluginInfo)
+{
+	pluginInfo->name = SKSEPlugin_Version.pluginName;
+	pluginInfo->infoVersion = SKSE::PluginInfo::kVersion;
+	pluginInfo->version = SKSEPlugin_Version.pluginVersion;
+	return true;
+}
+
+void MessageHandler(SKSE::MessagingInterface::Message* message)
+{
+	switch (message->type) {
+	case SKSE::MessagingInterface::kPostPostLoad:
+		{
+			if (errors.empty()) {
+				Deferred::Hooks::Install();
+				Hooks::Install();
+				EngineFix::InstallOnPostPostLoadFixes();
+				FrameAnnotations::OnPostPostLoad();
+
+				globals::state->flatWorldMapLoaded = GetModuleHandleW(L"FlatMapMarkersSSE.dll") != nullptr;
+				if (globals::state->flatWorldMapLoaded)
+					logger::info("FlatMapMarkersSSE detected, Effects11, Post Processing and Linear Lighting are disabled on the world map");
+
+				auto shaderCache = globals::shaderCache;
+
+				// Run feature PostPostLoad() first so features can disable themselves if needed
+				Feature::ForEachLoadedFeature("PostPostLoad", [](Feature* feature) { feature->PostPostLoad(); });
+
+				shaderCache->RemoveLegacyDiskCache();
+
+				if (shaderCache->UseFileWatcher())
+					shaderCache->StartFileWatcher();
+			}
+
+			break;
+		}
+	case SKSE::MessagingInterface::kDataLoaded:
+		{
+			for (auto it = errors.begin(); it != errors.end(); ++it) {
+				auto& errorMessage = *it;
+				RE::DebugMessageBox(std::format("{}\n{}, will disable all hooks and features", Plugin::DISPLAY_NAME, errorMessage).c_str());
+			}
+
+			if (errors.empty()) {
+				globals::OnDataLoaded();
+				EngineFix::InstallOnDataLoadedFixes();
+				FrameAnnotations::OnDataLoaded();
+
+				auto shaderCache = globals::shaderCache;
+				shaderCache->menuLoaded = true;
+
+				while (shaderCache->IsCompiling() && !shaderCache->backgroundCompilation && !globals::game::quitGame) {
+					std::this_thread::sleep_for(100ms);
+				}
+
+				// The boot compile pass is over.
+				shaderCache->SetBackgroundCompilation(true);
+
+				if (globals::game::quitGame) {
+					logger::info("Game was closed, skipping feature DataLoaded methods");
+					break;
+				}
+
+				if (shaderCache->IsDiskCache()) {
+					shaderCache->TrimDiskCache();
+				}
+
+				Feature::ForEachLoadedFeature("DataLoaded", [](Feature* feature) { feature->DataLoaded(); });
+			}
+
+			break;
+		}
+	case SKSE::MessagingInterface::kPostLoadGame:
+		{
+			if (errors.empty())
+				Feature::ForEachLoadedFeature("GameLoaded", [](Feature* feature) { feature->GameLoaded(); });
+			break;
+		}
+	}
+}
+
+bool Load()
+{
+	auto privateProfileRedirectorVersion = Util::GetDllVersion(L"Data/SKSE/Plugins/PrivateProfileRedirector.dll");
+	if (privateProfileRedirectorVersion.has_value() && privateProfileRedirectorVersion.value().compare(REL::Version(0, 6, 2)) == std::strong_ordering::less) {
+		stl::report_and_fail("Old version of PrivateProfileRedirector detected, 0.6.2+ required if using it."sv);
+	}
+
+	if (Streamline::IsSmoothMotionEnabledForProfile())
+		logger::warn(
+			"NVIDIA Smooth Motion is enabled for this profile. It is known to crash "
+			"alongside D3D11 hooking mods (including this plugin). Disable Smooth "
+			"Motion for Skyrim Special Edition in the NVIDIA App if you experience "
+			"crashes at startup.");
+
+	auto messaging = SKSE::GetMessagingInterface();
+	messaging->RegisterListener("SKSE", MessageHandler);
+
+	globals::OnInit();
+	globals::ReInit();
+
+	auto state = globals::state;
+
+	// Initialize i18n system (loads English fallback and discovers available locales)
+	I18n::GetSingleton()->Init();
+
+	state->Load();
+	state->LoadTheme();  // Load the active theme preset
+
+	// Initialize theme system - create default themes and discover existing ones
+	globals::menu->CreateDefaultThemes();  // Creates JSON files if they don't exist
+	auto themeManager = ThemeManager::GetSingleton();
+	themeManager->DiscoverThemes();  // Discover all available themes
+
+	auto log = spdlog::default_logger();
+	log->set_level(state->GetLogLevel());
+
+	const std::array incompatibleDLLs = {
+		L"Data/SKSE/Plugins/ShaderTools.dll",
+		L"Data/SKSE/Plugins/SSEShaderTools.dll",
+		L"Data/SKSE/Plugins/SkyrimUpscaler.dll",
+		L"Data/SKSE/Plugins/EVLaS.dll",
+		L"Data/SKSE/Plugins/AELAS.dll",
+		L"Data/SKSE/Plugins/SSEReShadeHelper.dll",
+		L"Data/SKSE/Plugins/TAASharpen.dll",
+		L"Data/SKSE/Plugins/NVIDIA_Reflex.dll",
+		L"Data/SKSE/Plugins/MARA.dll",
+		L"Data/SKSE/Plugins/NativeWaterLightStabilizer.dll",
+		L"Data/SKSE/Plugins/DynamicWetness.dll",
+		L"Data/SKSE/Plugins/NMN_DeformableTerrain.dll"
+	};
+
+	for (const auto dll : incompatibleDLLs) {
+		if (LoadLibrary(dll)) {
+			auto errorMessage = std::format("Incompatible DLL {} detected", stl::utf16_to_utf8(dll).value_or("<unicode conversion error>"s));
+			logger::error("{}", errorMessage);
+			errors.push_back(errorMessage);
+		}
+	}
+
+	const auto path = std::filesystem::path("Data/SKSE/Plugins/SexLabUtil.dll");
+
+	DWORD dummy;
+	const auto size = GetFileVersionInfoSizeW(path.c_str(), &dummy);
+
+	if (size) {
+		std::vector<std::byte> data(size);
+
+		if (GetFileVersionInfoW(path.c_str(), 0, size, data.data())) {
+			VS_FIXEDFILEINFO* info = nullptr;
+			UINT infoSize = 0;
+
+			if (VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&info), &infoSize) && info) {
+				const auto major = HIWORD(info->dwFileVersionMS);
+
+				if (major < 2) {
+					auto errorMessage = std::format("Incompatible version of SexLabUtil.dll detected. Use SexLab P+ instead");
+					logger::error("{}", errorMessage);
+					errors.push_back(errorMessage);
+				}
+			}
+		}
+	}
+
+	auto pushMissingDllError = [&](std::string_view dllName) {
+		auto errorMessage = std::format("Required DLL {} was missing", dllName);
+		logger::error("{}", errorMessage);
+		errors.push_back(errorMessage);
+	};
+
+	if (!LoadLibrary(L"Data/SKSE/Plugins/EngineFixes.dll")) {
+		pushMissingDllError(stl::utf16_to_utf8(L"Data/SKSE/Plugins/EngineFixes.dll").value_or("<unicode conversion error>"s));
+	}
+
+	// Empty RequiredDLLs array, if necessary we can add a dll here in the future without needing to modify the plugin loading logic.
+	const std::array<LPCWSTR, 0> requiredDLLs{};
+
+	for (const auto dll : requiredDLLs) {
+		if (!LoadLibrary(dll)) {
+			pushMissingDllError(stl::utf16_to_utf8(dll).value_or("<unicode conversion error>"s));
+		}
+	}
+
+	if (errors.empty()) {
+		Hooks::InstallEarlyHooks();
+		logger::info("Calling feature Load methods");
+		Feature::ForEachLoadedFeature("Load", [](Feature* feature) { feature->Load(); });
+	}
+
+	return true;
+}
