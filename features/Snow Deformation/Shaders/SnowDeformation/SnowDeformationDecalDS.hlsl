@@ -10,7 +10,7 @@ ControlPoint main(PatchConstants constants, float3 bary : SV_DomainLocation, con
 
 	precise float4 clipPosition = patch[0].Position * bary.x + patch[1].Position * bary.y + patch[2].Position * bary.z;
 	precise float2 windowPosition = ToWindow(ToCameraRelative(clipPosition));
-	precise float displacement = SnowSurface(BlanketAt(windowPosition), SampleField(windowPosition));
+	precise float displacement = DisplacedSurface(windowPosition, GroundParams.y);
 	output.Position = DisplaceClipPosition(clipPosition, displacement);
 
 	SD_FIELDS

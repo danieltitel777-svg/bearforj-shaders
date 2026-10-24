@@ -16,7 +16,8 @@ struct SnowDeformation : Feature
 			{ T("feature.snow_deformation.key_feature_1", "Footprints and body impressions from the player, NPCs and creatures"),
 				T("feature.snow_deformation.key_feature_2", "Works on vanilla snow textures and on Snow Cover snow"),
 				T("feature.snow_deformation.key_feature_3", "Prints fill back in over time, faster while it snows"),
-				T("feature.snow_deformation.key_feature_4", "Optional snow blanket raises snowy ground so prints become trenches down to the ground") } };
+				T("feature.snow_deformation.key_feature_4", "Optional snow blanket raises snowy ground so prints become trenches down to the ground"),
+				T("feature.snow_deformation.key_feature_5", "Separate ground toggle gives mud, dirt, sand, riverbed and main roads their own print depth, using the landscape blend") } };
 	}
 
 	static constexpr uint32_t kTexels = 2048;
@@ -41,6 +42,13 @@ struct SnowDeformation : Feature
 	static_assert((kTexels & (kTexels - 1)) == 0);
 	static_assert(kWindowSpan < static_cast<int32_t>(kSlots));
 
+	struct GroundType
+	{
+		std::string id;
+		float depth = 2.4f;
+		std::vector<std::string> textures{};
+	};
+
 	struct Settings
 	{
 		bool Enabled = true;
@@ -53,6 +61,8 @@ struct SnowDeformation : Feature
 		float Depth = 6.0f;
 		float Lifetime = 240.0f;
 		float TrianglePixels = 24.0f;
+		bool GroundDeformation = true;
+		std::vector<GroundType> GroundTypes{};
 	};
 
 	Settings settings;
@@ -231,6 +241,7 @@ private:
 		float motionX = 0.0f;
 		float motionY = 0.0f;
 		float vanillaSnow = 0.0f;
+		float ground = 0.0f;
 		float landZ = 0.0f;
 		float normalZ = 1.0f;
 		float clearance = 0.0f;
@@ -348,6 +359,8 @@ private:
 		uint64_t serial = 0;
 		bool clamped = false;
 		bool shadow = false;
+		bool ground = false;
+		float groundDecal = 0.0f;
 		bool valid = false;
 	};
 
@@ -362,12 +375,18 @@ private:
 		uint32_t decalDraws = 0;
 		uint32_t skippedDraws = 0;
 		uint32_t layoutRejects = 0;
+		uint32_t groundStamps = 0;
 		bool snowCover = false;
 	};
 
 	bool EnsureShaders();
 	bool IsActiveContext() const;
 	bool IsSnowCoverActive() const;
+	void EnsureGroundDefaults();
+	void RebuildGroundLookup();
+	float GroundScaleForPath(std::string_view a_path) const;
+	float GroundCoverScale(const RE::NiPoint3& a_position) const;
+	void SetDrawLayerScales(RE::BSShaderMaterial* a_material);
 	float SnowCoverUpperBound(const Stamp& a_stamp, float a_reach) const;
 	void UpdateBlanket(const RE::NiPoint3& a_position, RE::FormID a_worldspace);
 	bool InBlanketRange(const RE::NiBound& a_bound) const;
@@ -409,6 +428,11 @@ private:
 	Texture2D* beforeTexture = nullptr;
 	eastl::unique_ptr<ConstantBuffer> updateConstants;
 	eastl::unique_ptr<ConstantBuffer> drawConstants;
+	eastl::unique_ptr<ConstantBuffer> groundLayers;
+	std::unordered_map<std::string, float> groundLookup;
+	std::array<float, 6> drawLayerScale{};
+	float drawDepthScale = 0.0f;
+	bool groundListFromUser = false;
 	eastl::unique_ptr<StructuredBuffer> tileList;
 	winrt::com_ptr<ID3D11SamplerState> fieldSampler;
 	winrt::com_ptr<ID3D11SamplerState> linearSampler;

@@ -8,13 +8,13 @@
 
 StructuredBuffer<int4> TileList : register(t3);
 Texture2D<float> BlanketRaise : register(t4);
-Texture2D<float> FieldBefore : register(t5);
-Texture2D<float> CoarseField : register(t6);
+Texture2D<float2> FieldBefore : register(t5);
+Texture2D<float2> CoarseField : register(t6);
 SamplerState FieldSampler : register(s1);
 
-RWTexture2D<float> Field : register(u0);
+RWTexture2D<float2> Field : register(u0);
 
-float BeforeAt(int2 texel)
+float2 BeforeAt(int2 texel)
 {
 	return FieldBefore.Load(int3(texel & (FIELD_TEXELS - 1), 0));
 }
@@ -118,18 +118,26 @@ float StampDistance(float2 delta, float4 stamp, float4 shape)
 	GroupMemoryBarrierWithGroupSync();
 
 	float height = 0.0;
+	float ground = 0.0;
 	[branch] if (!clear)
 	{
 		[branch] if (!fresh)
-			height = BeforeAt(int2(texel)) * Control.x;
+		{
+			const float2 before = BeforeAt(int2(texel));
+			height = before.x * Control.x;
+			ground = GroundControl.x > 0.5 ? before.y * GroundControl.y : 0.0;
+		}
 		else if ((flags & FLAG_SEED) != 0 && Options.z > 0.5)
 		{
 			const float2 coarseTexel = ((windowPosition + Coarse.xy) * Coarse.z + float2(OriginCell.zw) + 0.5) * (1.0 / FIELD_TEXELS);
-			height = CoarseField.SampleLevel(FieldSampler, coarseTexel, 0);
+			const float2 seeded = CoarseField.SampleLevel(FieldSampler, coarseTexel, 0);
+			height = seeded.x;
+			ground = GroundControl.x > 0.5 ? seeded.y : 0.0;
 		}
 	}
 
 	float target = 0.0;
+	float groundTarget = 0.0;
 	float snowCover = -1.0;
 	float raise = -1.0;
 	float churn = 0.0;
@@ -200,15 +208,26 @@ float StampDistance(float2 delta, float4 stamp, float4 shape)
 				raise = RaiseAt(worldPosition);
 			carve = max(raise - (surface.w - 1.0), 0.0);
 		}
-		const float profile = (rim * max(1.0 + Shape.y * rimNoise, 0.0) - stamp.w * press * max(1.0 + Shape.z * churn, 0.0)) * snow - carve * press;
+		const float raw = rim * max(1.0 + Shape.y * rimNoise, 0.0) - stamp.w * press * max(1.0 + Shape.z * churn, 0.0);
+		const float profile = raw * snow - carve * press;
 		if (abs(profile) > abs(target))
 			target = profile;
+		[branch] if (GroundControl.x > 0.5 && StampGround[i].x > 0.0 && abs(raw) > abs(groundTarget))
+			groundTarget = raw;
 	}
 
 	if (target < 0.0 && target < height)
 		height = target;
 	else if (target > 0.0 && target > height && height >= 0.0)
 		height = target;
+
+	[branch] if (GroundControl.x > 0.5)
+	{
+		if (groundTarget < 0.0 && groundTarget < ground)
+			ground = groundTarget;
+		else if (groundTarget > 0.0 && groundTarget > ground && ground >= 0.0)
+			ground = groundTarget;
+	}
 
 	[branch] if (melt > 0.0 && Coarse.w > 0.0)
 	{
@@ -219,10 +238,10 @@ float StampDistance(float2 delta, float4 stamp, float4 shape)
 	[branch] if (!clear && !fresh && target == 0.0 && Options.w > 0.0)
 	{
 		const float maxStep = cellSize * Shape.w;
-		const float n0 = BeforeAt(int2(texel) + int2(-1, 0));
-		const float n1 = BeforeAt(int2(texel) + int2(1, 0));
-		const float n2 = BeforeAt(int2(texel) + int2(0, -1));
-		const float n3 = BeforeAt(int2(texel) + int2(0, 1));
+		const float n0 = BeforeAt(int2(texel) + int2(-1, 0)).x;
+		const float n1 = BeforeAt(int2(texel) + int2(1, 0)).x;
+		const float n2 = BeforeAt(int2(texel) + int2(0, -1)).x;
+		const float n3 = BeforeAt(int2(texel) + int2(0, 1)).x;
 		float pull = sign(n0 - height) * max(abs(n0 - height) - maxStep, 0.0);
 		pull += sign(n1 - height) * max(abs(n1 - height) - maxStep, 0.0);
 		pull += sign(n2 - height) * max(abs(n2 - height) - maxStep, 0.0);
@@ -230,5 +249,19 @@ float StampDistance(float2 delta, float4 stamp, float4 shape)
 		height += pull * 0.25 * Options.w;
 	}
 
-	Field[texel] = clear ? 0.0 : height;
+	[branch] if (GroundControl.x > 0.5 && !clear && !fresh && groundTarget == 0.0 && Options.w > 0.0)
+	{
+		const float maxStep = cellSize * Shape.w;
+		const float n0 = BeforeAt(int2(texel) + int2(-1, 0)).y;
+		const float n1 = BeforeAt(int2(texel) + int2(1, 0)).y;
+		const float n2 = BeforeAt(int2(texel) + int2(0, -1)).y;
+		const float n3 = BeforeAt(int2(texel) + int2(0, 1)).y;
+		float pull = sign(n0 - ground) * max(abs(n0 - ground) - maxStep, 0.0);
+		pull += sign(n1 - ground) * max(abs(n1 - ground) - maxStep, 0.0);
+		pull += sign(n2 - ground) * max(abs(n2 - ground) - maxStep, 0.0);
+		pull += sign(n3 - ground) * max(abs(n3 - ground) - maxStep, 0.0);
+		ground += pull * 0.25 * Options.w;
+	}
+
+	Field[texel] = (clear || GroundControl.x <= 0.5) ? float2(clear ? 0.0 : height, 0.0) : float2(height, ground);
 }
