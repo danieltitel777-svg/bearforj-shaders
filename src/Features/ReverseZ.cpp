@@ -648,6 +648,33 @@ void ReverseZ::FixupMappedFrameBuffer(globals::FrameBuffer& a_frameBuffer)
 	ReverseUploadedInverse(a_frameBuffer.CameraProjInverse);
 }
 
+void ReverseZ::FixupMappedFrameBufferVR(globals::FrameBufferVR& a_frameBuffer)
+{
+	if (!activeThisBoot || !g_reversalActive.load(std::memory_order_relaxed) || !g_projectionReversed)
+		return;
+
+	for (uint32_t eye = 0; eye < 2; ++eye) {
+		const auto& proj = a_frameBuffer.CameraProj[eye];
+		const bool perspective = std::abs(proj.m[3][3]) < 1e-4f && std::abs(std::abs(proj.m[3][2]) - 1.0f) < 1e-3f;
+		if (!perspective || proj.m[2][2] * proj.m[3][2] < 0.0f)
+			continue;
+
+		static bool logged = false;
+		if (!logged) {
+			logged = true;
+			logger::info("ReverseZ: reversing an uploaded standard projection (near {:.3f}) for a reversed pass", -proj.m[2][3] / proj.m[2][2]);
+		}
+
+		ReverseUploadedProjection(a_frameBuffer.CameraProj[eye]);
+		ReverseUploadedProjection(a_frameBuffer.CameraViewProj[eye]);
+		ReverseUploadedProjection(a_frameBuffer.CameraViewProjUnjittered[eye]);
+		ReverseUploadedProjection(a_frameBuffer.CameraProjUnjittered[eye]);
+		ReverseUploadedInverse(a_frameBuffer.CameraProjUnjitteredInverse[eye]);
+		ReverseUploadedInverse(a_frameBuffer.CameraViewProjInverse[eye]);
+		ReverseUploadedInverse(a_frameBuffer.CameraProjInverse[eye]);
+	}
+}
+
 void ReverseZ::TracePublishedCamera(const RE::NiCamera* a_camera)
 {
 	static std::unordered_set<uint64_t> seen;

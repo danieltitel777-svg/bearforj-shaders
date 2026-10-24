@@ -309,9 +309,16 @@ namespace globals
 	void CacheFramebuffer()
 	{
 		using namespace game;
-		auto frameBuffer = (FrameBuffer*)mappedFrameBuffer->pData;
-		features::reverseZ.FixupMappedFrameBuffer(*frameBuffer);
-		frameBufferCached.data = *frameBuffer;
+		// The mapped bytes are what the GPU reads. Flat and VR constant-buffer layouts are not the same size.
+		if (REL::Module::IsVR()) {
+			auto& frameBufferVR = *reinterpret_cast<FrameBufferVR*>(mappedFrameBuffer->pData);
+			features::reverseZ.FixupMappedFrameBufferVR(frameBufferVR);
+			frameBufferCached.vr = frameBufferVR;
+		} else {
+			auto& frameBuffer = *reinterpret_cast<FrameBuffer*>(mappedFrameBuffer->pData);
+			features::reverseZ.FixupMappedFrameBuffer(frameBuffer);
+			frameBufferCached.nonVR = frameBuffer;
+		}
 		mappedFrameBuffer = nullptr;
 	}
 

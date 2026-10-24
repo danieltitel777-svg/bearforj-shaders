@@ -9,6 +9,7 @@ struct ID3D11DepthStencilView;
 namespace globals
 {
 	struct FrameBuffer;
+	struct FrameBufferVR;
 }
 
 struct ReverseZ : Feature
@@ -49,6 +50,7 @@ struct ReverseZ : Feature
 	void ApplyReverseProjection(void* a_cameraStateEntry, const RE::NiCamera* a_camera);
 	void ReversePublishedProjection();
 	void FixupMappedFrameBuffer(globals::FrameBuffer& a_frameBuffer);
+	void FixupMappedFrameBufferVR(globals::FrameBufferVR& a_frameBuffer);
 	void TracePublishedCamera(const RE::NiCamera* a_camera);
 	[[nodiscard]] bool IsConvertedDepthTarget(uint32_t a_target) const;
 	[[nodiscard]] bool ExpectPublishedReversal(const RE::NiCamera* a_camera, bool a_renderingCubemap) const;
