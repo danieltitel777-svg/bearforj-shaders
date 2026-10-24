@@ -59,6 +59,7 @@
 #include "Features/VolumetricShadows.h"
 #include "Features/WaterEffects.h"
 #include "Features/ReverseZ.h"
+#include "Features/WaterWaves.h"
 #include "Features/WetnessEffects.h"
 #include "Menu.h"
 #include "ShaderCache.h"
@@ -135,6 +136,7 @@ namespace globals
 		FurShells furShells{};
 		LandscapeSeams landscapeSeams{};
 		SnowDeformation snowDeformation{};
+		WaterWaves waterWaves{};
 		SceneManager sceneManager{};
 
 		namespace llf

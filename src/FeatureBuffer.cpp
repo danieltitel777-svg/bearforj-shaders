@@ -35,6 +35,7 @@
 #include "Features/TerrainVariation.h"
 #include "Features/VanillaFresnel.h"
 #include "Features/VolumetricLighting.h"
+#include "Features/WaterWaves.h"
 #include "Features/WetnessEffects.h"
 #include "TruePBR.h"
 
@@ -103,5 +104,6 @@ std::pair<unsigned char*, size_t> GetFeatureBufferData(bool a_inWorld)
 		globals::features::screenSpaceGI.GetCommonBufferData(),
 		globals::features::screenSpaceReflections.GetCommonBufferData(),
 		globals::features::rainRendering.GetCommonBufferData(),
+		globals::features::waterWaves.GetCommonBufferData(),
 		runtimeFeatureFlags);
 }

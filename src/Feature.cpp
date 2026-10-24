@@ -61,6 +61,7 @@
 #include "Features/VolumetricShadows.h"
 #include "Features/ReverseZ.h"
 #include "Features/WaterEffects.h"
+#include "Features/WaterWaves.h"
 #include "Features/WetnessEffects.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
@@ -275,7 +276,8 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::landscapeSeams,
 		&globals::features::snowDeformation,
 		&globals::features::proceduralAurora,
-		&globals::features::treeLODWind
+		&globals::features::treeLODWind,
+		&globals::features::waterWaves
 	};
 
 	return features;

@@ -121,7 +121,7 @@ namespace ActorSnow
 			float grit = Detail(posModel * 3.0);
 			material.BaseColor = lerp(material.BaseColor, float3(0.16, 0.115, 0.08) * (0.8 + 0.4 * grit), mud);
 		}
-		snow = max(snow, feet.x * ActorSnowStrength);
+		// FeetCoat snow (x) is not applied. Mud stays in feet.y. EICold::Snow stays above.
 		if (snow <= 0.001)
 			return;
 

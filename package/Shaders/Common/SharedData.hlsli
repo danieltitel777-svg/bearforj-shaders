@@ -723,6 +723,25 @@ namespace SharedData
 		SSGISettings ssgiSettings;
 		SSRSettings ssrSettings;
 		RainRenderingSettings rainRenderingSettings;
+
+		struct WaterWavesSettings
+		{
+			float WaveScale;
+			float WaveAmplitude;
+			float WaveChop;
+			float WaveShore;
+			float4 WaveLook;
+			float CameraBelowWaves;
+			float ShoreOriginX;
+			float ShoreOriginY;
+			float ShoreCellSize;
+			float ShoreCellCount;
+			float WindSpeed;
+			float WindAngle;
+			float Pad0;
+		};
+
+		WaterWavesSettings waterWavesSettings;
 		uint4 RuntimeFeatureFlags;
 	};
 

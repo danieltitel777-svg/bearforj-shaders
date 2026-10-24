@@ -58,6 +58,7 @@ struct NightEye;
 struct FurShells;
 struct LandscapeSeams;
 struct SnowDeformation;
+struct WaterWaves;
 struct SceneManager;
 
 class State;
@@ -168,6 +169,7 @@ namespace globals
 		extern FurShells furShells;
 		extern LandscapeSeams landscapeSeams;
 		extern SnowDeformation snowDeformation;
+		extern WaterWaves waterWaves;
 		extern SceneManager sceneManager;
 
 	}
