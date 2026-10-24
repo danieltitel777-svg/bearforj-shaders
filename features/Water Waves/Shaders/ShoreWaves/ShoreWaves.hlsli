@@ -12,19 +12,15 @@ cbuffer ShoreWavesWaterfallCB : register(b13)
 	float4 EI4, EI5;             // v0.4: foam texture, surf (wave height / run-up / period)
 	float4 EIwPad6;              // EI6 slot of the shared GPUBlock (blood, unused by water)
 	float4 CD0, CD1, CD2, CD3;   // v0.11: Crimson-Desert-inspired layers (CDWater.hlsli)
-	float4 ECParallax;           // Bearforj: x on, y foam depth (units), z wave depth (units), w unused
+	float4 ECParallax;           // Bearforj: x on, y foam depth (units). zw unused. No wave-height map.
 };
 
 // v0.4: 2048^2 seamless foam lace (textures/ElementalContact/foam.dds), bound by the DLL on PS t107.
 // Unbound -> EI4.x == 0 -> procedural fallback.
 Texture2D<float4> EIFoamTex : register(t107);
-// v0.8: 2048^2 tileable detail normal map (textures/ElementalContact/water_normals.dds, BC5 xy), PS t108.
-// WaterfallInfo.y = strength (0 = not bound -> procedural), .z = flow speed, .w = 1 when y/z are valid.
-Texture2D<float2> EIWaterNormalTex : register(t108);
-// Bearforj: height maps derived from foam.dds alpha and from water_normals.dds slopes.
-// Data\textures\ElementalContact\foam_height.dds and wave_height.dds. Flat when ECParallax.x is 0.
+// Bearforj: foam_height.dds is the alpha of foam.dds. Flat when ECParallax.x is 0.
+// The EC ripple normal (water_normals.dds) is not used. Small wave detail is the Gerstner ripple.
 Texture2D<float4> EIFoamHeightTex : register(t111);
-Texture2D<float4> EIWaveHeightTex : register(t112);
 float3 gECView = float3(0, 0, 1);
 
 float2 ECParallaxUv(Texture2D<float4> heightTex, float2 uv, float worldPerTile, float depthUnits)
@@ -260,63 +256,11 @@ namespace ShoreWaves
 		return r;
 	}
 
-	// v0.8 detail normals: two scales of the 2K tileable normal map scrolled in different directions (lakes, sea).
-	// Absolute world position / tile size keeps the pattern continuous across water cells (no per-cell squares).
-	// SampleGrad: explicit gradients (world-position derivatives taken in uniform flow) so the samples are legal
-	// inside FXC dynamic branches; gScale = uv units per world unit of this layer.
-	float2 SampleDetail(float2 uv, float gScale, float4 dxy)
-	{
-		return EIWaterNormalTex.SampleGrad(Normals01Sampler, uv, dxy.xy * gScale, dxy.zw * gScale) * 2.0 - 1.0;
-	}
-
-	// flow: world-space flow vector decoded from the CS flowmap (length ~ 0..1.4)
-	// v0.8: the v0.4-v0.7 river waves used phase = dot(worldPos, flowDir) * k. worldPos is absolute (1e5 units), so the
-	// tiny direction changes between flow-map texels turned into huge phase jumps -> square blocks following the flow-map
-	// grid. Now: classic two-phase flow-map advection of the detail texture (UV offset = flow * phase, cross-faded),
-	// which is continuous no matter how the flow changes, plus a calm two-layer drift where there is no flow.
+	// Foam along the current. The surface shape is the Gerstner swell, not the EC detail normal.
 	Result RiverWaves(float3 normal, float2 flow, float3 worldPos, float time)
 	{
-		Result r;
+		Result r = RiverWavesV07(normal, flow, worldPos, time);
 		r.normal = normal;
-		r.foam = 0;
-		r.foamTint = 1;
-		r.exposed = 0;
-		r.shade = 1;
-		const float4 eiDxy = float4(ddx(worldPos.xy), ddy(worldPos.xy));
-		const float strengthTex = WaterfallInfo.w > 0.5 ? WaterfallInfo.y : 0.0;
-		const float flowSpeed = WaterfallInfo.w > 0.5 ? WaterfallInfo.z : 1.0;
-		float speed = length(flow);
-		const float riverMul = EI_River;
-		float2 slope = 0;
-		[branch] if (strengthTex > 0.001)
-		{
-			// still water: two layers, ~5 m and ~1.7 m tiles, slow wind drift
-			float2 p = worldPos.xy;
-			float2 a = SampleDetail(p / 512.0 + float2(0.011, 0.007) * time, 1.0 / 512.0, eiDxy);
-			float2 b = SampleDetail(p / 173.0 + float2(-0.017, 0.013) * time, 1.0 / 173.0, eiDxy);
-			float calm = 1.0 - smoothstep(0.05, 0.5, speed);
-			slope = (a * 0.55 + b * 0.45) * 0.35 * calm;
-			// flowing water: advect along the flow, two phases half a cycle apart, triangle cross-fade
-			[branch] if (speed > 0.05 && riverMul > 0.001)
-			{
-				float cycle = 1.0;
-				float t = time * 0.25 * flowSpeed;
-				float ph0 = frac(t), ph1 = frac(t + 0.5);
-				float w0 = 1.0 - abs(1.0 - 2.0 * ph0);
-				float2 adv = flow * 0.35;
-				float2 uv = p / 220.0;
-				float2 f0 = SampleDetail(uv - adv * ph0 * cycle, 1.0 / 220.0, eiDxy);
-				float2 f1 = SampleDetail(uv - adv * ph1 * cycle + 0.5, 1.0 / 220.0, eiDxy);
-				float2 fl = f0 * w0 + f1 * (1.0 - w0);
-				float strength = smoothstep(RiverMinSpeed * 0.5, RiverFastSpeed, speed);
-				slope += fl * lerp(0.35, 0.9, strength) * riverMul * (1.0 - calm * 0.5);
-			}
-			slope *= strengthTex;
-		}
-		r.normal = normalize(float3(normal.xy + slope, normal.z));
-		r.foam = RiverWavesV07(normal, flow, worldPos, time).foam;  // foam identical to v0.7
-		if (strengthTex <= 0.001)
-			r.normal = RiverWavesV07(normal, flow, worldPos, time).normal;  // no texture: old behaviour
 		return r;
 	}
 
@@ -341,28 +285,6 @@ namespace ShoreWaves
 		return saturate(saturate(band * strong * smoothstep(0.45, 0.8, n)) * 0.6 * EI_RockFoam);
 	}
 
-	// Boiling foam patches around waterfall impact points (camera-relative positions).
-	float WaterfallFoam(float3 posRel, float3 worldPos, float time, out float2 turb)
-	{
-		turb = 0;
-		uint count = (uint)min(WaterfallInfo.x, 16.0);
-		float foam = 0;
-		[loop] for (uint i = 0; i < count; i++) {
-			float4 p = WaterfallPoints[i];
-			float radius = max(p.w, 1.0);
-			float2 dxy = posRel.xy - p.xy;
-			float d = length(dxy);
-			if (d > radius * 1.6 || abs(posRel.z - p.z) > 200.0)
-				continue;
-			float boil = ValueNoise2(worldPos.xy / 14.0 + float2(time * 0.7, -time * 0.9)) * 0.6 +
-			             ValueNoise2(worldPos.xy / 5.0 - time * 1.7) * 0.4;
-			float core = 1.0 - smoothstep(radius * 0.35, radius * 1.4, d + boil * radius * 0.4);
-			foam = max(foam, core * (0.65 + 0.35 * boil));
-			turb += (dxy / max(d, 1e-3)) * core * (boil - 0.5) * 0.8;  // outward boiling bumps
-		}
-		turb *= EI_WaterfallFoam;
-		return saturate(foam * EI_WaterfallFoam);
-	}
 }
 #include "ShoreWaves/CDWater.hlsli"
 #endif

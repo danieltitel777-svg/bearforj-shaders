@@ -45,38 +45,34 @@ offset when WATER_PARALLAX is on. Off stores a negative WaveLook.y so the
 constant-buffer layout does not change; the shader uses abs(WaveLook.y) for
 the detail amount.
 
-Elemental Contact v0.13.2 is copied from the uploaded package, not rewritten.
+Elemental Contact v0.13.2 contributes two things. Shore surf is ShoreWaves::Apply
+and CDWater::ShoreRun. foam.dds is the lace on that shore foam, on rock and
+obstacle foam, on foam along the current, and on the Gerstner crest foam.
 features/Water Waves/Shaders/ShoreWaves/ holds ShoreWaves.hlsli, CDWater.hlsli
-and EISettings.hlsli. SurfaceFlow.hlsli is not in the build. Water.hlsl calls the same shore, river,
-rock, waterfall and CDWater blocks the EC Water.hlsl calls. The blocks are
-marked BEARFORJ_EC_WATER_BEGIN. This Water.hlsl is still the 0.6.7 shader.
-Reapply those blocks onto Bottled's Water.hlsl at: the line before
-GetWaterNormal, "float depth = 0", the depthAdjustedViewDirection line,
-"float3 normal = waterData.normal", the line before the diffuseColor lerp,
-and the psout.Lighting assignment. bearforj/1-base is on the remote now and
-is not this branch.
+and EISettings.hlsli. The blocks are marked BEARFORJ_EC_WATER_BEGIN. This
+Water.hlsl is still the 0.6.7 shader. Reapply those blocks onto Bottled's
+Water.hlsl at: the line before GetWaterNormal, "float depth = 0", the
+depthAdjustedViewDirection line, "float3 normal = waterData.normal", inside
+ApplyCrestFoam, and the psout.Lighting assignment. bearforj/1-base is on the
+remote now and is not this branch.
+
+Not taken from Elemental Contact: SurfaceFlow, the rain mask, the puddle
+texture, water_normals.dds, wave_height.dds, the detail-normal river cascade,
+the CD ripple slope, caustics, and the waterfall scan.
 
 The water pixel shader constant buffer is PS b13, matching
 ShoreWavesWaterfallCB, and it is not declared when VR is defined because
 Common/VR.hlsli already uses b13. VR water keeps the original shading.
-Foam is PS t107 (foam.dds). The detail normal is PS t108 (water_normals.dds).
-Foam height is PS t111. Wave height is PS t112. Slots match the EC loader in
-Waterfalls.cpp except the two height maps, which EC does not have.
+Foam is PS t107 (foam.dds). Foam height is PS t111 (foam_height.dds).
 
-Shore surf is its own menu toggle. Off writes EI3.w = 1 and zeros the shore,
-river, rock, waterfall and CD amounts, so the block keeps the original colour.
-Foam and wave parallax is a second toggle. On, it offsets the foam UVs by
-foam_height.dds and the water_normals UVs by wave_height.dds (six-step
-relief). Off, those samples stay on the original UVs.
+Shore surf is its own menu toggle. Off writes EI3.w = 1 and zeros the shore
+wave amounts. Foam on rocks, crests and currents stays while the feature is on.
+Foam parallax is a second toggle. On, it offsets the foam UVs by foam_height.dds
+(six-step relief). Off, those samples stay on the original UVs. Small wave
+detail is the Gerstner ripple and its own crest-parallax toggle.
 
-foam_height.dds is the alpha channel of the EC foam.dds, the lace the shader
-already uses as coverage. wave_height.dds integrates the EC water_normals.dds
-slopes in the Fourier domain (the same 2048 tile). Both are R8_UNORM with a
-full mip chain. EC shipped no height maps.
-
-Waterfalls are scanned the same way as Waterfalls.cpp: models whose path
-contains "waterfall", within 4096 units, impact at the water height, radius
-0.35 of the bound, merged inside 160 units, at most 16 points, once a second.
+foam_height.dds is the alpha channel of the EC foam.dds. It is R8_UNORM with a
+full mip chain. EC shipped no height map.
 
 A missing game flow texture or sampler would sample unbound and come out pink.
 WaterWaves::BindFlowMaps binds a runtime 1x1 texture when PS t8 or t9 is null
@@ -84,5 +80,5 @@ and copies a bound game texture to VS, DS, and HS. The neutral flow pixel is
 (128, 128, 0, 255): no direction, no strength. The neutral normal is
 (128, 128, 255, 128). Those textures are created in DataLoaded. They are not
 files in the package. The vanilla per-cell flow DDS tiles stay in the game
-BSA and are not shipped here. If foam.dds, water_normals.dds, or either height
-map fails to load, a 1x1 fallback is bound and that texture's effect stays off.
+BSA and are not shipped here. If foam.dds or foam_height.dds fails to load, a
+1x1 fallback is bound and that texture's effect stays off.

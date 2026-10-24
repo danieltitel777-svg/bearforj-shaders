@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Height maps for Elemental Contact water. EC v0.13.2 ships foam.dds and
-water_normals.dds and no height maps.
+"""Foam height map. Elemental Contact v0.13.2 ships foam.dds and no height map.
 
 foam_height.dds is the foam.dds alpha (BC3), the lace the shader already uses.
-wave_height.dds integrates the water_normals.dds slopes (BC5 / ATI2) in the
-Fourier domain, the same 2048 tile. Both are R8_UNORM with a full mip chain.
+It is R8_UNORM with a full mip chain. The EC ripple normal is not used.
 
-Usage: python tools/bearforj/gen_ec_height.py <foam.dds> <water_normals.dds> <out dir>
+Usage: python tools/bearforj/gen_ec_height.py <foam.dds> <out dir>
 """
 import struct
 import sys
@@ -48,19 +46,6 @@ def mip0_blocks(data, size, block_bytes):
     return np.frombuffer(data, np.uint8, count=count * block_bytes, offset=128).reshape(count, block_bytes)
 
 
-def integrate_slopes(nx, ny):
-    # slope = ifft(1j * k * fft(height)), so height comes back from both slopes.
-    fx = np.fft.fft2(nx)
-    fy = np.fft.fft2(ny)
-    k = np.fft.fftfreq(nx.shape[0]) * (2.0 * np.pi)
-    kx, ky = np.meshgrid(k, k)
-    denom = kx * kx + ky * ky
-    denom[0, 0] = 1.0
-    height = (kx * fx + ky * fy) / (1j * denom)
-    height[0, 0] = 0.0
-    return np.real(np.fft.ifft2(height)).astype(np.float32)
-
-
 def mips(img):
     out = [img]
     cur = img
@@ -85,20 +70,13 @@ def write_r8(path, img):
 
 
 def main():
-    foam_path, normal_path, out_dir = sys.argv[1:4]
+    foam_path, out_dir = sys.argv[1:3]
     foam = open(foam_path, "rb").read()
-    normals = open(normal_path, "rb").read()
-    if foam[84:88] != b"DXT5" or normals[84:88] != b"ATI2":
-        raise SystemExit("expected foam DXT5 and water_normals ATI2")
+    if foam[84:88] != b"DXT5":
+        raise SystemExit("expected foam DXT5")
     foam_h = blocks_to_image(bc4_decode(mip0_blocks(foam, 2048, 16)[:, :8]), 2048).astype(np.float32)
-    red = blocks_to_image(bc4_decode(mip0_blocks(normals, 2048, 16)[:, :8]), 2048)
-    green = blocks_to_image(bc4_decode(mip0_blocks(normals, 2048, 16)[:, 8:]), 2048)
-    wave = integrate_slopes((red * 2.0 - 1.0).astype(np.float32), (green * 2.0 - 1.0).astype(np.float32))
-    lo, hi = np.percentile(wave, [1.0, 99.0])
-    wave = np.clip((wave - lo) / max(float(hi - lo), 1e-6), 0.0, 1.0).astype(np.float32)
     write_r8(out_dir + "/foam_height.dds", foam_h)
-    write_r8(out_dir + "/wave_height.dds", wave)
-    print("foam alpha mean", float(foam_h.mean()), "wave mean", float(wave.mean()), "wave std", float(wave.std()))
+    print("foam alpha mean", float(foam_h.mean()))
 
 
 if __name__ == "__main__":

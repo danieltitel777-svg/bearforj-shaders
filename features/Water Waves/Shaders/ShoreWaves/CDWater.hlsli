@@ -10,11 +10,8 @@ namespace CDWater
 	static const float Grav = 687.0;
 	static const float TwoPi = 6.2831853;
 
-	// --- settings (zeros when the DLL did not write the block -> everything off)
-	float RippleAmt()    { return EI3.w > 0.5 ? CD0.x : 0.0; }
-	float RippleScale()  { return max(CD0.y, 0.1); }
-	float RippleSpeed()  { return CD0.z; }
-	float NormalTexAmt() { return (EI3.w > 0.5 && WaterfallInfo.y > 0.0) ? CD0.w : 0.0; }
+	// Ripple slope and the water_normals cascade are not in this build.
+	// Small wave detail is the Gerstner ripple in WaterWaves.
 	float RunAmt()       { return EI3.w > 0.5 ? CD1.x : 0.0; }
 	float RunLength()    { return max(CD1.y, 40.0); }
 	float RunPeriod()    { return max(CD1.z, 1.5); }
@@ -24,64 +21,8 @@ namespace CDWater
 	float QuietAmt()     { return EI3.w > 0.5 ? CD2.z : 0.0; }
 	float CrestFoamAmt() { return EI3.w > 0.5 ? CD2.w : 0.0; }
 	float CrestDecay()   { return max(CD3.x, 0.2); }
-	float CausticsAmt()  { return EI3.w > 0.5 ? CD3.y : 0.0; }
-	float FogTintAmt()   { return EI3.w > 0.5 ? CD3.z : 0.0; }
-	float CausticsMode() { return CD3.w; }  // 0 = only when Open Shaders caustics are off, 1 = always
 
-	float Hash11(float n) { return frac(sin(n * 127.1) * 43758.5453); }
-
-	// finite-depth dispersion w = sqrt(g k tanh(k h))
-	float Omega(float k, float h) { return sqrt(Grav * k * tanh(max(k * h, 0.05))); }
-
-	// ---- Stage 1: sum of directional Gerstner waves, returns the normal xy offset (slopes)
-	float2 RippleSlope(float2 pAbs, float t, float h, float camDist)
-	{
-		float amt = RippleAmt();
-		float2 sl = 0;
-		if (amt <= 0.0)
-			return sl;
-		// pixel footprint -> fade waves that would alias
-		float foot = max(length(ddx(pAbs)), length(ddy(pAbs)));
-		const float baseDir = 0.6 + 0.35 * sin(t * 0.004);  // slow wind veer
-		// v0.13.2: 9 waves in three sets - long swell (narrow spread), mid wind waves, short cross chop
-		[unroll] for (int i = 0; i < 9; ++i) {
-			float fi = (float)i;
-			float lam = RippleScale() * (420.0 * pow(0.70, fi));            // 420 .. 24 units
-			float spread = (i < 3) ? 0.6 : ((i < 6) ? 1.5 : 2.6);
-			float ang = baseDir + (Hash11(fi + 3.0) - 0.5) * spread + ((i >= 6) ? 1.2 : 0.0);
-			float2 dirW = float2(cos(ang), sin(ang));
-			float k = TwoPi / lam;
-			float w = Omega(k, h) * RippleSpeed();
-			float slopeA = (0.095 - 0.006 * fi);                             // k*A, sum ~0.64 < 1 (no loops)
-			float th = k * dot(dirW, pAbs) - w * t + Hash11(fi * 7.1) * TwoPi;
-			float fadeAlias = 1.0 - smoothstep(lam * 0.12, lam * 0.35, foot);
-			sl -= dirW * slopeA * cos(th) * fadeAlias;
-		}
-		// calmer in very shallow water and far away
-		return sl * amt * smoothstep(0.0, 10.0, h) * (1.0 - smoothstep(4000.0, 9000.0, camDist));
-	}
-
-	// optional FFT-like layer: the tileable detail normal texture (t108) at two extra scales, crossing directions
-	float2 TexSlope(float2 pAbs, float t)
-	{
-		float amt = NormalTexAmt();
-		if (amt <= 0.0)
-			return 0;
-		float2 uv1 = pAbs / 1700.0 + float2(0.010, 0.004) * t;
-		float2 q = float2(0.8 * pAbs.x + 0.6 * pAbs.y, -0.6 * pAbs.x + 0.8 * pAbs.y);
-		float2 uv2 = q / 610.0 + float2(-0.006, 0.013) * t;
-		uv1 = ECParallaxUv(EIWaveHeightTex, uv1, 1700.0, ECParallax.z);
-		uv2 = ECParallaxUv(EIWaveHeightTex, uv2, 610.0, ECParallax.z);
-		float2 a = EIWaterNormalTex.Sample(Normals01Sampler, uv1) * 2.0 - 1.0;
-		float2 b = EIWaterNormalTex.Sample(Normals01Sampler, uv2) * 2.0 - 1.0;
-		float2 q2 = float2(-0.5 * pAbs.x + 0.87 * pAbs.y, -0.87 * pAbs.x - 0.5 * pAbs.y);
-		float2 uv3 = q2 / 190.0 + float2(0.017, -0.011) * t;
-		uv3 = ECParallaxUv(EIWaveHeightTex, uv3, 190.0, ECParallax.z);
-		float2 c = EIWaterNormalTex.Sample(Normals01Sampler, uv3) * 2.0 - 1.0;  // v0.13.2 crisp fine cascade
-		return (a * 0.5 + b * 0.35 + c * 0.25) * 0.4 * amt;
-	}
-
-	// ---- Stage 2: shore waves running toward the shore, depth proxy dist = h / slope.
+	// ---- Shore surf: waves running toward the shore, depth proxy dist = h / slope.
 	// Phase w (t + 2 sqrt(h) / (s sqrt g)): crests travel shoreward with c = sqrt(g h) (slow down in the shallows).
 	struct Run
 	{
@@ -167,50 +108,5 @@ namespace CDWater
 		return lerp(1.0.xxx, lerp(shallowFoam, deepFoam, deep), amt);
 	}
 
-	// ---- Stage 3: projected caustics + underwater fog tint on the refracted bottom (above-water view)
-	float CausticPattern(float2 p, float t)
-	{
-		float c = 0.0;
-		[unroll] for (int i = 0; i < 2; ++i) {
-			float sc = (i == 0) ? 1.0 : 1.9;
-			float2 q = p * sc + float2(t * 0.21, -t * 0.17) * (1.0 + (float)i * 0.4);
-			float v = sin(q.x + 1.3 * sin(q.y * 1.2 + t * 0.6)) + sin(q.y + 1.3 * sin(q.x * 1.4 - t * 0.5));
-			c += pow(saturate(1.0 - abs(v) * 0.55), 7.0) * ((i == 0) ? 1.0 : 0.6);
-		}
-		return c;
-	}
-
-	float3 Bottom(float3 refrCol, float h, float3 surfAbs, float3 refrDir, float3 sunDir, float3 sunCol,
-		float t, bool osCaustics, float3 deepCol)
-	{
-		// v0.13.2: refrDir can be degenerate (refraction sample above the water plane) -> fall back to straight down
-		float3 rd = (all(isfinite(refrDir)) && dot(refrDir, refrDir) > 1e-4) ? refrDir : float3(0, 0, -1);
-		float path = min(h / max(abs(rd.z), 0.35), 1500.0);
-		float3 col = refrCol;
-		refrDir = rd;
-		float ca = CausticsAmt();
-		if (ca > 0.0 && (!osCaustics || CausticsMode() > 0.5) && h > 0.5) {
-			float2 bottomXY = surfAbs.xy + refrDir.xy * path;
-			float sz = max(sunDir.z, 0.25);
-			float2 proj = bottomXY + sunDir.xy / sz * h;                      // where the sun ray entered the surface
-			float pat = CausticPattern(proj / 55.0, t);
-			float depthFade = smoothstep(0.5, 8.0, h) * (1.0 - smoothstep(180.0, 900.0, h));
-			float sun = saturate(sunDir.z * 2.0) * saturate(dot(sunCol, float3(0.3, 0.5, 0.2)));
-			col *= 1.0 + pat * depthFade * sun * ca * 0.9;
-		}
-		float fa = FogTintAmt();
-		if (fa > 0.0) {
-			// v0.13.2 FIX (orange shallows): v0.11 added in-scatter as deepCol * (1 - tr) per channel. Red is absorbed
-			// fastest, so (1 - tr) was largest in red and the "fog" painted the bottom orange whenever the deep colour
-			// was not strongly blue (night / weather presets). In-scatter now uses ONE scalar weight and is tinted by
-			// the water deep colour only; absorption alone shifts the bottom toward blue-green.
-			float3 sigma = float3(0.0045, 0.0018, 0.0012) * fa;               // per unit: red fades first
-			float3 tr = exp(-sigma * path);
-			float inscat = 1.0 - dot(tr, float3(0.2, 0.4, 0.4));
-			float3 dc = saturate(deepCol);
-			col = col * tr + dc * inscat * 0.5;
-		}
-		return all(isfinite(col)) ? max(col, 0.0) : refrCol;
-	}
 }
 #endif

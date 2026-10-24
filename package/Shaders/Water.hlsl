@@ -1538,6 +1538,18 @@ void ApplyCrestFoam(inout float3 color, inout float opacity, PS_INPUT input, flo
 	float foam = saturate(shore * 0.85 + objectFoam + crest) * foamSet;
 	float3 foamColor = lerp(float3(0.62, 0.70, 0.68), float3(0.78, 0.81, 0.78), saturate(crest * 2.0));
 	foamColor = lerp(foamColor, float3(0.52, 0.53, 0.46), murk * 0.35);
+#	if !defined(VR) && !defined(STENCIL)
+	{
+		// foam.dds lace on the Gerstner crest, the shore contact, and the obstacle band.
+		// The height shift is the foam alpha. The ripple under it stays the Gerstner parallax.
+		float3 lace = 1.0;
+		float vis = ShoreWaves::TexturedFoam(saturate(foam), absXZ, SharedData::Timer, 0.0, lace);
+		if (EI_FoamTexOn > 0.5) {
+			foamColor = ShoreWaves::FoamColor * lace;
+			foam = max(foam, vis);
+		}
+	}
+#	endif
 	color = lerp(color, foamColor, saturate(foam * 0.72));
 	opacity = max(opacity, saturate(foam * 0.85));
 #endif
@@ -1655,13 +1667,10 @@ PS_OUTPUT main(PS_INPUT input)
 	}
 #	endif
 	const float3 swWorldPos = input.WPosition.xyz + FrameBuffer::CameraPosAdjust[eyeIndex].xyz;
+	// River foam follows the current. The swell shape stays the Gerstner wave, not an EC normal map.
 	ShoreWaves::Result riverWaves = ShoreWaves::RiverWaves(normal, shoreFlow, swWorldPos, SharedData::Timer);
-	normal = normalize(lerp(normal, riverWaves.normal, inWorld ? 1.0 : 0.0));
 	const float rockFoam = (shoreDepth >= 0) ? ShoreWaves::RockFoam(max(shoreDepth, 0), shoreFlow, swWorldPos, SharedData::Timer) : 0.0;
-	float2 waterfallTurb;
-	const float waterfallFoam = ShoreWaves::WaterfallFoam(input.WPosition.xyz, swWorldPos, SharedData::Timer, waterfallTurb);
-	normal = normalize(float3(normal.xy + waterfallTurb, normal.z));
-	const float extraFoam = inWorld ? max(max(riverWaves.foam, rockFoam), waterfallFoam) * 0.75 * (1.0 - smoothstep(ShoreWaves::FoamFadeStart, ShoreWaves::FoamFadeEnd, length(input.WPosition.xyz))) : 0.0;
+	const float extraFoam = inWorld ? max(riverWaves.foam, rockFoam) * 0.75 * (1.0 - smoothstep(ShoreWaves::FoamFadeStart, ShoreWaves::FoamFadeEnd, length(input.WPosition.xyz))) : 0.0;
 	const float cdCamDist = length(input.WPosition.xyz);
 	const float cdH = max(shoreDepth, 0.0);
 	const bool cdHasDepth = shoreDepth >= 0 && inWorld;
@@ -1672,10 +1681,9 @@ PS_OUTPUT main(PS_INPUT input)
 		float cdDet = cdPx.x * cdPy.y - cdPx.y * cdPy.x;
 		cdGrad = abs(cdDet) > 1e-6 ? float2(cdDx * cdPy.y - cdDy * cdPx.y, cdDy * cdPx.x - cdDx * cdPy.x) / cdDet : 0;
 	}
-	float2 cdSlope = CDWater::RippleSlope(swWorldPos.xy, SharedData::Timer, cdHasDepth ? cdH : 3000.0, cdCamDist) + CDWater::TexSlope(swWorldPos.xy, SharedData::Timer);
 	CDWater::Run cdRun = CDWater::ShoreRun(cdHasDepth ? cdH : 0.0, cdGrad, swWorldPos.xy, SharedData::Timer, cdCamDist);
 	{
-		float3 cdN = normalize(float3(normal.xy + (inWorld ? (cdSlope + cdRun.slope) : 0.0), normal.z));
+		float3 cdN = normalize(float3(normal.xy + (inWorld ? cdRun.slope : 0.0), normal.z));
 		normal = all(isfinite(cdN)) ? cdN : normal;
 	}
 #	if defined(FLOWMAP)
@@ -1770,18 +1778,6 @@ PS_OUTPUT main(PS_INPUT input)
 	}
 #				endif
 
-#				if defined(SHOREWAVES_ACTIVE) && defined(REFRACTIONS) && defined(DEPTH)
-	{
-#					if defined(WATER_EFFECTS)
-		const bool cdOsCaustics = SharedData::csUtilitySettings.waterCausticsStrength > 0.0;
-#					else
-		const bool cdOsCaustics = false;
-#					endif
-		if (cdHasDepth)
-			diffuseOutput.refractionColor = CDWater::Bottom(diffuseOutput.refractionColor, cdH, swWorldPos, diffuseOutput.refractedViewDirection,
-				SharedData::DirLightDirection.xyz, SharedData::DirLightColor.xyz, SharedData::Timer, cdOsCaustics, Color::Water(DeepColor.xyz));
-	}
-#				endif
 	float3 diffuseColor = lerp(diffuseOutput.refractionColor, diffuseOutput.refractionDiffuseColor, diffuseOutput.refractionMul);
 
 	depthControl = DepthControl * (distanceMul - 1) + 1;
@@ -2044,7 +2040,11 @@ PS_OUTPUT main(PS_INPUT input)
 	finalColor *= lerp(1.0, shoreWaves.shade, shoreMask);
 	finalColor = lerp(finalColor, diffuseOutput.refractionColor * 0.82, shoreWaves.exposed * shoreMask);
 	finalColor = lerp(finalColor, ShoreWaves::FoamColor * cdFoamTint * shoreWaves.foamTint * saturate(SharedData::DirLightColor.xyz * 0.6 + 0.3), shoreWaves.foam * shoreMask);
-	finalColor = lerp(finalColor, ShoreWaves::FoamColor * cdFoamTint * saturate(SharedData::DirLightColor.xyz * 0.6 + 0.3), extraFoam);
+	{
+		float3 flowLace;
+		float flowVis = ShoreWaves::TexturedFoam(extraFoam, swWorldPos.xy, SharedData::Timer, 0.0, flowLace);
+		finalColor = lerp(finalColor, ShoreWaves::FoamColor * cdFoamTint * flowLace * saturate(SharedData::DirLightColor.xyz * 0.6 + 0.3), flowVis);
+	}
 	{
 		float3 cdLace;
 		float cdVis = ShoreWaves::TexturedFoam(cdFoam, swWorldPos.xy, SharedData::Timer, 0.0, cdLace);
