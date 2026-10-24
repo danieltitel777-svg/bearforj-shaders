@@ -104,12 +104,12 @@ public:
 		const auto kind = owner.KindFromClass(a_context.renderClass);
 		if (kind >= PhysicalWorldParticles::kKindCount || !owner.textures[kind].SRV())
 			return;
-		auto* renderer = globals::game::renderer;
-		if (!renderer || !globals::deferred)
+		auto* gameRenderer = globals::game::renderer;
+		if (!gameRenderer || !globals::deferred)
 			return;
 		const auto mainTarget = globals::deferred->forwardRenderTargets[0];
-		auto& main = renderer->GetRuntimeData().renderTargets[mainTarget];
-		auto& depth = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN];
+		auto& main = gameRenderer->GetRuntimeData().renderTargets[mainTarget];
+		auto& depth = gameRenderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN];
 		ID3D11RenderTargetView* target = main.RTV;
 		ID3D11DepthStencilView* depthView = depth.readOnlyViews[0] ? depth.readOnlyViews[0] : depth.views[0];
 		if (!target)
@@ -147,8 +147,8 @@ public:
 		context->PSSetConstantBuffers(0, 1, &constantBuffer);
 		ID3D11ShaderResourceView* texture = owner.textures[kind].SRV();
 		context->PSSetShaderResources(2, 1, &texture);
-		ID3D11SamplerState* sampler = owner.sampler.get();
-		context->PSSetSamplers(0, 1, &sampler);
+		ID3D11SamplerState* particleSampler = owner.sampler.get();
+		context->PSSetSamplers(0, 1, &particleSampler);
 		context->VSSetShader(owner.vertexShader.get(), nullptr, 0);
 		context->PSSetShader(owner.pixelShader.get(), nullptr, 0);
 		a_context.DrawInstancedIndirect();
@@ -499,7 +499,7 @@ void PhysicalWorldParticles::OnMagicImpact(RE::Projectile* a_projectile, const R
 	impactThrottle[formID] = { now, a_position };
 	const auto count = std::max(1U, static_cast<std::uint32_t>(std::lround(12.0F * scale)));
 	const auto velocity = runtime.velocity;
-	QueueKind(Kind::kMagic, a_position, velocity, count, color, 0.55F);
+	std::ignore = QueueKind(Kind::kMagic, a_position, velocity, count, color, 0.55F);
 }
 
 void PhysicalWorldParticles::SpawnHandSparks(float a_deltaTime)
@@ -542,7 +542,7 @@ void PhysicalWorldParticles::SpawnHandSparks(float a_deltaTime)
 		origin.z += 96.0F;
 		if (auto* node = caster->GetMagicNode())
 			origin = node->world.translate;
-		QueueKind(Kind::kMagic, origin, { 0.0F, 0.0F, -1.0F }, count, color, 0.28F);
+		std::ignore = QueueKind(Kind::kMagic, origin, { 0.0F, 0.0F, -1.0F }, count, color, 0.28F);
 		++handIndex;
 	}
 }
@@ -580,26 +580,26 @@ void PhysicalWorldParticles::SpawnAmbient()
 			randomState = randomState * 1664525U + 1013904223U;
 			if (BearforjParticles::IsGrassReference(a_ref)) {
 				if (particles.IsKindEnabled(ScreenSpacePhysicalParticlesFeature::ParticleKind::kFluff))
-					QueueKind(Kind::kFluff, position, { 0.0F, 0.0F, 1.0F }, 1U, 0.0F, 1.0F);
+					std::ignore = QueueKind(Kind::kFluff, position, { 0.0F, 0.0F, 1.0F }, 1U, 0.0F, 1.0F);
 				if ((randomState & 3U) == 0U &&
 					particles.IsKindEnabled(ScreenSpacePhysicalParticlesFeature::ParticleKind::kDandelion))
-					QueueKind(Kind::kDandelion, position, { 0.2F, 0.1F, 1.0F }, 1U, 0.0F, 1.0F);
+					std::ignore = QueueKind(Kind::kDandelion, position, { 0.2F, 0.1F, 1.0F }, 1U, 0.0F, 1.0F);
 			}
 			if (particles.IsKindEnabled(ScreenSpacePhysicalParticlesFeature::ParticleKind::kSpores) &&
 				BearforjParticles::IsGlowingMushroom(a_ref)) {
 				auto origin = position;
 				origin.z += 24.0F;
-				QueueKind(Kind::kSpores, origin, { 0.0F, 0.0F, 1.0F }, 1U, 0.0F, 1.0F);
+				std::ignore = QueueKind(Kind::kSpores, origin, { 0.0F, 0.0F, 1.0F }, 1U, 0.0F, 1.0F);
 			}
 			if (evening && particles.IsKindEnabled(ScreenSpacePhysicalParticlesFeature::ParticleKind::kFireflies) &&
 				BearforjParticles::IsGrassReference(a_ref)) {
-				QueueKind(Kind::kFireflies, position, { 0.0F, 0.0F, 0.2F }, water ? 2U : 1U, 0.0F, 0.7F);
+				std::ignore = QueueKind(Kind::kFireflies, position, { 0.0F, 0.0F, 0.2F }, water ? 2U : 1U, 0.0F, 0.7F);
 			}
 			if (night && particles.IsKindEnabled(ScreenSpacePhysicalParticlesFeature::ParticleKind::kMoths) &&
 				BearforjParticles::IsLampReference(a_ref)) {
 				auto origin = position;
 				origin.z += 18.0F;
-				QueueKind(Kind::kMoths, origin, { 0.0F, 1.0F, 0.2F }, 1U, 0.0F, 1.0F);
+				std::ignore = QueueKind(Kind::kMoths, origin, { 0.0F, 1.0F, 0.2F }, 1U, 0.0F, 1.0F);
 			}
 			return RE::BSContainer::ForEachResult::kContinue;
 		});
@@ -609,12 +609,12 @@ void PhysicalWorldParticles::SpawnAmbient()
 		auto origin = playerPosition;
 		origin.z -= 8.0F;
 		if (particles.IsKindEnabled(ScreenSpacePhysicalParticlesFeature::ParticleKind::kFluff))
-			QueueKind(Kind::kFluff, origin, { 0.0F, 0.0F, 1.0F }, 2U, 0.0F, 1.0F);
+			std::ignore = QueueKind(Kind::kFluff, origin, { 0.0F, 0.0F, 1.0F }, 2U, 0.0F, 1.0F);
 		if (particles.IsKindEnabled(ScreenSpacePhysicalParticlesFeature::ParticleKind::kDandelion))
-			QueueKind(Kind::kDandelion, origin, { 0.3F, 0.0F, 1.0F }, 1U, 0.0F, 1.0F);
+			std::ignore = QueueKind(Kind::kDandelion, origin, { 0.3F, 0.0F, 1.0F }, 1U, 0.0F, 1.0F);
 		if (evening && water &&
 			particles.IsKindEnabled(ScreenSpacePhysicalParticlesFeature::ParticleKind::kFireflies))
-			QueueKind(Kind::kFireflies, origin, { 0.0F, 0.2F, 0.4F }, 2U, 0.0F, 0.7F);
+			std::ignore = QueueKind(Kind::kFireflies, origin, { 0.0F, 0.2F, 0.4F }, 2U, 0.0F, 0.7F);
 	}
 
 	if (night && particles.IsKindEnabled(ScreenSpacePhysicalParticlesFeature::ParticleKind::kMoths)) {
@@ -624,7 +624,7 @@ void PhysicalWorldParticles::SpawnAmbient()
 				continue;
 			auto origin = player->GetPosition();
 			origin.z += 110.0F;
-			QueueKind(Kind::kMoths, origin, { 1.0F, 0.0F, 0.3F }, 1U, 0.0F, 0.8F);
+			std::ignore = QueueKind(Kind::kMoths, origin, { 1.0F, 0.0F, 0.3F }, 1U, 0.0F, 0.8F);
 		}
 	}
 }

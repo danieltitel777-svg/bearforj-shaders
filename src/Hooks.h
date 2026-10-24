@@ -2,6 +2,9 @@
 
 namespace Hooks
 {
+	using DirtyStatesObserver = void (*)();
+	/** @brief Sets the callback invoked after Skyrim applies dirty render state. Pass nullptr to clear it. */
+	void SetDirtyStatesObserver(DirtyStatesObserver a_observer) noexcept;
 
 	/** @brief Hook for BSShader::BeginTechnique that intercepts shader selection to substitute custom-compiled shaders from the shader cache. */
 	struct BSShader_BeginTechnique
