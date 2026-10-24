@@ -160,6 +160,7 @@ private:
 	PhysicalWorldParticles& owner;
 };
 
+PhysicalWorldParticles::PhysicalWorldParticles() = default;
 PhysicalWorldParticles::~PhysicalWorldParticles() = default;
 
 std::uint32_t PhysicalWorldParticles::KindFromClass(std::uint32_t a_renderClass) const noexcept

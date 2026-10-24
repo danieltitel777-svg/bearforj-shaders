@@ -28,6 +28,7 @@ struct PhysicalWorldParticles final : Feature
 	void PostComposite() override;
 	void ClearShaderCache() override;
 	void DrawSettings() override;
+	PhysicalWorldParticles();
 	~PhysicalWorldParticles();
 
 	// Summary: Queues spell-colored sparks when a magic projectile hits anything.
