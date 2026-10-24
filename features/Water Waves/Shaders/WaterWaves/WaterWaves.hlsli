@@ -94,7 +94,7 @@ namespace WaterWaves
 		float jacobian;
 	};
 
-	WaveSample Eval(float2 absXY, float2 camRelXY, bool normalFade)
+	WaveSample Eval(float2 absXY, float2 camRelXY, bool normalFade, float flowAngle, float flowWeight)
 	{
 		WaveSample s = (WaveSample)0;
 		s.jacobian = 1.0;
@@ -107,7 +107,11 @@ namespace WaterWaves
 		if (fade <= 0.0)
 			return s;
 		WaveResponse weather = WaveResponseAt(SharedData::WindFieldTransitionData.z);
-		float angle = SharedData::WindFieldTransitionData.w;
+		float wind = SharedData::WindFieldTransitionData.w;
+		float weight = saturate(flowWeight);
+		float hx = cos(wind) * (1.0 - weight) + cos(flowAngle) * weight;
+		float hy = sin(wind) * (1.0 - weight) + sin(flowAngle) * weight;
+		float angle = dot(float2(hx, hy), float2(hx, hy)) > 1.0e-8 ? atan2(hy, hx) : wind;
 		float jxx = 1.0;
 		float jyy = 1.0;
 		float jxy = 0.0;
@@ -146,21 +150,24 @@ namespace WaterWaves
 		float jacobian;
 	};
 
-	Displaced Displace(float3 plane, uint eye, bool normalFade)
+	Displaced Displace(float3 plane, uint eye, bool normalFade, float flowAngle, float flowWeight)
 	{
 		Displaced d = (Displaced)0;
 		d.jacobian = 1.0;
-#if !defined(FLOWMAP)
 		if (SharedData::WaveScale <= 0.0)
 			return d;
 		float2 absXY = plane.xy + FrameBuffer::CameraPosAdjust[eye].xy;
-		WaveSample s = Eval(absXY, plane.xy, normalFade);
+		WaveSample s = Eval(absXY, plane.xy, normalFade, flowAngle, flowWeight);
 		float damp = ShoreDampGPU(plane, eye);
 		d.offset = s.offset * damp;
 		d.slope = s.slope * damp;
 		d.jacobian = lerp(1.0, s.jacobian, damp);
-#endif
 		return d;
+	}
+
+	Displaced Displace(float3 plane, uint eye, bool normalFade)
+	{
+		return Displace(plane, eye, normalFade, 0.0, 0.0);
 	}
 
 	// Patchy foam mask. Hash period is far longer than a texture tile.

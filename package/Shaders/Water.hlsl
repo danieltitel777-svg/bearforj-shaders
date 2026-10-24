@@ -101,8 +101,27 @@ PS_OUTPUT main(PS_INPUT input)
 
 Texture2D<float4> DepthTex : register(t7);
 SamplerState DepthSampler : register(s7);
+// Declared for every stage. The vertex and domain shaders read t8 to steer swells.
+// The pixel shader used to be the only stage that could see these registers.
+Texture2D<float4> FlowMapTex : register(t8);
+Texture2D<float4> FlowMapNormalsTex : register(t9);
+SamplerState FlowMapSampler : register(s8);
+SamplerState FlowMapNormalsSampler : register(s9);
 #	if defined(WATER_WAVES)
 #		include "WaterWaves/WaterWaves.hlsli"
+
+void WaterFlowHeading(float2 uv, out float angle, out float weight)
+{
+#		if defined(FLOWMAP)
+	float4 flowSample = FlowMapTex.SampleLevel(FlowMapSampler, uv, 0);
+	float2 flowDir = -(flowSample.xy * 2.0 - 1.0);
+	weight = saturate(flowSample.z);
+	angle = atan2(flowDir.y, flowDir.x);
+#		else
+	angle = 0.0;
+	weight = 0.0;
+#		endif
+}
 #	endif
 
 #	if defined(VSHADER)
@@ -361,7 +380,12 @@ VS_OUTPUT main(VS_INPUT input)
 
 #		if defined(WATER_WAVES)
 	vsout.WaveBase = float4(worldPos.xyz, 1.0);
-	WaterWaves::Displaced wave = WaterWaves::Displace(worldPos.xyz, eyeIndex, false);
+	float flowAngle = 0.0;
+	float flowWeight = 0.0;
+#			if defined(FLOWMAP) && !defined(LOD) && !defined(STENCIL)
+	WaterFlowHeading(vsout.TexCoord2.zw, flowAngle, flowWeight);
+#			endif
+	WaterWaves::Displaced wave = WaterWaves::Displace(worldPos.xyz, eyeIndex, false, flowAngle, flowWeight);
 	float3 waveOff = wave.offset;
 	vsout.WaveShape = float4(wave.slope, wave.jacobian, 0.0);
 	float3 waveDisplaced = worldPos.xyz + waveOff;
@@ -402,7 +426,7 @@ VS_OUTPUT main(VS_INPUT input)
 
 #	endif
 
-#if defined(WATER_WAVES) && (defined(HSHADER) || defined(DSHADER)) && !defined(LOD) && !defined(FLOWMAP)
+#if defined(WATER_WAVES) && (defined(HSHADER) || defined(DSHADER))
 cbuffer WaterWaveTess : register(b7)
 {
 	float4 WaveTess;  // x max factor, y range, z enabled, w unused
@@ -503,7 +527,12 @@ VS_OUTPUT main(WavePatch pc, float3 bary: SV_DomainLocation, const OutputPatch<V
 #		endif
 
 	float3 plane = patch[0].WaveBase.xyz * bary.x + patch[1].WaveBase.xyz * bary.y + patch[2].WaveBase.xyz * bary.z;
-	WaterWaves::Displaced wave = WaterWaves::Displace(plane, 0, false);
+	float flowAngle = 0.0;
+	float flowWeight = 0.0;
+#		if defined(FLOWMAP) && !defined(LOD) && !defined(STENCIL)
+	WaterFlowHeading(o.TexCoord2.zw, flowAngle, flowWeight);
+#		endif
+	WaterWaves::Displaced wave = WaterWaves::Displace(plane, 0, false, flowAngle, flowWeight);
 	float3 waveOff = wave.offset;
 	o.WaveShape = float4(wave.slope, wave.jacobian, 0.0);
 	float3 displaced = plane + waveOff;
@@ -562,8 +591,6 @@ SamplerState CubeMapSampler : register(s3);
 SamplerState Normals01Sampler : register(s4);
 SamplerState Normals02Sampler : register(s5);
 SamplerState Normals03Sampler : register(s6);
-SamplerState FlowMapSampler : register(s8);
-SamplerState FlowMapNormalsSampler : register(s9);
 SamplerState SSRReflectionSampler : register(s10);
 SamplerState RawSSRReflectionSampler : register(s11);
 
@@ -574,8 +601,6 @@ TextureCube<float4> CubeMapTex : register(t3);
 Texture2D<float4> Normals01Tex : register(t4);
 Texture2D<float4> Normals02Tex : register(t5);
 Texture2D<float4> Normals03Tex : register(t6);
-Texture2D<float4> FlowMapTex : register(t8);
-Texture2D<float4> FlowMapNormalsTex : register(t9);
 Texture2D<float4> SSRReflectionTex : register(t10);
 Texture2D<float4> RawSSRReflectionTex : register(t11);
 
@@ -909,16 +934,17 @@ struct WaterNormalData
 #if defined(WATER_WAVES)
 // Two fetches of one normal map, rotated by an irrational scale, plus a procedural ripple.
 // Replaces the three scrolled maps, which lined up into a visible tile.
-float3 WaterDetailNormal(PS_INPUT input, uint eyeIndex, float normalsDepthFactor, float distanceFactor, bool useFlow, float3 flowmapNormal)
+float3 WaterDetailNormal(PS_INPUT input, uint eyeIndex, float normalsDepthFactor, float distanceFactor, bool useFlow, float3 flowmapNormal, float2 crestShift)
 {
 	float2 absXZ = input.WaveBase.xy + FrameBuffer::CameraPosAdjust[eyeIndex].xy;
 	float dist = length(input.WPosition.xy);
-	float detail = saturate(SharedData::WaveLook.y);
+	// WaveLook.y is negative when crest parallax is off. The slider itself stays 0..2.
+	float detail = saturate(abs(SharedData::WaveLook.y));
 	float storm = saturate(SharedData::WaveLook.w);
 	float2 wind = float2(cos(SharedData::WindFieldTransitionData.w), sin(SharedData::WindFieldTransitionData.w));
 	float2 across = float2(-wind.y, wind.x);
 	float time = SharedData::Timer;
-	float2 uvA = absXZ * 0.0047 + wind * time * 0.02;
+	float2 uvA = absXZ * 0.0047 + wind * time * 0.02 + crestShift;
 	float3 n = Normals01Tex.SampleBias(Normals01Sampler, uvA, SharedData::MipBias).xyz * 2.0 + float3(-1, -1, -2);
 	// The second tap is the anti-tile. Past the mid field the mip hides the repeat, so the fetch is dropped.
 	[branch] if (dist < 2800.0)
@@ -951,6 +977,15 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 
 #			if defined(WATER_PARALLAX)
 	float2 parallaxOffset = WaterEffects::GetParallaxOffset(input, normalsAmplitude.xyz, normalScalesRcp);
+#			endif
+	float2 detailShift = 0.0;
+#			if defined(WATER_WAVES)
+	// Negative WaveLook.y is the crest-parallax switch. Off leaves the ripple unshifted.
+	if (SharedData::WaveLook.y >= 0.0) {
+		float crest = saturate((0.85 - input.WaveShape.z) * 2.0);
+		float2 dir = viewDirection.xy / max(-viewDirection.z, 0.05);
+		detailShift = dir * crest * 0.004;
+	}
 #			endif
 
 #			if defined(FLOWMAP)
@@ -996,6 +1031,7 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 #				if defined(WATER_PARALLAX)
 	// Use flowmap-derived parallax offset for base normals
 	baseNormalUv += flowmapParallaxOffset.xy * normalScalesRcp.x;
+	detailShift += flowmapParallaxOffset;
 #				endif
 #if defined(WATER_WAVES) && !defined(LOD)
 	float3 normals1 = float3(0, 0, -2);
@@ -1005,6 +1041,9 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 #			endif  // End of FLOWMAP block
 
 #			if !defined(FLOWMAP)
+#				if defined(WATER_PARALLAX)
+	detailShift += parallaxOffset;
+#				endif
 #if defined(WATER_WAVES) && !defined(LOD)
 	float3 normals1 = float3(0, 0, -2);
 #else
@@ -1020,9 +1059,9 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 	[branch] if (SharedData::WaveScale > 0.0)
 	{
 #				if defined(FLOWMAP)
-		finalNormal = WaterDetailNormal(input, eyeIndex, normalsDepthFactor, distanceFactor, true, flowmapNormal);
+		finalNormal = WaterDetailNormal(input, eyeIndex, normalsDepthFactor, distanceFactor, true, flowmapNormal, detailShift);
 #				else
-		finalNormal = WaterDetailNormal(input, eyeIndex, normalsDepthFactor, distanceFactor, false, float3(0, 0, 1));
+		finalNormal = WaterDetailNormal(input, eyeIndex, normalsDepthFactor, distanceFactor, false, float3(0, 0, 1), detailShift);
 #				endif
 	}
 	else
@@ -1138,7 +1177,7 @@ WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float norma
 	finalNormal = ReorientNormal(rippleNormal, finalNormal);
 #			endif
 
-#			if defined(WATER_WAVES) && !defined(FLOWMAP)
+#			if defined(WATER_WAVES)
 	finalNormal = normalize(float3(finalNormal.xy + input.WaveShape.xy, finalNormal.z));
 #			endif
 	float waveAmplitude = SharedData::csUtilitySettings.waterWaveAmplitude;
@@ -1256,7 +1295,7 @@ DiffuseOutput GetWaterDiffuseColor(PS_INPUT input, float3 normal, float3 viewDir
 {
 #			if defined(REFRACTIONS)
 	float2 refractXy = normal.xy;
-#if defined(WATER_WAVES) && !defined(FLOWMAP) && !defined(UNDERWATER)
+#if defined(WATER_WAVES) && !defined(UNDERWATER)
 	if (SharedData::WaveScale > 0.0) {
 		// The crest slope bends the view. The first half-metre stays almost straight so the bottom reads clearly.
 		float verticalHint = distanceMul.y * max(FogParam.z, 1.0);
@@ -1317,7 +1356,7 @@ DiffuseOutput GetWaterDiffuseColor(PS_INPUT input, float3 normal, float3 viewDir
 		refractionWorldPosition = mul(FrameBuffer::CameraViewProjInverse[eyeIndex], float4((refractionUvRaw * 2 - 1) * float2(1, -1), DepthTex.Load(float3(refractionScreenPosition, 0)).x, 1));
 #					endif
 		refractionWorldPosition.xyz /= refractionWorldPosition.w;
-#						if defined(WATER_WAVES) && !defined(FLOWMAP)
+#						if defined(WATER_WAVES)
 		{
 			float vertical = max(input.WPosition.z - refractionWorldPosition.z, 0.0);
 			float path = vertical > 0.0 ? length(refractionWorldPosition.xyz - input.WPosition.xyz) : 0.0;
@@ -1429,6 +1468,19 @@ float3 GetSunColor(float3 normal, float3 viewDirection, float3 worldPosition, ui
 #		endif
 
 #if defined(WATER_WAVES)
+// Sunlight through a folding crest. Scales with how far the Jacobian has dropped and how high the sun is.
+float3 CrestSun(float3 sunColor, float jacobian)
+{
+	float3 sun = SunDir.xyz;
+	float sunLen = length(sun);
+	if (sunLen < 1.0e-4)
+		return sunColor;
+	sun /= sunLen;
+	float above = saturate(sun.z);
+	float fold = saturate((0.55 - jacobian) * 4.0);
+	return sunColor + SunColor.xyz * SunDir.w * fold * above * 0.22;
+}
+
 void ApplyCrestFoam(inout float3 color, inout float opacity, PS_INPUT input, float4 distanceMul, uint eyeIndex)
 {
 #if defined(UNDERWATER) || defined(LOD) || !defined(DEPTH) || defined(VERTEX_ALPHA_DEPTH)
@@ -1436,13 +1488,30 @@ void ApplyCrestFoam(inout float3 color, inout float opacity, PS_INPUT input, flo
 #else
 	// Derivatives stay outside the feature branch. A return above them makes fxc reject the shader.
 	float vertical = distanceMul.y * max(FogParam.z, 1.0);
-	float grad = length(float2(ddx(vertical), ddy(vertical)));
+	// Depth derivatives stay above the runtime return. fxc rejects a return above them.
+	float2 depthGrad = float2(ddx(vertical), ddy(vertical));
+	float grad = length(depthGrad);
 	if (SharedData::WaveScale <= 0.0)
 		return;
 	float storm = saturate(SharedData::WaveLook.w);
 	float foamSet = SharedData::WaveLook.x;
 	float murk = saturate(SharedData::WaveLook.z);
 	float2 absXZ = input.WaveBase.xy + FrameBuffer::CameraPosAdjust[eyeIndex].xy;
+	float upstream = 0.5;
+#	if defined(FLOWMAP)
+	{
+		// Same decode as GetFlowmapDataWorldSpace. Foam drifts with that current and
+		// piles up where the current runs into shallower water.
+		FlowmapData worldFlow = GetFlowmapDataWorldSpace(input, float2(0, 0));
+		float flowLen = length(worldFlow.flowVector);
+		if (flowLen > 1.0e-4) {
+			float2 flowDir = worldFlow.flowVector / flowLen;
+			absXZ -= flowDir * SharedData::Timer * 18.0 * saturate(worldFlow.color.b);
+			if (grad > 1.0e-4)
+				upstream = saturate(dot(flowDir, -depthGrad / grad));
+		}
+	}
+#	endif
 	float n = WaterWaves::FoamNoise(absXZ, SharedData::Timer);
 	float reach = lerp(28.0, 52.0, max(storm, murk));
 	float contact = saturate(1.0 - vertical / max(reach, 1.0));
@@ -1452,11 +1521,12 @@ void ApplyCrestFoam(inout float3 color, inout float opacity, PS_INPUT input, flo
 	float ring = (1.0 - smoothstep(4.0, 36.0, vertical)) * distFade;
 	float shore = saturate(contact * 1.7 - 0.28) * lerp(0.55, 1.0, n) * distFade;
 	float objectFoam = saturate(max(ring, contact * saturate(grad * 0.08) * 2.4)) * lerp(0.65, 1.0, n);
-	float crest = 0.0;
-#if !defined(FLOWMAP)
-	crest = saturate((0.62 - input.WaveShape.z) * lerp(2.0, 6.5, storm)) * saturate(storm * 1.35);
-	crest *= lerp(0.45, 1.0, n);
-#endif
+#	if defined(FLOWMAP)
+	objectFoam *= lerp(0.35, 1.65, upstream);
+	shore *= lerp(0.75, 1.2, upstream);
+#	endif
+	// Jacobian falls when a crest folds. That foam is not limited to storms or to non-flow water.
+	float crest = saturate((0.62 - input.WaveShape.z) * lerp(2.0, 6.5, storm)) * lerp(0.45, 1.0, n) * lerp(0.4, 1.0, storm);
 	float foam = saturate(shore * 0.85 + objectFoam + crest) * foamSet;
 	float3 foamColor = lerp(float3(0.62, 0.70, 0.68), float3(0.78, 0.81, 0.78), saturate(crest * 2.0));
 	foamColor = lerp(foamColor, float3(0.52, 0.53, 0.46), murk * 0.35);
@@ -1507,7 +1577,7 @@ PS_OUTPUT main(PS_INPUT input)
 	distanceMul = saturate(
 		planeMul * float4(length(depthAdjustedViewDirection).xx, abs(viewSurfaceAngle).xx) /
 		FogParam.z);
-#						if defined(WATER_WAVES) && !defined(FLOWMAP)
+#						if defined(WATER_WAVES)
 	{
 		float3 scenePoint = normalize(input.WPosition.xyz) * depthMul;
 		float vertical = max(input.WPosition.z - scenePoint.z, 0.0);
@@ -1735,6 +1805,9 @@ PS_OUTPUT main(PS_INPUT input)
 #				else
 
 	float3 sunColor = GetSunColor(normal, viewDirection, input.WPosition.xyz, eyeIndex) * surfaceShadow;
+#					if defined(WATER_WAVES)
+	sunColor = CrestSun(sunColor, input.WaveShape.z);
+#					endif
 
 	// Reflection and sun weights. On refracting water vanilla fades both with refractionMul, which only
 	// reaches 1 once the water is deep enough to fog, so shallow water lost its reflections.
@@ -1892,7 +1965,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #				endif
 #			endif
-#			if defined(WATER_WAVES) && !defined(UNDERWATER) && !defined(FLOWMAP)
+#			if defined(WATER_WAVES) && !defined(UNDERWATER)
 	if (SharedData::CameraBelowWaves > 0.5)
 		finalColor = lerp(finalColor, DeepColor.xyz * 0.35, 0.72);
 #			endif

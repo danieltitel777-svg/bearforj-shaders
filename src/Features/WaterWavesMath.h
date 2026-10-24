@@ -25,6 +25,9 @@ namespace WaterWaveMath
 		float windSpeed = 0.0f;
 		float windAngle = 0.0f;
 		float scale = 1.0f;
+		// 0 keeps the wind heading. 1 uses flowAngle. Flowmap water used to force a flat plane.
+		float flowAngle = 0.0f;
+		float flowWeight = 0.0f;
 		bool enabled = false;
 		bool flowmap = false;
 	};
@@ -183,10 +186,23 @@ namespace WaterWaveMath
 		return 1.0f - Smooth((a_distance - start) / (end - start));
 	}
 
+	// Same heading blend as WaterWaves::Eval in WaterWaves.hlsli.
+	inline float BlendHeading(float a_wind, float a_flow, float a_weight)
+	{
+		const float weight = std::clamp(a_weight, 0.0f, 1.0f);
+		if (weight <= 0.0f)
+			return a_wind;
+		const float x = std::cos(a_wind) * (1.0f - weight) + std::cos(a_flow) * weight;
+		const float y = std::sin(a_wind) * (1.0f - weight) + std::sin(a_flow) * weight;
+		if (x * x + y * y <= 1.0e-8f)
+			return a_wind;
+		return std::atan2(y, x);
+	}
+
 	inline Sample Evaluate(float a_absX, float a_absY, float a_camRelX, float a_camRelY, const Params& a_params, bool a_normalFade)
 	{
 		Sample sample{};
-		if (!a_params.enabled || a_params.flowmap || a_params.amplitude <= 0.0f || a_params.scale <= 0.0f)
+		if (!a_params.enabled || a_params.amplitude <= 0.0f || a_params.scale <= 0.0f)
 			return sample;
 		const float distance = std::sqrt(a_camRelX * a_camRelX + a_camRelY * a_camRelY);
 		const float fade = DistanceFade(distance, a_normalFade);
@@ -203,7 +219,8 @@ namespace WaterWaveMath
 			const float omega = std::sqrt(kGravity * k);
 			const float slopeA = 0.095f - 0.006f * fi;
 			const float amp = a_params.amplitude * a_params.scale * weather.amplitude * (slopeA / 0.095f) * std::pow(0.62f, fi);
-			const float ang = a_params.windAngle + kSpreads[i] * weather.spread;
+			const float heading = BlendHeading(a_params.windAngle, a_params.flowAngle, a_params.flowWeight);
+			const float ang = heading + kSpreads[i] * weather.spread;
 			const float dirX = std::cos(ang);
 			const float dirY = std::sin(ang);
 			const float phase = k * (dirX * a_absX + dirY * a_absY) - omega * a_params.time;

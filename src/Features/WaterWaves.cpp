@@ -22,7 +22,7 @@ using namespace WaterWaveMath;
 namespace
 {
 	// One hull per vertex layout. Light count, refraction, and the flags that
-	// do not change VS_OUTPUT share that hull. Flowmap and LOD are not tessellated.
+	// do not change VS_OUTPUT share that hull. Flowmap and LOD keep their own hulls.
 	uint32_t CanonicalTessDescriptor(uint32_t a_descriptor)
 	{
 		using Flag = SIE::ShaderCache::WaterShaderFlags;
@@ -51,7 +51,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	MaxTessFactor,
 	TessRange,
 	Foam,
-	Detail)
+	Detail,
+	FoamParallax)
 
 namespace
 {
@@ -136,6 +137,36 @@ void WaterWaves::DataLoaded()
 	Util::SetResourceName(shoreTexture.get(), "WaterWaves Shore");
 	Util::SetResourceName(shoreSRV.get(), "WaterWaves Shore SRV");
 	shoreCPU.assign(static_cast<size_t>(kShoreCells * kShoreCells), -1.0e8f);
+
+	// Neutral flow is (0.5, 0.5, 0, 1): no direction, no strength. A missing t8/t9
+	// would otherwise sample Skyrim's unbound water texture and come out pink.
+	auto makeNeutral = [](uint8_t r, uint8_t g, uint8_t b, uint8_t a, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv, const char* name) {
+		const uint8_t pixel[4] = { r, g, b, a };
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = 1;
+		desc.Height = 1;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.SampleDesc.Count = 1;
+		desc.Usage = D3D11_USAGE_IMMUTABLE;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		D3D11_SUBRESOURCE_DATA data{ pixel, 4, 0 };
+		DX::ThrowIfFailed(globals::d3d::device->CreateTexture2D(&desc, &data, tex));
+		DX::ThrowIfFailed(globals::d3d::device->CreateShaderResourceView(*tex, nullptr, srv));
+		Util::SetResourceName(*tex, name);
+	};
+	makeNeutral(128, 128, 0, 255, neutralFlowTexture.put(), neutralFlowSRV.put(), "WaterWaves Neutral Flow");
+	makeNeutral(128, 128, 255, 128, neutralFlowNormalTexture.put(), neutralFlowNormalSRV.put(), "WaterWaves Neutral Flow Normal");
+
+	D3D11_SAMPLER_DESC samp{};
+	samp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	samp.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+	samp.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+	samp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+	samp.MaxLOD = D3D11_FLOAT32_MAX;
+	DX::ThrowIfFailed(globals::d3d::device->CreateSamplerState(&samp, flowSampler.put()));
+	Util::SetResourceName(flowSampler.get(), "WaterWaves Flow Sampler");
 }
 
 WaterWaveMath::Params WaterWaves::MakeParams(bool a_flowmap) const
@@ -255,9 +286,9 @@ float WaterWaves::DisplacedHeight(const RE::TESObjectREFR* a_ref, const RE::NiPo
 {
 	if (!(a_flatHeight > -1.0e8f))
 		return a_flatHeight;
-	if (CellUsesFlowmap(a_ref))
-		return a_flatHeight;
-	const Params params = MakeParams(false);
+	// Flowing cells keep the swell. The CPU does not have the flow texture, so actors
+	// follow the wind heading; the shader steers the same waves with the flowmap.
+	const Params params = MakeParams(CellUsesFlowmap(a_ref));
 	if (!params.enabled)
 		return a_flatHeight;
 	float camX = 0.0f;
@@ -298,6 +329,9 @@ void WaterWaves::ApplyShared(float& a_displacedHeight, float& a_cameraBelow, flo
 	const float rain = smoothedRain.load(std::memory_order_relaxed);
 	a_foam = std::clamp(settings.Foam, 0.0f, 2.0f);
 	a_detail = std::clamp(settings.Detail, 0.0f, 2.0f);
+	// The shader reads a negative detail as "crest parallax off". Zero would lose the sign.
+	if (!settings.FoamParallax)
+		a_detail = -a_detail - 0.001f;
 	a_storm = std::clamp(weather.storm, 0.0f, 1.0f);
 	a_murk = std::clamp(weather.storm * 0.55f + rain * 0.85f, 0.0f, 1.0f);
 	UpdateShoreGrid();
@@ -317,7 +351,7 @@ void WaterWaves::ApplyShared(float& a_displacedHeight, float& a_cameraBelow, flo
 		return;
 	const auto eye = Util::GetEyePosition(0);
 	RE::NiPoint3 eyePos{ eye.x, eye.y, eye.z };
-	// WaterHeightAt adds the displacement once, including on a flowmap where that addition is zero.
+	// WaterHeightAt adds the displacement once. Flowing cells keep that swell.
 	const float surface = SubmersionWetness::WaterHeightAt(player, eyePos);
 	if (surface > -1.0e8f) {
 		a_displacedHeight = surface - eye.z;
@@ -356,11 +390,11 @@ void WaterWaves::OnSetup(RE::BSShader* a_shader, RE::BSRenderPass*)
 	context->PSGetSamplers(7, 1, &samp);
 	context->VSSetSamplers(7, 1, &samp);
 
+	BindFlowMaps();
+
 	const uint32_t desc = globals::state->modifiedVertexDescriptor;
-	const uint32_t technique = (desc >> 11) & 0xF;
-	const bool flowmap = (desc & static_cast<uint32_t>(SIE::ShaderCache::WaterShaderFlags::Flowmap)) != 0;
-	const bool lod = technique == static_cast<uint32_t>(SIE::ShaderCache::WaterShaderTechniques::Lod);
-	if (vr || flowmap || lod || !a_shader || !globals::shaderCache->IsEnabled()) {
+	// VR keeps the original triangle list. Flowmap, LOD and a disabled shader cache do not.
+	if (vr || !a_shader) {
 		if (depth)
 			depth->Release();
 		if (samp)
@@ -403,6 +437,41 @@ void WaterWaves::OnLightingSetup()
 	if (!loaded || !settings.Enabled)
 		return;
 	BindShore();
+}
+
+void WaterWaves::BindFlowMaps() const
+{
+	auto* context = globals::d3d::context;
+	if (!context)
+		return;
+	auto bindSlot = [&](UINT slot, ID3D11ShaderResourceView* fallback) {
+		ID3D11ShaderResourceView* bound = nullptr;
+		context->PSGetShaderResources(slot, 1, &bound);
+		ID3D11ShaderResourceView* use = bound ? bound : fallback;
+		if (use) {
+			context->PSSetShaderResources(slot, 1, &use);
+			context->VSSetShaderResources(slot, 1, &use);
+			context->DSSetShaderResources(slot, 1, &use);
+			context->HSSetShaderResources(slot, 1, &use);
+		}
+		if (bound)
+			bound->Release();
+	};
+	bindSlot(8, neutralFlowSRV.get());
+	bindSlot(9, neutralFlowNormalSRV.get());
+
+	ID3D11SamplerState* boundSampler = nullptr;
+	context->PSGetSamplers(8, 1, &boundSampler);
+	ID3D11SamplerState* useSampler = boundSampler ? boundSampler : flowSampler.get();
+	if (useSampler) {
+		if (!boundSampler)
+			context->PSSetSamplers(8, 1, &useSampler);
+		context->VSSetSamplers(8, 1, &useSampler);
+		context->DSSetSamplers(8, 1, &useSampler);
+		context->HSSetSamplers(8, 1, &useSampler);
+	}
+	if (boundSampler)
+		boundSampler->Release();
 }
 
 void WaterWaves::BindShore() const
@@ -621,13 +690,16 @@ void WaterWaves::DrawSettings()
 	BFUI::SliderFloat(T(TKEY("max_tess"), "Tessellation"), &settings.MaxTessFactor, 1.0f, 8.0f, "%.0f");
 	BFUI::SliderFloat(T(TKEY("tess_range"), "Tessellation Range"), &settings.TessRange, 256.0f, 4096.0f, "%.0f");
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::Text("%s", T(TKEY("tess_tt"), "Extra triangles near the camera, and only while the swell is large enough to need them. Calm water stays on the original mesh. At factor 1 the surface matches that mesh. Rivers and waterfalls are not moved."));
+		ImGui::Text("%s", T(TKEY("tess_tt"), "Extra triangles near the camera, and only while the swell is large enough to need them. Calm water stays on the original mesh. At factor 1 the surface matches that mesh. Rivers and distant water are tessellated too, and this does not need the shader cache."));
 	BFUI::SliderFloat(T(TKEY("foam"), "Foam"), &settings.Foam, 0.0f, 2.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::Text("%s", T(TKEY("foam_tt"), "White water on the shore, around rocks, and on storm crests. Crest foam grows with the wind."));
 	BFUI::SliderFloat(T(TKEY("detail"), "Detail"), &settings.Detail, 0.0f, 2.0f, "%.2f");
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::Text("%s", T(TKEY("detail_tt"), "Fine ripples on top of the swells. Two rotated samples of one normal map, so the pattern does not tile."));
+	BFUI::Checkbox(T(TKEY("foam_parallax"), "Crest parallax"), &settings.FoamParallax);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text("%s", T(TKEY("foam_parallax_tt"), "Shifts the fine ripple by the folding crest, including on flowmap water. Off leaves that ripple where the original shader put it. This is not a foam.dds height map."));
 }
 
 void WaterWaves::LoadSettings(json& o_json)

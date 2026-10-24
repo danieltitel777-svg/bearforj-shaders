@@ -27,10 +27,10 @@ struct WaterWaves : Feature
 
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
-		return { T("feature.water_waves.description", "The water mesh is tessellated into swells. Wind, rain, depth and foam follow the weather. Far water stays flat."),
-			{ T("feature.water_waves.key_1", "Tessellated swells near the camera, flat past the range"),
-				T("feature.water_waves.key_2", "Calm is a ripple, wind builds swells, storms add crest foam"),
-				T("feature.water_waves.key_3", "Foam on the shore, on rocks and on the crests. Actors use the same height") } };
+		return { T("feature.water_waves.description", "The water mesh is tessellated into swells. Wind, rain, depth and foam follow the weather. Flowing water keeps the swells, headed downstream. Far water stays flat."),
+			{ T("feature.water_waves.key_1", "Tessellated swells on lakes, rivers and distant water, including when the shader cache is off"),
+				T("feature.water_waves.key_2", "Calm is a ripple, wind builds swells, a folding crest lets the sun through and leaves foam"),
+				T("feature.water_waves.key_3", "Foam on the shore, on rocks and on the crests. On a current it piles up in front of an obstacle. Actors use the same height") } };
 	}
 
 	struct Settings
@@ -45,6 +45,8 @@ struct WaterWaves : Feature
 		float TessRange = 2048.0f;
 		float Foam = 1.0f;
 		float Detail = 1.0f;
+		// Off restores the unshifted detail ripple. The height is the Gerstner jacobian, not a foam texture.
+		bool FoamParallax = true;
 	} settings;
 
 	virtual void PostPostLoad() override;
@@ -57,7 +59,7 @@ struct WaterWaves : Feature
 
 	/** @brief Fills the shared-data wave fields and the camera-under-waves flag. */
 	void ApplyShared(float& a_displacedHeight, float& a_cameraBelow, float& a_scale, float& a_amplitude, float& a_chop, float& a_shore, float& a_windSpeed, float& a_windAngle, float& a_shoreOriginX, float& a_shoreOriginY, float& a_shoreCellSize, float& a_shoreCellCount, float& a_foam, float& a_detail, float& a_murk, float& a_storm);
-	/** @brief Flat water height plus the Gerstner offset, or the flat height on a flowmap. */
+	/** @brief Flat water height plus the Gerstner offset. Flowing cells keep the swell. */
 	float DisplacedHeight(const RE::TESObjectREFR* a_ref, const RE::NiPoint3& a_pos, float a_flatHeight) const;
 	void OnSetup(RE::BSShader* a_shader, RE::BSRenderPass* a_pass);
 	void OnLightingSetup();
@@ -76,6 +78,7 @@ private:
 	void FillShoreColumn(int a_x);
 	void ShiftShore(int a_dx, int a_dy);
 	void BindShore() const;
+	void BindFlowMaps() const;
 
 	struct TessShaders
 	{
@@ -103,6 +106,11 @@ private:
 	winrt::com_ptr<ID3D11Buffer> tessCB;
 	winrt::com_ptr<ID3D11Texture2D> shoreTexture;
 	winrt::com_ptr<ID3D11ShaderResourceView> shoreSRV;
+	winrt::com_ptr<ID3D11Texture2D> neutralFlowTexture;
+	winrt::com_ptr<ID3D11ShaderResourceView> neutralFlowSRV;
+	winrt::com_ptr<ID3D11Texture2D> neutralFlowNormalTexture;
+	winrt::com_ptr<ID3D11ShaderResourceView> neutralFlowNormalSRV;
+	winrt::com_ptr<ID3D11SamplerState> flowSampler;
 	std::vector<float> shoreCPU;
 	float shoreOriginX = 0.0f;
 	float shoreOriginY = 0.0f;

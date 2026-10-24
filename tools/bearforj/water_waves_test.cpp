@@ -29,8 +29,25 @@ int main()
 	Params flow = off;
 	flow.enabled = true;
 	flow.flowmap = true;
-	const Sample river = Evaluate(10, 20, 0, 0, flow, false);
-	Expect(river.height == 0.0f && river.slopeX == 0.0f, "flowmap height is 0");
+	flow.windSpeed = 0.8f;
+	flow.windAngle = 0.4f;
+	float riverPeak = 0.0f;
+	for (int i = 0; i < 8; ++i) {
+		flow.time = static_cast<float>(i) * 0.2f;
+		const Sample river = Evaluate(10.0f, 20.0f, 0.0f, 0.0f, flow, false);
+		riverPeak = std::max(riverPeak, std::fabs(river.height));
+		Expect(std::isfinite(river.jacobian), "flowmap jacobian stays finite");
+	}
+	Expect(riverPeak > 0.05f, "flowmap water still displaces");
+	Params downstream = flow;
+	downstream.time = 12.0f;
+	downstream.flowWeight = 1.0f;
+	downstream.flowAngle = 0.0f;
+	Params across = downstream;
+	across.flowAngle = 1.5707963f;
+	const Sample down = Evaluate(1000.0f, -250.0f, 30.0f, -10.0f, downstream, false);
+	const Sample side = Evaluate(1000.0f, -250.0f, 30.0f, -10.0f, across, false);
+	Expect(std::fabs(down.dx - side.dx) > 1.0e-3f || std::fabs(down.dy - side.dy) > 1.0e-3f, "flow heading changes the swell");
 
 	Expect(ShoreDamp(4.0f, 160.0f) == 0.0f, "shore damp is 0 at the 4-unit deadzone");
 	Expect(ShoreDamp(0.0f, 160.0f) == 0.0f, "shore damp is 0 on dry ground");
@@ -89,7 +106,7 @@ int main()
 	const WaveResponse stepA = WaveResponseAt(0.70f);
 	const WaveResponse stepB = WaveResponseAt(0.72f);
 	Expect(std::fabs(stepA.amplitude - stepB.amplitude) < 0.08f && std::fabs(stepA.length - stepB.length) < 0.08f, "a small wind step does not pop the swell");
-	Expect(disabled.jacobian == 1.0f && river.jacobian == 1.0f, "disabled and flowmap water keep a flat jacobian");
+	Expect(disabled.jacobian == 1.0f, "disabled water keeps a flat jacobian");
 
 	Params flat = sea;
 	flat.chop = 0.0f;
