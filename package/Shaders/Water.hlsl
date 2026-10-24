@@ -965,6 +965,25 @@ float3 WaterDetailNormal(PS_INPUT input, uint eyeIndex, float normalsDepthFactor
 }
 #endif
 
+// BEARFORJ_EC_WATER_BEGIN include
+// Reapply on Bottled package/Shaders/Water.hlsl immediately before WaterNormalData GetWaterNormal.
+// This file is the 0.6.7 water shader. Bottled UnifiedWater is not in this branch.
+#if defined(PSHADER) && defined(WATER_WAVES) && !defined(VR)
+#	include "ShoreWaves/ShoreWaves.hlsli"
+// SurfaceFlow is the EC rain-on-ground mask (Lighting PS t106 / t110). This water shader does not
+// write that mask. The constants keep the include type-checking; Strength() stays 0.
+static const float4 EI11 = float4(0, 0, 0, 0);
+static const float4 EI12 = float4(0, 0, 0, 0);
+static const float4 EI13 = float4(0, 0, 0, 0);
+static const float4 EI14 = float4(0, 0, 0, 0);
+static const float4 EI15 = float4(0, 0, 0, 0);
+static const float4 EI16 = float4(0, 0, 0, 0);
+static const float4 EI17 = float4(0, 0, 0, 0);
+static const float4 EI18 = float4(0, 0, 0, 0);
+#	include "ShoreWaves/SurfaceFlow.hlsli"
+#endif
+// BEARFORJ_EC_WATER_END include
+
 WaterNormalData GetWaterNormal(PS_INPUT input, float distanceFactor, float normalsDepthFactor, float3 viewDirection, float depth, uint eyeIndex, float wetnessOcclusion)
 {
 	WaterNormalData result;
@@ -1553,6 +1572,7 @@ PS_OUTPUT main(PS_INPUT input)
 	bool isSpecular = false;
 
 	float depth = 0;
+	float shoreDepth = -1;
 
 #			if defined(DEPTH)
 #				if defined(VERTEX_ALPHA_DEPTH)
@@ -1571,6 +1591,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float depthMul = CalculateDepthMultFromUV(Stereo::ConvertFromStereoUV(depthOffset, eyeIndex, 1), FrameBuffer::ToNativeDepth(depth), eyeIndex);
 #					endif  //VR
 	float3 depthAdjustedViewDirection = -viewDirection * depthMul;
+	shoreDepth = max(0, depthMul - length(input.WPosition.xyz)) * abs(viewDirection.z);
 	float viewSurfaceAngle = dot(depthAdjustedViewDirection, ReflectPlane[eyeIndex].xyz);
 
 	float planeMul = (1 - ReflectPlane[eyeIndex].w / viewSurfaceAngle);
@@ -1630,6 +1651,55 @@ PS_OUTPUT main(PS_INPUT input)
 #			endif
 
 	float3 normal = waterData.normal;
+// BEARFORJ_EC_WATER_BEGIN shore
+#if !defined(UNDERWATER) && !defined(LOD) && !defined(VR)
+#define SHOREWAVES_ACTIVE
+	gECView = viewDirection;
+	ShoreWaves::Result shoreWaves = ShoreWaves::Apply(normal, max(shoreDepth, 0), input.WPosition.xyz + FrameBuffer::CameraPosAdjust[eyeIndex].xyz, SharedData::Timer, length(input.WPosition.xyz));
+	const float shoreMask = (shoreDepth >= 0 && inWorld) ? 1.0 : 0.0;
+	normal = normalize(lerp(normal, shoreWaves.normal, shoreMask));
+	float2 shoreFlow = 0;
+#	if defined(FLOWMAP)
+	{
+		FlowmapData swFlowData = GetFlowmapDataTextureSpace(input, 0.0.xx);
+		shoreFlow = -(swFlowData.color.xy * 2 - 1) * sqrt(saturate(1.01 - swFlowData.color.z));
+	}
+#	endif
+	const float3 swWorldPos = input.WPosition.xyz + FrameBuffer::CameraPosAdjust[eyeIndex].xyz;
+	ShoreWaves::Result riverWaves = ShoreWaves::RiverWaves(normal, shoreFlow, swWorldPos, SharedData::Timer);
+	normal = normalize(lerp(normal, riverWaves.normal, inWorld ? 1.0 : 0.0));
+	const float rockFoam = (shoreDepth >= 0) ? ShoreWaves::RockFoam(max(shoreDepth, 0), shoreFlow, swWorldPos, SharedData::Timer) : 0.0;
+	float2 waterfallTurb;
+	const float waterfallFoam = ShoreWaves::WaterfallFoam(input.WPosition.xyz, swWorldPos, SharedData::Timer, waterfallTurb);
+	normal = normalize(float3(normal.xy + waterfallTurb, normal.z));
+	const float extraFoam = inWorld ? max(max(riverWaves.foam, rockFoam), waterfallFoam) * 0.75 * (1.0 - smoothstep(ShoreWaves::FoamFadeStart, ShoreWaves::FoamFadeEnd, length(input.WPosition.xyz))) : 0.0;
+	const float cdCamDist = length(input.WPosition.xyz);
+	const float cdH = max(shoreDepth, 0.0);
+	const bool cdHasDepth = shoreDepth >= 0 && inWorld;
+	float2 cdGrad = 0;
+	{
+		float2 cdPx = ddx(swWorldPos.xy), cdPy = ddy(swWorldPos.xy);
+		float cdDx = ddx(cdH), cdDy = ddy(cdH);
+		float cdDet = cdPx.x * cdPy.y - cdPx.y * cdPy.x;
+		cdGrad = abs(cdDet) > 1e-6 ? float2(cdDx * cdPy.y - cdDy * cdPx.y, cdDy * cdPx.x - cdDx * cdPy.x) / cdDet : 0;
+	}
+	float2 cdSlope = CDWater::RippleSlope(swWorldPos.xy, SharedData::Timer, cdHasDepth ? cdH : 3000.0, cdCamDist) + CDWater::TexSlope(swWorldPos.xy, SharedData::Timer);
+	CDWater::Run cdRun = CDWater::ShoreRun(cdHasDepth ? cdH : 0.0, cdGrad, swWorldPos.xy, SharedData::Timer, cdCamDist);
+	{
+		float3 cdN = normalize(float3(normal.xy + (inWorld ? (cdSlope + cdRun.slope) : 0.0), normal.z));
+		normal = all(isfinite(cdN)) ? cdN : normal;
+	}
+#	if defined(FLOWMAP)
+	const bool cdHasFlow = true;
+#	else
+	const bool cdHasFlow = false;
+#	endif
+	const float cdFoamFade = 1.0 - smoothstep(ShoreWaves::FoamFadeStart, ShoreWaves::FoamFadeEnd, cdCamDist);
+	const float cdFoam = cdHasDepth ? saturate(max(cdRun.foam, max(CDWater::ObstacleFoam(cdH, length(cdGrad), swWorldPos.xy, SharedData::Timer),
+	                                      CDWater::QuietFoam(cdH, shoreFlow, cdHasFlow, swWorldPos.xy, SharedData::Timer))) * cdFoamFade * EI_FoamStrength) : 0.0;
+	const float3 cdFoamTint = CDWater::FoamTint(cdH);
+#endif
+// BEARFORJ_EC_WATER_END shore
 
 #			if defined(SKYLIGHTING)
 	sh2 specularLobe = SphericalHarmonics::FauxSpecularLobe(normal, -viewDirection, 0.0);
@@ -1711,6 +1781,18 @@ PS_OUTPUT main(PS_INPUT input)
 	}
 #				endif
 
+#				if defined(SHOREWAVES_ACTIVE) && defined(REFRACTIONS) && defined(DEPTH)
+	{
+#					if defined(WATER_EFFECTS)
+		const bool cdOsCaustics = SharedData::csUtilitySettings.waterCausticsStrength > 0.0;
+#					else
+		const bool cdOsCaustics = false;
+#					endif
+		if (cdHasDepth)
+			diffuseOutput.refractionColor = CDWater::Bottom(diffuseOutput.refractionColor, cdH, swWorldPos, diffuseOutput.refractedViewDirection,
+				SharedData::DirLightDirection.xyz, SharedData::DirLightColor.xyz, SharedData::Timer, cdOsCaustics, Color::Water(DeepColor.xyz));
+	}
+#				endif
 	float3 diffuseColor = lerp(diffuseOutput.refractionColor, diffuseOutput.refractionDiffuseColor, diffuseOutput.refractionMul);
 
 	depthControl = DepthControl * (distanceMul - 1) + 1;
@@ -1969,6 +2051,25 @@ PS_OUTPUT main(PS_INPUT input)
 	if (SharedData::CameraBelowWaves > 0.5)
 		finalColor = lerp(finalColor, DeepColor.xyz * 0.35, 0.72);
 #			endif
+#			if defined(SHOREWAVES_ACTIVE) && !(defined(SPECULAR) && (NUM_SPECULAR_LIGHTS != 0))
+	finalColor *= lerp(1.0, shoreWaves.shade, shoreMask);
+	finalColor = lerp(finalColor, diffuseOutput.refractionColor * 0.82, shoreWaves.exposed * shoreMask);
+	finalColor = lerp(finalColor, ShoreWaves::FoamColor * cdFoamTint * shoreWaves.foamTint * saturate(SharedData::DirLightColor.xyz * 0.6 + 0.3), shoreWaves.foam * shoreMask);
+	finalColor = lerp(finalColor, ShoreWaves::FoamColor * cdFoamTint * saturate(SharedData::DirLightColor.xyz * 0.6 + 0.3), extraFoam);
+	{
+		float3 cdLace;
+		float cdVis = ShoreWaves::TexturedFoam(cdFoam, swWorldPos.xy, SharedData::Timer, 0.0, cdLace);
+		finalColor = lerp(finalColor, ShoreWaves::FoamColor * cdFoamTint * cdLace * saturate(SharedData::DirLightColor.xyz * 0.6 + 0.3), cdVis * shoreMask * EI_FoamOpacity);
+	}
+	{
+		const float2 swP = swWorldPos.xy;
+		float swN = ShoreWaves::VNoise(swP / 41.0 + SharedData::Timer * 0.02) * 0.65 + ShoreWaves::VNoise(swP / 11.0) * 0.35;
+		float softW = (2.0 + 6.0 * swN) * (0.6 + 0.4 * saturate(EI_FoamDepth / 5.0));
+		float shoreSoft = smoothstep(0.0, softW, max(shoreDepth, 0.0));
+		finalColor = lerp(diffuseOutput.refractionColor, finalColor, lerp(1.0, shoreSoft, shoreMask * (inWorld ? 1.0 : 0.0)));
+	}
+#endif
+#undef SHOREWAVES_ACTIVE
 	psout.Lighting = float4(finalColor * SharedData::csUtilitySettings.waterBrightness, isSpecular);
 #		endif
 

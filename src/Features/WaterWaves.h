@@ -47,6 +47,10 @@ struct WaterWaves : Feature
 		float Detail = 1.0f;
 		// Off restores the unshifted detail ripple. The height is the Gerstner jacobian, not a foam texture.
 		bool FoamParallax = true;
+		// Elemental Contact shore, river, rock and crest foam. Off leaves the original shading.
+		bool ShoreContact = true;
+		// Foam lace and wave-detail normal shift by the height maps. Off samples those textures flat.
+		bool HeightParallax = true;
 	} settings;
 
 	virtual void PostPostLoad() override;
@@ -79,6 +83,9 @@ private:
 	void ShiftShore(int a_dx, int a_dy);
 	void BindShore() const;
 	void BindFlowMaps() const;
+	void BindElementalContact();
+	void UnbindElementalContact();
+	void UpdateWaterfalls();
 
 	struct TessShaders
 	{
@@ -118,6 +125,25 @@ private:
 	bool shoreReady = false;
 	bool tessBound = false;
 	bool vr = false;
+	winrt::com_ptr<ID3D11Buffer> ecCB;
+	winrt::com_ptr<ID3D11ShaderResourceView> ecFoamSRV;
+	winrt::com_ptr<ID3D11ShaderResourceView> ecNormalSRV;
+	winrt::com_ptr<ID3D11ShaderResourceView> ecFoamHeightSRV;
+	winrt::com_ptr<ID3D11ShaderResourceView> ecWaveHeightSRV;
+	bool ecFoamFile = false;
+	bool ecNormalFile = false;
+	bool ecFoamHeightFile = false;
+	bool ecWaveHeightFile = false;
+	bool ecBound = false;
+	struct FallPoint
+	{
+		float x;
+		float y;
+		float z;
+		float radius;
+	};
+	std::vector<FallPoint> fallPoints;
+	float fallAccum = 1.0f;
 	mutable std::atomic<float> smoothedWind{ 0.0f };
 	mutable std::atomic<float> smoothedAngle{ 0.0f };
 	mutable std::atomic<float> smoothedRain{ 0.0f };

@@ -12,8 +12,13 @@
 #include "Utils/D3D.h"
 #include "Utils/Game.h"
 
+#include <DDSTextureLoader.h>
+
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstring>
+#include <string>
 
 #define I18N_KEY_PREFIX "feature.water_waves."
 
@@ -52,7 +57,9 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	TessRange,
 	Foam,
 	Detail,
-	FoamParallax)
+	FoamParallax,
+	ShoreContact,
+	HeightParallax)
 
 namespace
 {
@@ -167,6 +174,37 @@ void WaterWaves::DataLoaded()
 	samp.MaxLOD = D3D11_FLOAT32_MAX;
 	DX::ThrowIfFailed(globals::d3d::device->CreateSamplerState(&samp, flowSampler.put()));
 	Util::SetResourceName(flowSampler.get(), "WaterWaves Flow Sampler");
+
+	D3D11_BUFFER_DESC ecDesc{};
+	ecDesc.ByteWidth = 464;
+	ecDesc.Usage = D3D11_USAGE_DYNAMIC;
+	ecDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	ecDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	DX::ThrowIfFailed(globals::d3d::device->CreateBuffer(&ecDesc, nullptr, ecCB.put()));
+	Util::SetResourceName(ecCB.get(), "WaterWaves Elemental Contact");
+
+	auto loadDDS = [&](const wchar_t* path, winrt::com_ptr<ID3D11ShaderResourceView>& srv, bool& fromFile) {
+		fromFile = SUCCEEDED(DirectX::CreateDDSTextureFromFile(globals::d3d::device, globals::d3d::context, path, nullptr, srv.put())) && srv;
+		if (!fromFile)
+			srv = nullptr;
+	};
+	loadDDS(L"Data\\textures\\ElementalContact\\foam.dds", ecFoamSRV, ecFoamFile);
+	loadDDS(L"Data\\textures\\ElementalContact\\water_normals.dds", ecNormalSRV, ecNormalFile);
+	loadDDS(L"Data\\textures\\ElementalContact\\foam_height.dds", ecFoamHeightSRV, ecFoamHeightFile);
+	loadDDS(L"Data\\textures\\ElementalContact\\wave_height.dds", ecWaveHeightSRV, ecWaveHeightFile);
+	winrt::com_ptr<ID3D11Texture2D> hold;
+	if (!ecFoamFile)
+		makeNeutral(255, 255, 255, 255, hold.put(), ecFoamSRV.put(), "WaterWaves Foam Fallback");
+	hold = nullptr;
+	if (!ecNormalFile)
+		makeNeutral(128, 128, 255, 255, hold.put(), ecNormalSRV.put(), "WaterWaves Water Normal Fallback");
+	hold = nullptr;
+	if (!ecFoamHeightFile)
+		makeNeutral(128, 128, 128, 255, hold.put(), ecFoamHeightSRV.put(), "WaterWaves Foam Height Fallback");
+	hold = nullptr;
+	if (!ecWaveHeightFile)
+		makeNeutral(128, 128, 128, 255, hold.put(), ecWaveHeightSRV.put(), "WaterWaves Wave Height Fallback");
+	logger::info("[Water Waves] Elemental Contact foam {} normals {} foam height {} wave height {}", ecFoamFile, ecNormalFile, ecFoamHeightFile, ecWaveHeightFile);
 }
 
 WaterWaveMath::Params WaterWaves::MakeParams(bool a_flowmap) const
@@ -379,7 +417,11 @@ void WaterWaves::OnSetup(RE::BSShader* a_shader, RE::BSRenderPass*)
 	if (tessBound)
 		OnRestore();
 	auto context = globals::d3d::context;
-	if (!context || !loaded || !settings.Enabled)
+	if (!context || !loaded)
+		return;
+	if (!vr)
+		BindElementalContact();
+	if (!settings.Enabled)
 		return;
 	BindShore();
 
@@ -597,6 +639,7 @@ void WaterWaves::UpdateShoreGrid()
 
 void WaterWaves::OnRestore()
 {
+	UnbindElementalContact();
 	if (!tessBound)
 		return;
 	auto context = globals::d3d::context;
@@ -675,6 +718,183 @@ void WaterWaves::ClearShaderCache()
 	tessShaders.clear();
 }
 
+namespace
+{
+	struct ECWaterGPU
+	{
+		float points[16][4]{};
+		float info[4]{};
+		float ei[7][4]{};
+		float cd[4][4]{};
+		float parallax[4]{};
+	};
+	static_assert(sizeof(ECWaterGPU) == 464);
+}
+
+void WaterWaves::UpdateWaterfalls()
+{
+	fallAccum += std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, 0.1f);
+	if (fallAccum < 1.0f)
+		return;
+	fallAccum = 0.0f;
+	std::vector<FallPoint> found;
+	auto* player = RE::PlayerCharacter::GetSingleton();
+	auto* tes = RE::TES::GetSingleton();
+	if (!player || !tes) {
+		fallPoints.clear();
+		return;
+	}
+	tes->ForEachReferenceInRange(player, 4096.0f, [&](RE::TESObjectREFR* a_ref) {
+		if (!a_ref || a_ref->IsDisabled() || a_ref->IsDeleted())
+			return RE::BSContainer::ForEachResult::kContinue;
+		auto* base = a_ref->GetBaseObject();
+		auto* model = base ? base->As<RE::TESModel>() : nullptr;
+		const char* path = model ? model->GetModel() : nullptr;
+		if (!path || !*path)
+			return RE::BSContainer::ForEachResult::kContinue;
+		std::string lower(path);
+		for (char& c : lower)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		if (lower.find("waterfall") == std::string::npos)
+			return RE::BSContainer::ForEachResult::kContinue;
+		auto* root = a_ref->Get3D();
+		if (!root)
+			return RE::BSContainer::ForEachResult::kContinue;
+		const auto& bound = root->worldBound;
+		FallPoint pt{};
+		pt.x = bound.center.x;
+		pt.y = bound.center.y;
+		const float waterZ = a_ref->GetWaterHeight();
+		const float bottom = bound.center.z - bound.radius;
+		pt.z = (waterZ > -1.0e8f && waterZ > bottom && waterZ < bound.center.z + bound.radius) ? waterZ : bottom;
+		pt.radius = std::clamp(bound.radius * 0.35f, 48.0f, 512.0f);
+		for (auto& have : found) {
+			const float dx = have.x - pt.x;
+			const float dy = have.y - pt.y;
+			if (dx * dx + dy * dy < 160.0f * 160.0f && std::abs(have.z - pt.z) < 256.0f) {
+				have.radius = std::max(have.radius, pt.radius);
+				have.z = std::min(have.z, pt.z);
+				return RE::BSContainer::ForEachResult::kContinue;
+			}
+		}
+		found.push_back(pt);
+		return RE::BSContainer::ForEachResult::kContinue;
+	});
+	const auto pos = player->GetPosition();
+	std::sort(found.begin(), found.end(), [&](const FallPoint& a, const FallPoint& b) {
+		const float adx = a.x - pos.x;
+		const float ady = a.y - pos.y;
+		const float bdx = b.x - pos.x;
+		const float bdy = b.y - pos.y;
+		return adx * adx + ady * ady < bdx * bdx + bdy * bdy;
+	});
+	if (found.size() > 16)
+		found.resize(16);
+	fallPoints = std::move(found);
+}
+
+void WaterWaves::BindElementalContact()
+{
+	auto* context = globals::d3d::context;
+	if (!context || !ecCB)
+		return;
+	const bool shore = settings.Enabled && settings.ShoreContact;
+	if (shore)
+		UpdateWaterfalls();
+	ECWaterGPU data{};
+	data.ei[3][3] = 1.0f;
+	if (shore) {
+		data.ei[0][0] = 1.0f;
+		data.ei[0][1] = 0.22f;
+		data.ei[0][2] = 14.0f;
+		data.ei[0][3] = 0.35f;
+		data.ei[1][0] = 0.70f;
+		data.ei[1][1] = 5.0f;
+		data.ei[1][2] = 1.0f;
+		data.ei[1][3] = 1.0f;
+		data.ei[2][0] = 1.0f;
+		data.ei[2][1] = 0.9f;
+		data.ei[2][2] = 1.0f;
+		data.ei[2][3] = 0.55f;
+		data.ei[3][0] = 1.0f;
+		data.ei[3][1] = 1.0f;
+		data.ei[3][2] = 1.0f;
+		data.ei[4][0] = ecFoamFile ? 1.0f : 0.0f;
+		data.ei[4][1] = 420.0f;
+		data.ei[4][2] = 0.85f;
+		data.ei[4][3] = 1.0f;
+		data.ei[5][0] = 40.0f;
+		data.ei[5][1] = 7.0f;
+		data.ei[5][3] = 1.0f;
+		data.cd[0][0] = 0.85f;
+		data.cd[0][1] = 1.0f;
+		data.cd[0][2] = 1.0f;
+		data.cd[0][3] = 0.6f;
+		data.cd[1][0] = 1.0f;
+		data.cd[1][1] = 300.0f;
+		data.cd[1][2] = 7.0f;
+		data.cd[1][3] = 0.08f;
+		data.cd[2][0] = 0.8f;
+		data.cd[2][1] = 1.0f;
+		data.cd[2][2] = 0.6f;
+		data.cd[2][3] = 0.9f;
+		data.cd[3][0] = 5.0f;
+		data.cd[3][1] = 0.8f;
+		data.cd[3][2] = 0.35f;
+		data.info[1] = ecNormalFile ? 1.0f : 0.0f;
+		data.info[2] = 1.0f;
+		data.info[3] = 1.0f;
+		const auto eye = Util::GetAverageEyePosition();
+		uint32_t n = 0;
+		for (const auto& p : fallPoints) {
+			data.points[n][0] = p.x - eye.x;
+			data.points[n][1] = p.y - eye.y;
+			data.points[n][2] = p.z - eye.z;
+			data.points[n][3] = p.radius;
+			if (++n == 16)
+				break;
+		}
+		data.info[0] = static_cast<float>(n);
+	}
+	const bool parallax = shore && settings.HeightParallax && ecFoamHeightFile && ecWaveHeightFile;
+	data.parallax[0] = parallax ? 1.0f : 0.0f;
+	data.parallax[1] = 8.0f;
+	data.parallax[2] = 22.0f;
+	D3D11_MAPPED_SUBRESOURCE mapped{};
+	if (FAILED(context->Map(ecCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+		return;
+	std::memcpy(mapped.pData, &data, sizeof(data));
+	context->Unmap(ecCB.get(), 0);
+	ID3D11Buffer* cb = ecCB.get();
+	context->PSSetConstantBuffers(13, 1, &cb);
+	ID3D11ShaderResourceView* foam = ecFoamSRV.get();
+	ID3D11ShaderResourceView* normal = ecNormalSRV.get();
+	ID3D11ShaderResourceView* foamH = ecFoamHeightSRV.get();
+	ID3D11ShaderResourceView* waveH = ecWaveHeightSRV.get();
+	context->PSSetShaderResources(107, 1, &foam);
+	context->PSSetShaderResources(108, 1, &normal);
+	context->PSSetShaderResources(111, 1, &foamH);
+	context->PSSetShaderResources(112, 1, &waveH);
+	ecBound = true;
+}
+
+void WaterWaves::UnbindElementalContact()
+{
+	if (!ecBound)
+		return;
+	auto* context = globals::d3d::context;
+	ecBound = false;
+	if (!context)
+		return;
+	ID3D11Buffer* cb = nullptr;
+	context->PSSetConstantBuffers(13, 1, &cb);
+	ID3D11ShaderResourceView* srv = nullptr;
+	context->PSSetShaderResources(107, 1, &srv);
+	context->PSSetShaderResources(108, 1, &srv);
+	context->PSSetShaderResources(111, 1, &srv);
+	context->PSSetShaderResources(112, 1, &srv);
+}
+
 void WaterWaves::DrawSettings()
 {
 	BFUI::Checkbox(T(TKEY("enabled"), "Enabled"), &settings.Enabled);
@@ -700,6 +920,12 @@ void WaterWaves::DrawSettings()
 	BFUI::Checkbox(T(TKEY("foam_parallax"), "Crest parallax"), &settings.FoamParallax);
 	if (auto _tt = Util::HoverTooltipWrapper())
 		ImGui::Text("%s", T(TKEY("foam_parallax_tt"), "Shifts the fine ripple by the folding crest, including on flowmap water. Off leaves that ripple where the original shader put it. This is not a foam.dds height map."));
+	BFUI::Checkbox(T(TKEY("shore_surf"), "Shore surf"), &settings.ShoreContact);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text("%s", T(TKEY("shore_surf_tt"), "Elemental Contact shore waves, shore foam, river foam, rock foam and the layered crest foam. Off leaves the original water shading."));
+	BFUI::Checkbox(T(TKEY("height_parallax"), "Foam and wave parallax"), &settings.HeightParallax);
+	if (auto _tt = Util::HoverTooltipWrapper())
+		ImGui::Text("%s", T(TKEY("height_parallax_tt"), "Shifts the foam lace and the wave detail normal by the foam and wave height maps. Off samples those textures flat."));
 }
 
 void WaterWaves::LoadSettings(json& o_json)
