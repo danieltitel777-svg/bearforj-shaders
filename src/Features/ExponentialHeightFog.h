@@ -1,0 +1,194 @@
+#pragma once
+
+#include "Buffer.h"
+
+struct ExponentialHeightFog : Feature
+{
+private:
+	static constexpr std::string_view MOD_ID = "180146";
+
+public:
+	virtual inline std::string GetName() override { return "Exponential Height Fog"; }
+	virtual std::string GetDisplayName() override { return T("feature.exponential_height_fog.name", "Exponential Height Fog"); }
+	virtual inline std::string GetShortName() override { return "ExponentialHeightFog"; }
+	virtual inline std::string GetFeatureModLink() override { return MakeNexusModURL(MOD_ID); }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kSkyAndWeather; }
+
+	virtual inline std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
+	{
+		return { T("feature.exponential_height_fog.description", "Exponential Height Fog adds a realistic fog effect that increases in density with height, enhancing atmospheric depth and immersion in the game environment."),
+			{ T("feature.exponential_height_fog.key_feature_1", "Added exponential height fog effect"),
+				T("feature.exponential_height_fog.key_feature_2", "Adapted to vanilla fog settings"),
+				T("feature.exponential_height_fog.key_feature_3", "Creates atmospheric depth") } };
+	};
+
+	virtual inline std::string_view GetShaderDefineName() override { return "EXP_HEIGHT_FOG"; }
+	bool HasShaderDefine(RE::BSShader::Type) override { return true; };
+
+	/** @brief Draws the ImGui settings UI for fog parameters and volumetric fog options. */
+	virtual void DrawSettings() override;
+	/** @brief Creates samplers and the volumetric fog constant buffer. */
+	virtual void SetupResources() override;
+	/** @brief Releases all cached volumetric fog compute shaders so they can be recompiled. */
+	virtual void ClearShaderCache() override;
+	/**
+	 * @brief Runs the volumetric fog pipeline: material setup, conservative depth,
+	 * light scattering, and front-to-back integration.
+	 */
+	virtual void Prepass() override;
+
+	virtual void RestoreDefaultSettings() override;
+	virtual void LoadSettings(json& o_json) override;
+	virtual void SaveSettings(json& o_json) override;
+
+	/** @brief Captures the current directional shadow map SRV for use in volumetric fog light scattering. */
+	void CaptureDirectionalShadowMap();
+
+	struct alignas(16) Settings
+	{
+		uint enabled = 0;
+		uint useDynamicCubemaps = 1;
+		float startDistance = 0.0f;
+		float fogHeight = 0.0f;
+		float fogHeightFalloff = 0.2f;
+		float fogDensity = 0.005f;
+		float fogHeight2 = 0.0f;
+		float fogHeightFalloff2 = 0.2f;
+		float fogDensity2 = 0.0f;
+		float directionalInscatteringMultiplier = 1.0f;
+		float directionalInscatteringAnisotropy = 0.2f;
+		uint useSkyIBL = 1;
+		float4 inscatteringTint = { 1.0f, 1.0f, 1.0f, 1.0f };
+		float cubemapMipLevel = 8.0f;
+		float sunlightAttenuationAmount = 1.0f;
+		uint respectVanillaFogFade = 1;
+		uint disableVanillaFog = 1;
+		float4 fogInscatteringColor = { 0.0f, 0.0f, 0.0f, 1.0f };
+		float originalFogColorAmount = 0.0f;
+		uint volumetricFogEnabled = 0;
+		uint volumetricGridPixelSize = 16;
+		uint volumetricGridSizeZ = 64;
+		float volumetricFogDistance = 60000.0f;
+		float volumetricFogStartDistance = 0.0f;
+		float volumetricFogNearFadeInDistance = 1000.0f;
+		float volumetricFogExtinctionScale = 1.0f;
+		float4 volumetricFogAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };
+		float4 volumetricFogEmissive = { 0.0f, 0.0f, 0.0f, 0.0f };
+		float volumetricDirectionalScatteringIntensity = 1.0f;
+		float volumetricShadowBias = 0.002f;
+		float volumetricDepthDistributionScale = 8.0f;
+		float volumetricSkyLightingIntensity = 1.0f;
+		float volumetricFogScatteringDistribution = 0.2f;
+		float volumetricHistoryWeight = 0.96f;
+		uint volumetricHistoryMissSampleCount = 4;
+		float volumetricSampleJitterMultiplier = 0.0f;
+		float volumetricUpsampleJitterMultiplier = 1.0f;
+		float volumetricNearGridDistance = 8000.0f;
+		uint volumetricFarGridPixelSize = 64;
+		uint volumetricFarGridSizeZ = 32;
+		float volumetricLocalLightScatteringIntensity = 1.0f;
+		float volumetricFogNoiseScale = 0.0f;  // noise frequency per unit; 0 = disabled
+		float volumetricFogNoiseThreshold = 0.5f;
+		float pad3 = 0.0f;
+		float3 volumetricFogNoiseVelocity = { 0.0f, 0.0f, 0.0f };
+		float pad0 = 0.0f;
+		uint useVanillaFogSettings = 1;
+		float vanillaFogMaxOpacity = 1.0f;
+		float vanillaFogDensity = 0.0f;
+		float vanillaFogNear = 0.0f;
+		float vanillaFogFar = 40960.0f;
+		float vanillaFogPower = 1.0f;
+		float vanillaFogStrength = 1.25f;
+		float pad4 = 0.0f;
+		float4 vanillaFogNearColor = {};
+		float4 vanillaFogFarColor = {};
+		float fogLightingInfluence = 0.35f;
+		float distanceHazeMaxOpacity = 0.0f;
+		float distanceHazeStartDistance = 15000.0f;
+		float distanceHazeFadeDistance = 60000.0f;
+	} settings;
+	STATIC_ASSERT_ALIGNAS_16(Settings);
+	static_assert(offsetof(Settings, volumetricFogNoiseVelocity) == 224);
+	static_assert(offsetof(Settings, useVanillaFogSettings) == 240);
+	static_assert(offsetof(Settings, vanillaFogNearColor) == 272);
+	static_assert(offsetof(Settings, fogLightingInfluence) == 304);
+	static_assert(offsetof(Settings, distanceHazeMaxOpacity) == 308);
+	static_assert(sizeof(Settings) == 320);
+
+	Settings GetCommonBufferData() const;
+
+private:
+	void DrawHeightFogSettings();
+	void DrawVolumetricSettings();
+
+	Settings previousFogSettings = {};
+
+	struct VolumetricFogCB
+	{
+		DirectX::XMUINT4 gridSizeAndFlags = {};
+		float4 invGridSizeAndNearFade = {};
+		float4 gridZParams = {};
+		float4x4 clipToWorld = {};
+		float4 frameJitterOffsets[16] = {};
+		float4 historyParameters = {};  // x = near weight, y = miss sample count, z = far weight, w = unused
+		float4 jitterParameters = {};   // x = LightScatteringSampleJitterMultiplier, y = StateFrameIndexMod8, zw = unused
+		// Far volume grid (starts where the near volume ends, runs to volumetricFogDistance).
+		DirectX::XMUINT4 farGridSizeAndFlags = {};
+		float4 farInvGridSizeAndNearFade = {};
+		float4 farGridZParams = {};
+		float4 farRange = {};  // x = far start depth, y = far end depth, zw = unused
+	};
+	STATIC_ASSERT_ALIGNAS_16(VolumetricFogCB);
+
+	/** @brief Shaders see height fog as disabled while the map is open. */
+	bool IsSuppressed() const;
+	void EnsureVolumetricResources();
+	void ReleaseVolumetricResources();
+	void BindIntegratedLightScattering();
+	ID3D11ShaderResourceView* UpdateEngineLocalShadowData();
+	ID3D11ComputeShader* GetMaterialSetupCS();
+	ID3D11ComputeShader* GetFarMaterialSetupCS();
+	ID3D11ComputeShader* GetConservativeDepthCS();
+	ID3D11ComputeShader* GetFarConservativeDepthCS();
+	ID3D11ComputeShader* GetLightScatteringCS();
+	ID3D11ComputeShader* GetFarLightScatteringCS();
+	ID3D11ComputeShader* GetIntegrationCS();
+	ID3D11ComputeShader* GetFarIntegrationCS();
+	ID3D11ComputeShader* GetFogIBLColorCS();
+	void UpdateFogIBLColor();
+
+	std::unique_ptr<Texture3D> vBufferA;
+	std::unique_ptr<Texture3D> vBufferAFar;
+	std::unique_ptr<Texture2D> conservativeDepth;
+	std::unique_ptr<Texture2D> conservativeDepthHistory;
+	std::unique_ptr<Texture2D> conservativeDepthFar;
+	std::unique_ptr<Texture2D> conservativeDepthFarHistory;
+	std::unique_ptr<Texture3D> lightScattering;
+	std::unique_ptr<Texture3D> lightScatteringHistory;
+	std::unique_ptr<Texture3D> lightScatteringFar;
+	std::unique_ptr<Texture3D> lightScatteringFarHistory;
+	std::unique_ptr<Texture3D> integratedLightScattering;
+	std::unique_ptr<Texture3D> integratedLightScatteringFar;
+	std::unique_ptr<ConstantBuffer> volumetricFogCB;
+	std::unique_ptr<ConstantBuffer> engineLocalShadowCB;
+	winrt::com_ptr<ID3D11SamplerState> linearSampler;
+	winrt::com_ptr<ID3D11SamplerState> shadowSampler;
+	winrt::com_ptr<ID3D11ShaderResourceView> directionalShadowMap;
+	ID3D11ComputeShader* materialSetupCS = nullptr;
+	ID3D11ComputeShader* farMaterialSetupCS = nullptr;
+	ID3D11ComputeShader* conservativeDepthCS = nullptr;
+	ID3D11ComputeShader* farConservativeDepthCS = nullptr;
+	ID3D11ComputeShader* lightScatteringCS = nullptr;
+	ID3D11ComputeShader* farLightScatteringCS = nullptr;
+	ID3D11ComputeShader* integrationCS = nullptr;
+	ID3D11ComputeShader* farIntegrationCS = nullptr;
+	ID3D11ComputeShader* fogIBLColorCS = nullptr;
+	std::unique_ptr<Texture2D> fogIBLColor;
+	DirectX::XMUINT4 currentGridSize = {};
+	DirectX::XMUINT4 currentFarGridSize = {};
+	bool hasLightScatteringHistory = false;
+	bool hasConservativeDepthHistory = false;
+	bool hasLightScatteringFarHistory = false;
+	bool hasConservativeDepthFarHistory = false;
+	uint32_t lastPrepassFrame = UINT32_MAX;
+};

@@ -1,0 +1,34 @@
+#pragma once
+
+#include <string_view>
+
+namespace Plugin
+{
+	using namespace std::literals;
+
+	inline constexpr REL::Version VERSION
+	{
+		// clang-format off
+		@PROJECT_VERSION_MAJOR@u,
+		@PROJECT_VERSION_MINOR@u,
+		@PROJECT_VERSION_PATCH@u,
+		// clang-format on
+	};
+
+	/// Runtime identity: DLL name, log file, and the on-disk settings/asset folders.
+	/// Deliberately distinct from DISPLAY_NAME so the fork stays a drop-in replacement.
+	inline constexpr auto NAME = "@PROJECT_NAME@"sv;
+
+	/// Product name shown to users. Branding only; never use it to build a path.
+	inline constexpr auto DISPLAY_NAME = "@BEARFORJ_DISPLAY_NAME@"sv;
+
+	/// Version label shown in the menu, log, and version resource.
+	inline constexpr auto VERSION_LABEL = "@BEARFORJ_VERSION_LABEL@"sv;
+
+	/// Full build name: menu title, log line, and version info.
+	inline constexpr auto PRODUCT_TITLE = "@BEARFORJ_PRODUCT_TITLE@"sv;
+
+	/// Full git describe string, e.g. "v1.4.11", "v1.4.11-3-gabcdef1", "v1.4.11-3-gabcdef1-dirty".
+	/// Matches "v{VERSION}" exactly on a clean tagged release build.
+	inline constexpr auto BUILD_DESCRIBE = "@GIT_DESCRIBE@"sv;
+}

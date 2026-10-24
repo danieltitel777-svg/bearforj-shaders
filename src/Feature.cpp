@@ -1,0 +1,538 @@
+#include "Feature.h"
+
+#include "Utils/RuntimeResources.h"
+
+#include "CSEditor/SceneManager/SceneManager.h"
+#include "FeatureIssues.h"
+#include "FeatureVersions.h"
+#include "Features/CSEditor.h"
+#include "Features/CloudShadows.h"
+#include "Features/DynamicCubemaps.h"
+#include "Features/ProceduralSun.h"
+#include "Features/Effects11.h"
+#include "Features/ExponentialHeightFog.h"
+#include "Features/ExtendedMaterials.h"
+#include "Features/ExtendedTranslucency.h"
+#include "Features/FoliageLighting.h"
+#include "Features/FootstepParticles.h"
+#include "Features/FurShells.h"
+#include "Features/GrassCollision.h"
+#include "Features/GrassLighting.h"
+#include "Features/GrassOptimizations.h"
+#include "Features/HairBacklighting.h"
+#include "Features/HDRDisplay.h"
+#include "Features/HairSpecular.h"
+#include "Features/HiZOcclusion.h"
+#include "Features/HorizonFix.h"
+#include "Features/IBL.h"
+#include "Features/InteriorSun.h"
+#include "Features/LODBlending.h"
+#include "Features/LandscapeSeams.h"
+#include "Features/LightLimitFix.h"
+#include "Features/LinearLighting.h"
+#include "Features/NRD.h"
+#include "Features/NightEye.h"
+#include "Features/PerformanceOverlay.h"
+#include "Features/PostProcessing.h"
+#include "Features/ProceduralAurora.h"
+#include "Features/RainRefraction.h"
+#include "Features/RainRendering.h"
+#include "Features/RemoteControl.h"
+#include "Features/RenderDoc.h"
+#include "Features/ScreenSpaceGI.h"
+#include "Features/ScreenSpaceReflections.h"
+#include "Features/ScreenSpaceShadows.h"
+#include "Features/ScreenshotFeature.h"
+#include "Features/Skin.h"
+#include "Features/SnowCover.h"
+#include "Features/SnowDeformation.h"
+#include "Features/SkySync.h"
+#include "Features/Skylighting.h"
+#include "Features/SubsurfaceScattering.h"
+#include "Features/TerrainBlending.h"
+#include "Features/TerrainHelper.h"
+#include "Features/TerrainShadows.h"
+#include "Features/TerrainVariation.h"
+#include "Features/TreeLODWind.h"
+#include "Features/UnifiedWater.h"
+#include "Features/Upscaling.h"
+#include "Features/VanillaFresnel.h"
+#include "Features/VolumetricLighting.h"
+#include "Features/VolumetricShadows.h"
+#include "Features/ReverseZ.h"
+#include "Features/WaterEffects.h"
+#include "Features/WetnessEffects.h"
+#include "I18n/I18n.h"
+#include "Menu.h"
+#include "Utils/Format.h"
+
+#include "State.h"
+#include "TruePBR.h"
+
+#include <unordered_map>
+#include <unordered_set>
+
+void Feature::Load(json& o_json)
+{
+	// Convert string to wstring
+	auto ini_filename = std::format("{}.ini", GetShortName());
+	std::wstring ini_filename_w;
+	std::ranges::copy(ini_filename, std::back_inserter(ini_filename_w));
+	auto ini_path = L"Data\\Shaders\\Features\\" + ini_filename_w;
+
+	CSimpleIniA ini;
+	ini.SetUnicode();
+	SI_Error rc = ini.LoadFile(ini_path.c_str());
+
+	if (rc < 0) {
+		if (!FeatureIssues::IsObsoleteFeature(GetShortName()))
+			logger::info("{} failed to load, feature disabled", ini_filename);
+		loaded = false;
+		return;
+	}
+
+	bool hasError = false;
+	std::string errorVersion;
+	FeatureIssues::FeatureIssueInfo::IssueType errorType = FeatureIssues::FeatureIssueInfo::IssueType::UNKNOWN;
+
+	if (FeatureIssues::IsObsoleteFeature(GetShortName())) {
+		hasError = true;
+		errorVersion = "N/A";
+		errorType = FeatureIssues::FeatureIssueInfo::IssueType::OBSOLETE;
+		failedLoadedMessage = std::format("{} is an obsolete feature that has been removed", GetShortName());
+	} else if (auto value = ini.GetValue("Info", "Version")) {
+		try {
+			REL::Version featureVersion(std::regex_replace(value, std::regex("-"), "."));
+
+			// Check if feature exists in minimal versions
+			REL::Version minimalFeatureVersion;
+			if (!Feature::IsFeatureKnown(GetShortName(), &minimalFeatureVersion)) {
+				hasError = true;
+				errorVersion = value;
+				errorType = FeatureIssues::FeatureIssueInfo::IssueType::UNKNOWN;
+				failedLoadedMessage = std::format("{} {} is an unknown feature not supported by this CS version. This may be a feature from a development branch.", GetShortName(), value);
+			} else {
+				// Version compatibility check
+				bool oldFeature = featureVersion.compare(minimalFeatureVersion) == std::strong_ordering::less;
+				bool majorVersionMismatch = featureVersion.major() < minimalFeatureVersion.major();
+
+				if (!oldFeature && !majorVersionMismatch) {
+					loaded = true;
+					logger::info("{} {} successfully loaded", ini_filename, value);
+				} else {
+					hasError = true;
+					errorVersion = value;
+					errorType = FeatureIssues::FeatureIssueInfo::IssueType::VERSION_MISMATCH;
+
+					std::string minimalVersionString = Util::GetFormattedVersion(minimalFeatureVersion);
+
+					if (IsCore()) {
+						failedLoadedMessage = std::format("This feature is already included as part of the core Bearforj Shaders installation. Uninstall this feature with your mod manager.");
+					} else if (majorVersionMismatch) {
+						failedLoadedMessage = std::format("{} {} is too old, major version incompatibility detected. Required: {}", GetShortName(), value, minimalVersionString);
+					} else {
+						failedLoadedMessage = std::format("{} {} is an old feature version, required: {}", GetShortName(), value, minimalVersionString);
+					}
+				}
+			}
+
+			version = value;
+		} catch (const std::exception& e) {
+			hasError = true;
+			errorVersion = value;
+			errorType = FeatureIssues::FeatureIssueInfo::IssueType::VERSION_MISMATCH;
+			failedLoadedMessage = std::format("{} {} has invalid version format: {}", GetShortName(), value, e.what());
+		}
+	} else {
+		hasError = true;
+		errorVersion = "unknown";
+		errorType = FeatureIssues::FeatureIssueInfo::IssueType::VERSION_MISMATCH;
+
+		// Get the minimum required version to include in the error message
+		std::string requiredVersion = Feature::GetFeatureRequiredVersion(GetShortName());
+
+		failedLoadedMessage = std::format("The {} file is missing. This feature is not installed! Version required: {}", ini_filename, requiredVersion);
+	}
+
+	if (hasError) {
+		loaded = false;
+		logger::warn("{}", failedLoadedMessage);
+
+		// Guard against empty shortName to prevent bogus filesystem access
+		std::string shortName = GetShortName();
+		if (!shortName.empty()) {
+			FeatureIssues::FeatureFileInfo fileInfo = FeatureIssues::GetFeatureFileInfo(shortName);
+
+			// For version mismatch, also pass the minimum required version
+			std::string minimumVersion;
+			if (errorType == FeatureIssues::FeatureIssueInfo::IssueType::VERSION_MISMATCH) {
+				minimumVersion = Feature::GetFeatureRequiredVersion(shortName);
+			}
+
+			FeatureIssues::AddFeatureIssue(shortName, errorVersion, failedLoadedMessage, errorType, fileInfo, minimumVersion);
+
+		} else {
+			logger::error("Feature has empty short name, cannot add to feature issues list");
+		}
+	} else {
+		if (!UsesMainSettings())
+			return;
+
+		// No errors, load settings now
+		if (o_json[GetName()].is_structured()) {
+			logger::info("Loading {} settings", GetName());
+			try {
+				LoadSettings(o_json[GetName()]);
+			} catch (...) {
+				// Plain defaults would be saved back as the user's edits, so the layered base is tried first.
+				logger::warn("Invalid settings for {}, using its defaults and Baseline packs.", GetName());
+				RestoreDefaultSettings();
+				if (const auto* base = globals::state->GetFeatureBase(GetName())) {
+					try {
+						auto baseSettings = *base;
+						LoadSettings(baseSettings);
+					} catch (...) {
+						logger::warn("Invalid Baseline settings for {}, using default.", GetName());
+						RestoreDefaultSettings();
+					}
+				}
+			}
+		} else {
+			logger::info("Loading default settings for {}", GetName());
+			RestoreDefaultSettings();
+		}
+	}
+}
+
+void Feature::Save(json& o_json)
+{
+	if (UsesMainSettings())
+		SaveSettings(o_json[GetName()]);
+}
+
+/**
+ * @brief Provides access to the registry of all known features.
+ * @return A constant reference to the vector of all known feature instances.
+ */
+const std::vector<Feature*>& Feature::GetFeatureList()
+{
+	static std::vector<Feature*> features = {
+		&globals::features::truePBR,
+		&globals::features::foliageLighting,
+		&globals::features::volumetricShadows,
+		&globals::features::grassLighting,
+		&globals::features::grassCollision,
+		&globals::features::grassOptimizations,
+		&globals::features::screenSpaceShadows,
+		&globals::features::extendedMaterials,
+		&globals::features::wetnessEffects,
+		&globals::features::lightLimitFix,
+		&globals::features::dynamicCubemaps,
+		&globals::features::cloudShadows,
+		&globals::features::proceduralSun,
+		&globals::features::waterEffects,
+		&globals::features::performanceOverlay,
+		&globals::features::subsurfaceScattering,
+		&globals::features::terrainShadows,
+		&globals::features::nrd,
+		&globals::features::screenSpaceGI,
+		&globals::features::screenSpaceReflections,
+		&globals::features::skylighting,
+		&globals::features::skySync,
+		&globals::features::terrainBlending,
+		&globals::features::terrainHelper,
+		&globals::features::vanillaFresnel,
+		&globals::features::volumetricLighting,
+		&globals::features::lodBlending,
+		&globals::features::hairSpecular,
+		&globals::features::interiorSun,
+		&globals::features::terrainVariation,
+		&globals::features::ibl,
+		&globals::features::extendedTranslucency,
+		&globals::features::reverseZ,
+		&globals::features::upscaling,
+		&globals::features::renderDoc,
+		&globals::features::hiZOcclusion,
+		&globals::features::remoteControl,
+		&globals::features::csEditor,
+		&globals::features::sceneManager,
+		&globals::features::rainRendering,
+		&globals::features::screenshotFeature,
+		&globals::features::linearLighting,
+		&globals::features::effects11,
+		&globals::features::rainRefraction,
+		&globals::features::unifiedWater,
+		&globals::features::horizonFix,
+		&globals::features::exponentialHeightFog,
+		&globals::features::hdrDisplay,
+		&globals::features::postProcessing,
+		&globals::features::skin,
+		&globals::features::snowCover,
+		&globals::features::footstepParticles,
+		&globals::features::hairBacklighting,
+		&globals::features::nightEye,
+		&globals::features::furShells,
+		&globals::features::landscapeSeams,
+		&globals::features::snowDeformation,
+		&globals::features::proceduralAurora,
+		&globals::features::treeLODWind
+	};
+
+	return features;
+}
+
+Feature* Feature::FindFeatureByShortName(const std::string& shortName)
+{
+	// GetShortName() returns by value, so index once rather than allocating per feature per call.
+	static const auto featuresByShortName = [] {
+		std::unordered_map<std::string, Feature*> index;
+		for (auto* feature : GetFeatureList())
+			index.emplace(feature->GetShortName(), feature);
+		return index;
+	}();
+
+	const auto it = featuresByShortName.find(shortName);
+	return it != featuresByShortName.end() && it->second->loaded ? it->second : nullptr;
+}
+
+std::vector<std::string> Feature::GetLoadedFeatureNames()
+{
+	std::vector<std::string> names;
+	for (auto* feature : GetFeatureList()) {
+		if (feature->loaded && feature->IsInMenu())
+			names.push_back(feature->GetShortName());
+	}
+	std::sort(names.begin(), names.end());
+	return names;
+}
+
+Feature* Feature::FindRegisteredFeatureByShortName(const std::string& shortName)
+{
+	static const auto featuresByShortName = [] {
+		std::unordered_map<std::string, Feature*> index;
+		for (auto* feature : GetFeatureList())
+			index.emplace(feature->GetShortName(), feature);
+		return index;
+	}();
+
+	const auto it = featuresByShortName.find(shortName);
+	return it == featuresByShortName.end() ? nullptr : it->second;
+}
+
+bool Feature::IsRuntimeListed() const
+{
+	static const auto names = [] {
+		std::unordered_set<std::string> listed;
+#define RUNTIME_FEATURE(name, index) listed.emplace(#name);
+#include "../package/Shaders/Common/RuntimeFeatureList.hlsli"
+#undef RUNTIME_FEATURE
+		return listed;
+	}();
+	return names.contains(GetShortName());
+}
+
+void Feature::SetEnabled(bool value)
+{
+	value = IsAlwaysEnabled() || value;
+	const bool previous = requestedEnabled.exchange(value, std::memory_order_acq_rel);
+	if (RequiresRestartForToggle() && runtimeBootSnapshot.IsLatched())
+		return;
+	if (!runtimeLifecycleStarted.load(std::memory_order_acquire))
+		runtimeEnabled.store(value, std::memory_order_release);
+	if (previous != value)
+		runtimeResetPending.store(true, std::memory_order_release);
+}
+
+bool Feature::ToggleAtBootSetting()
+{
+	if (IsAlwaysEnabled())
+		return false;
+	auto state = globals::state;
+	const std::string featureName = GetShortName();
+	auto disabled = state->IsFeatureDisabled(featureName);
+	state->SetFeatureDisabled(featureName, !disabled);
+	if (IsRuntimeListed())
+		SetEnabled(disabled);
+	state->CheckCoreSettingsChanged();
+
+	return state->IsFeatureDisabled(featureName);  // Return the new state
+}
+
+void Feature::InitializeRuntimeResources()
+{
+	if (!IsRuntimeAvailable()) {
+		logger::info("[ResourceLifetime] feature={} startup_disabled=true resource_initialization=skipped", GetShortName());
+		runtimeLifecycleStarted.store(true, std::memory_order_release);
+		runtimeEnabled.store(false, std::memory_order_release);
+		runtimeResetPending.store(false, std::memory_order_release);
+		return;
+	}
+	{
+		Util::RuntimeResourceDiagnostics diagnostics(GetShortName(), "initialize-persistent");
+		SetupPersistentResources();
+	}
+	runtimeLifecycleStarted.store(true, std::memory_order_release);
+	if (!HasReleasableResources()) {
+		Util::RuntimeResourceDiagnostics diagnostics(GetShortName(), "initialize-retained");
+		SetupResources();
+		runtimeResourcesReady = true;
+	}
+	ApplyRuntimeState();
+	runtimeResetPending.store(false, std::memory_order_release);
+}
+
+void Feature::ApplyRuntimeState()
+{
+	const bool enable = RequiresRestartForToggle() && runtimeBootSnapshot.IsLatched() ?
+	                        runtimeBootSnapshot.Boot(&RuntimeToggleSettings::enabled) :
+	                        requestedEnabled.load(std::memory_order_acquire);
+	Util::RuntimeResourceDiagnostics diagnostics(GetShortName(), enable ? "enable" : "disable");
+	logger::info("[ResourceLifetime] feature={} requested={} resources_ready={} releasable={}",
+		GetShortName(), enable, runtimeResourcesReady, HasReleasableResources());
+	try {
+		if (!enable) {
+			runtimeEnabled.store(false, std::memory_order_release);
+			OnRuntimeDisabled();
+			if (HasReleasableResources() && runtimeResourcesReady) {
+				ReleaseResources();
+				runtimeResourcesReady = false;
+			}
+			return;
+		}
+		runtimeEnabled.store(true, std::memory_order_release);
+		if (!runtimeResourcesReady) {
+			SetupResources();
+			runtimeResourcesReady = true;
+		}
+		OnRuntimeEnabled();
+	} catch (const std::exception& e) {
+		runtimeEnabled.store(false, std::memory_order_release);
+		requestedEnabled.store(false, std::memory_order_release);
+		logger::error("{} runtime resources failed: {}", GetShortName(), e.what());
+		OnRuntimeDisabled();
+		if (HasReleasableResources()) {
+			ReleaseResources();
+			runtimeResourcesReady = false;
+		}
+	}
+}
+
+std::string Feature::GetDisplayCategory() const
+{
+	return TranslateCategory(GetCategory());
+}
+
+std::string Feature::TranslateCategory(std::string_view category)
+{
+	if (category == FeatureCategories::kCharacters)
+		return T("feature.category.characters", "Characters");
+	if (category == FeatureCategories::kDisplay)
+		return T("feature.category.display", "Display");
+	if (category == FeatureCategories::kGrassAndFoliage)
+		return T("feature.category.grass_and_foliage", "Grass & Foliage");
+	if (category == FeatureCategories::kLandscapeAndTextures)
+		return T("feature.category.landscape_and_textures", "Landscape & Textures");
+	if (category == FeatureCategories::kLighting)
+		return T("feature.category.lighting", "Lighting");
+	if (category == FeatureCategories::kMaterials)
+		return T("feature.category.materials", "Materials");
+	if (category == FeatureCategories::kOther)
+		return T("feature.category.other", "Other");
+	if (category == FeatureCategories::kPostProcessing)
+		return T("feature.category.post_processing", "Post-Processing");
+	if (category == FeatureCategories::kShadows)
+		return T("feature.category.shadows", "Shadows");
+	if (category == FeatureCategories::kSkyAndWeather)
+		return T("feature.category.sky_and_weather", "Sky & Weather");
+	if (category == FeatureCategories::kUtility)
+		return T("feature.category.utility", "Utility");
+	if (category == FeatureCategories::kWater)
+		return T("feature.category.water", "Water");
+
+	return std::string(category);
+}
+
+std::string Feature::GetReleaseStageTag(ReleaseStage stage)
+{
+	switch (stage) {
+	case ReleaseStage::Alpha:
+		return T("menu.features.tag_alpha", "[ALPHA]");
+	case ReleaseStage::Beta:
+		return T("menu.features.tag_beta", "[BETA]");
+	default:
+		return {};
+	}
+}
+
+ImVec4 Feature::GetReleaseStageColor(ReleaseStage stage)
+{
+	const auto& statusPalette = globals::menu->GetTheme().StatusPalette;
+	return stage == ReleaseStage::Alpha ? statusPalette.Error : statusPalette.Warning;
+}
+
+void Feature::DrawUnloadedUI()
+{
+	// Prioritize detailed failure message if available
+	if (!failedLoadedMessage.empty()) {
+		// Use error color for all failure messages
+		auto& themeSettings = Menu::GetSingleton()->GetTheme();
+		ImGui::TextColored(themeSettings.StatusPalette.Error, "%s", failedLoadedMessage.c_str());
+		return;
+	}
+
+	// Fallback: Always show missing file message when no specific failure message exists
+	auto& themeSettings = Menu::GetSingleton()->GetTheme();
+	auto ini_filename = std::format("{}.ini", GetShortName());
+	// Get the minimum required version to include in the error message
+	std::string requiredVersion = Feature::GetFeatureRequiredVersion(GetShortName());
+
+	auto missingFileMessage = std::format("The {} file is missing. This feature is not installed! Version required: {}", ini_filename, requiredVersion);
+	ImGui::TextColored(themeSettings.StatusPalette.Error, "%s", missingFileMessage.c_str());
+
+	// Also show feature summary if available
+	auto [description, keyFeatures] = GetFeatureSummary();
+	if (!description.empty()) {
+		ImGui::Spacing();
+		ImGui::TextWrapped("%s", description.c_str());
+	}
+
+	if (!keyFeatures.empty()) {
+		if (description.empty()) {
+			ImGui::Spacing();
+		}
+		ImGui::TextWrapped("%s", T("feature.key_features", "Key features:"));
+		for (const auto& feature : keyFeatures) {
+			ImGui::BulletText("%s", feature.c_str());
+		}
+	}
+}
+
+std::string Feature::GetFeatureRequiredVersion(const std::string& shortName)
+{
+	if (shortName.empty()) {
+		return "unknown";
+	}
+	auto iter = FeatureVersions::FEATURE_MINIMAL_VERSIONS.find(shortName);
+	if (iter != FeatureVersions::FEATURE_MINIMAL_VERSIONS.end()) {
+		return Util::GetFormattedVersion(iter->second);
+	}
+
+	return "unknown";
+}
+
+bool Feature::IsFeatureKnown(const std::string& shortName, REL::Version* outVersion)
+{
+	if (shortName.empty()) {
+		return false;
+	}
+
+	auto iter = FeatureVersions::FEATURE_MINIMAL_VERSIONS.find(shortName);
+	if (iter != FeatureVersions::FEATURE_MINIMAL_VERSIONS.end()) {
+		if (outVersion) {
+			*outVersion = iter->second;
+		}
+		return true;
+	}
+
+	return false;
+}

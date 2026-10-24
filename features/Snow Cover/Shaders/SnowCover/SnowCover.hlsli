@@ -1,0 +1,243 @@
+#include "Common/ColorManagement.hlsli"
+#include "Common/LightingCommon.hlsli"
+#include "Common/Random.hlsli"
+#include "Common/SharedData.hlsli"
+#if defined(PSHADER)
+
+namespace SnowCover
+{
+
+	Texture2D<float4> SnowAlbedo : register(t38);
+	Texture2D<float3> SnowNormal : register(t39);
+	Texture2D<float4> SnowRmaos : register(t40);
+	Texture2D<float4> IceAlbedo : register(t41);
+	Texture2D<float3> IceNormal : register(t42);
+	Texture2D<float4> IceRmaos : register(t43);
+	Texture2D<float> SnowMap : register(t44);
+
+	// https://blog.selfshadow.com/publications/blending-in-detail/
+	// for when s = (0,0,1)
+	float3 MyReorientNormal(float3 n1, float3 n2)
+	{
+		n1 += float3(0, 0, 1);
+		n2 *= float3(-1, -1, 1);
+
+		return n1 * dot(n1, n2) / n1.z - n2;
+	}
+
+	// Weather snow must stay at full strength past the terrain LOD rings or the snow front crawls with the camera.
+	float GetWeatherRange(float3 p, float viewDist)
+	{
+		float fadeStart = SharedData::snowCoverSettings.WeatherFadeStart;
+		float fadeEnd = max(fadeStart + 1, SharedData::snowCoverSettings.WeatherFadeEnd);
+		float wobble = 1000 * sin(p.z * 0.001 + cos(p.x * p.y * 0.001));
+		return 1 - smoothstep(fadeStart, fadeEnd + wobble, viewDist);
+	}
+
+	// Keeps DynDOLOD ultra-tree billboards from reading as white slabs; 0 amount disables it.
+	float GetObjectFade(float viewDist)
+	{
+		float amount = SharedData::snowCoverSettings.ObjectFadeAmount;
+		if (amount <= 0)
+			return 1;
+		float fadeStart = SharedData::snowCoverSettings.ObjectFadeStart;
+		float fadeEnd = max(fadeStart + 1, SharedData::snowCoverSettings.ObjectFadeEnd);
+		return 1 - smoothstep(fadeStart, fadeEnd, viewDist) * amount;
+	}
+
+	float GetFireMelt(float3 p)
+	{
+		float melt = 0;
+		uint fireCount = min(SharedData::snowCoverSettings.FireMeltCount, 8u);
+		[loop] for (uint i = 0; i < fireCount; i++)
+		{
+			float4 fire = SharedData::snowCoverSettings.FireMeltSpheres[i];
+			float radius = fire.w * SharedData::snowCoverSettings.FireMeltRadiusScale;
+			float3 delta = p - fire.xyz;
+			melt = max(melt, 1 - smoothstep(radius * radius * 0.25, radius * radius, dot(delta, delta)));
+		}
+		return melt * SharedData::snowCoverSettings.FireMeltStrength;
+	}
+
+	float GetHeightMult(float3 p)
+	{
+		float2 scale = SharedData::snowCoverSettings.mapScale;
+		float2 offset = SharedData::snowCoverSettings.mapOffset;
+		float2 uv = p.xy * scale + offset;
+		float height_tresh = p.z - SharedData::snowCoverSettings.SnowHeightOffset + (SnowMap.SampleLevel(SampColorSampler, uv, 0) - 0.5) * SharedData::snowCoverSettings.mapZscale;
+		return height_tresh;
+	}
+
+	float GetEnvironmentalMultiplier(float3 p)
+	{
+		return (GetHeightMult(p) + SharedData::snowCoverSettings.SeasonalAltitude) / SharedData::snowCoverSettings.BlendSmoothness;
+	}
+
+	float GetRooftopLift(float modelHeight, float skyVisibility)
+	{
+		float height = max(SharedData::snowCoverSettings.RooftopHeight, 1.0);
+		float exposure = smoothstep(SharedData::snowCoverSettings.RooftopExposure, 1.0, skyVisibility);
+		return SharedData::snowCoverSettings.RooftopSnow * exposure * smoothstep(0.5 * height, height, modelHeight);
+	}
+
+	void ApplyFoliageColor(inout float3 color, float env_mult)
+	{
+		float gmult = saturate(env_mult - SharedData::snowCoverSettings.FoliageHeightOffset / 5000);
+		if (gmult <= 0)
+			return;
+		float3 hsv = Color::RGBtoHSV(color);
+		if (hsv.x > 0.55)
+			hsv.x = frac(lerp(hsv.x, 1.1, gmult));
+		else
+			hsv.x = lerp(hsv.x, 0.1, gmult);
+		hsv.y *= lerp(1, 0.25, 4.0 * gmult * (1.0 - gmult));
+		color = Color::HSVtoRGB(hsv);
+	}
+
+	float GetFoliageSnowBase(float3 worldNormal, float3 p, float viewDist, float distMult, out float env_mult)
+	{
+		env_mult = GetEnvironmentalMultiplier(p);
+		float weatherMult = GetWeatherRange(p, viewDist) * SharedData::snowCoverSettings.TimeSnowing * max(500, SharedData::snowCoverSettings.SnowingDensity) / 500;
+		float mult = SharedData::snowCoverSettings.MainTint.a * saturate(env_mult);
+		return distMult * saturate(mult + weatherMult) * smoothstep(SharedData::snowCoverSettings.minAngle, SharedData::snowCoverSettings.maxAngle, worldNormal.z);
+	}
+
+	void ApplySnowFoliageBase(inout float3 color, float3 worldNormal, float3 p, float env_mult, float mult)
+	{
+		[branch] if (mult > 0)
+			mult *= 1 - GetFireMelt(p);
+#	if defined(GRASS)
+		if (SharedData::snowCoverSettings.AffectGrassTint) {
+#	else
+		if (SharedData::snowCoverSettings.AffectTreeTint) {
+#	endif
+			ApplyFoliageColor(color, env_mult);
+		}
+		if (mult < 0.01)
+			return;
+		float2 uv = frac(SharedData::snowCoverSettings.UVScale * (p.xy + worldNormal.xy) / 100);
+		float3 snowSample = SnowAlbedo.Sample(SampColorSampler, uv).rgb;
+#	if defined(TRUE_PBR)
+		float3 diffuse = Color::Albedo(Color::LinearSRGBToWorking(snowSample)) * SharedData::snowCoverSettings.MainTint.rgb * Color::PBRLightingScale;
+#	else
+		float3 diffuse = Color::Albedo(ColorManagement::DiffuseToWorking(TransferFunctions::LinearToGamma22(snowSample))) * SharedData::snowCoverSettings.MainTint.rgb * Color::PBRLightingScale;
+#	endif
+
+		color = lerp(color, diffuse, mult);
+	}
+
+	void ApplySnowFoliage(inout float3 color, float3 worldNormal, float3 p, float skylight, float viewDist, float distMult)
+	{
+		float env_mult;
+		float mult = GetFoliageSnowBase(worldNormal, p, viewDist, distMult, env_mult) * skylight;
+		ApplySnowFoliageBase(color, worldNormal, p, env_mult, mult);
+	}
+
+#	if !defined(BASIC_SNOW_COVER)
+	float ApplySnowBase(float3 worldNormal, inout float2 uv, out bool alt, float disp, float3 p, float skylight, float waterDist, float viewDist, float lift)
+	{
+		// the range in which water level affects snow
+		waterDist = smoothstep(-64, 8, -waterDist - disp);
+		// the amount of snow based on weather, TimeSnowing transitions smoothly between -1 in rain and 1 when snowing
+		float weatherMult = GetWeatherRange(p, viewDist) * pow(SharedData::snowCoverSettings.TimeSnowing, 3) * max(500, SharedData::snowCoverSettings.SnowingDensity) / 500;
+		weatherMult = clamp((weatherMult) * max(SharedData::snowCoverSettings.minAngle, worldNormal.z), -1, 1);
+		// the amount of snow based on season and weather
+		float env_mult = saturate(max((GetEnvironmentalMultiplier(p + float3(0, 0, lift)) + disp * 5), weatherMult)) - waterDist;
+		// LODLANDNOISE is the LOD4 ring; without it that ring gets snow halved and pops at the cell seam
+#		if !defined(LANDSCAPE) && !defined(LOD) && !defined(LODLANDSCAPE) && !defined(LODLANDNOISE)
+		float distMult = GetObjectFade(viewDist);
+#		else
+		float distMult = 1;
+#		endif
+		float mult = distMult * skylight * env_mult * smoothstep(SharedData::snowCoverSettings.minAngle, SharedData::snowCoverSettings.maxAngle, worldNormal.z);
+		[branch] if (mult > 0)
+			mult *= 1 - GetFireMelt(p);
+		if (mult <= 0) {
+			alt = false;
+			return 0;
+		}
+		float main_mult = (1 - abs(worldNormal.z - SharedData::snowCoverSettings.peakMainAngle)) + min(0, weatherMult) * SharedData::snowCoverSettings.minAngle;
+		float alt_mult = (1 - abs(worldNormal.z - SharedData::snowCoverSettings.peakAltAngle)) + sin(p.z * 0.01 + cos(p.x * p.y * 0.01) * 0.025) * 0.05;
+		alt = alt_mult > main_mult;
+		// apparently LOD landscape color sampler clamps uvs
+		uv = frac(SharedData::snowCoverSettings.UVScale * (p.xy / 100 + worldNormal.xy * disp));
+		return min(1, mult);
+	}
+
+#		if defined(TRUE_PBR)
+	float ApplySnowPBR(inout MaterialProperties material, inout float3 worldNormal, out float mult, float disp, float3 p, float skylight, float waterDist, float viewDist, float2 uv, float lift = 0)
+	{
+		bool alt;
+		mult = ApplySnowBase(worldNormal, uv, alt, disp, p, skylight, waterDist, viewDist, lift);
+		if (mult <= 0)
+			return mult;
+		float4 rmaos;
+		if (alt) {
+			rmaos = IceRmaos.Sample(SampColorSampler, uv);
+			float3 albedo = IceAlbedo.Sample(SampColorSampler, uv).rgb;
+			albedo = Color::Albedo(Color::LinearSRGBToWorking(albedo)) * SharedData::snowCoverSettings.AltTint.rgb;
+			material.BaseColor = lerp(material.BaseColor, albedo, mult * SharedData::snowCoverSettings.AltTint.w);
+			worldNormal = TransformNormal(IceNormal.Sample(SampNormalSampler, uv).rgb);
+			material.F0 = lerp(material.F0, rmaos.w * SharedData::snowCoverSettings.altSpec, mult);
+
+		} else {
+			rmaos = SnowRmaos.Sample(SampColorSampler, uv);
+			float3 albedo = SnowAlbedo.Sample(SampColorSampler, uv).rgb;
+			albedo = Color::Albedo(Color::LinearSRGBToWorking(albedo)) * SharedData::snowCoverSettings.MainTint.rgb;
+			material.BaseColor = lerp(material.BaseColor, albedo, mult * SharedData::snowCoverSettings.MainTint.w);
+			worldNormal = TransformNormal(SnowNormal.Sample(SampNormalSampler, uv).rgb);
+			material.F0 = lerp(material.F0, rmaos.w * SharedData::snowCoverSettings.mainSpec, mult);
+		}
+		material.Roughness = lerp(material.Roughness, rmaos.x, mult);
+		material.Metallic = lerp(material.Metallic, rmaos.y, mult);
+		material.AO = lerp(material.AO, rmaos.z, mult * 0.5);  //always leave a part of the original ao to make it more interesting
+		if (material.GlintLogMicrofacetDensity > 1.1) {
+			material.GlintScreenSpaceScale = lerp(material.GlintScreenSpaceScale, SharedData::snowCoverSettings.Glint.x, mult);
+			material.GlintLogMicrofacetDensity = lerp(material.GlintLogMicrofacetDensity, SharedData::snowCoverSettings.Glint.y, mult);
+			material.GlintMicrofacetRoughness = lerp(material.GlintMicrofacetRoughness, SharedData::snowCoverSettings.Glint.z, mult);
+			material.GlintDensityRandomization = lerp(material.GlintDensityRandomization, SharedData::snowCoverSettings.Glint.w, mult);
+		} else {
+			material.GlintScreenSpaceScale = SharedData::snowCoverSettings.Glint.x;
+			material.GlintLogMicrofacetDensity = lerp(PBR::Constants::MaxGlintDensity, SharedData::snowCoverSettings.Glint.y, mult);
+			material.GlintMicrofacetRoughness = SharedData::snowCoverSettings.Glint.z;
+			material.GlintDensityRandomization = SharedData::snowCoverSettings.Glint.w;
+		}
+		return mult;
+	}
+#		else
+
+	float ApplySnow(inout MaterialProperties material, inout float3 worldNormal, float disp, float3 p, float skylight, float waterDist, float viewDist, float2 uv, float lift = 0)
+	{
+		bool alt;
+		float mult = ApplySnowBase(worldNormal, uv, alt, disp, p, skylight, waterDist, viewDist, lift);
+		if (mult <= 0.0)
+			return 0;
+		float4 rmaos;
+		if (alt) {
+			float3 albedo = IceAlbedo.Sample(SampColorSampler, uv).rgb;
+			albedo = Color::Albedo(ColorManagement::DiffuseToWorking(TransferFunctions::LinearToGamma22(albedo))) * SharedData::snowCoverSettings.AltTint.rgb * Color::PBRLightingScale;
+			rmaos = IceRmaos.Sample(SampColorSampler, uv);
+			material.Roughness = lerp(material.Roughness, rmaos.x, mult);
+			material.Shininess = lerp(material.Shininess, 25 * 500 * SharedData::snowCoverSettings.altSpec * rmaos.w, mult);
+			worldNormal = TransformNormal(IceNormal.Sample(SampNormalSampler, uv).rgb);
+			material.BaseColor = lerp(material.BaseColor, rmaos.z * albedo, mult * SharedData::snowCoverSettings.AltTint.w);
+			material.SpecularColor = lerp(material.SpecularColor, rmaos.y * albedo + float3(1, 1, 1) * (1 - rmaos.y), mult);
+			material.F0 = lerp(material.F0, rmaos.w * SharedData::snowCoverSettings.altSpec, mult);
+		} else {
+			float3 albedo = SnowAlbedo.Sample(SampColorSampler, uv).rgb;
+			albedo = Color::Albedo(ColorManagement::DiffuseToWorking(TransferFunctions::LinearToGamma22(albedo))) * SharedData::snowCoverSettings.MainTint.rgb * Color::PBRLightingScale;
+			rmaos = SnowRmaos.Sample(SampColorSampler, uv);
+			material.Roughness = lerp(material.Roughness, rmaos.x, mult);
+			material.Shininess = lerp(material.Shininess, 25 * 500 * SharedData::snowCoverSettings.mainSpec * rmaos.w, mult);
+			worldNormal = TransformNormal(SnowNormal.Sample(SampNormalSampler, uv).rgb);
+			material.BaseColor = lerp(material.BaseColor, rmaos.z * albedo, mult * SharedData::snowCoverSettings.MainTint.w);
+			material.SpecularColor = lerp(material.SpecularColor, rmaos.y * albedo + float3(1, 1, 1) * (1 - rmaos.y), mult);
+			material.F0 = lerp(material.F0, rmaos.w * SharedData::snowCoverSettings.mainSpec, mult);
+		}
+		return mult;
+	}
+#		endif
+#	endif
+
+}
+#endif

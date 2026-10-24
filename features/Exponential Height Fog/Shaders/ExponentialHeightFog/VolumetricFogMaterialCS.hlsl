@@ -1,0 +1,34 @@
+#include "ExponentialHeightFog/VolumetricFogCSCommon.hlsli"
+
+RWTexture3D<float4> VBufferA : register(u0);
+
+[numthreads(8, 8, 4)] void main(uint3 dispatchID : SV_DispatchThreadID) {
+	if (!ExponentialHeightFog::IsInsideVolumetricGrid(dispatchID))
+		return;
+
+	float viewDepth;
+	float3 positionWS = ExponentialHeightFog::ComputeCellWorldPosition(dispatchID, 0.5f.xxx, viewDepth);
+
+	float extinction;
+	[branch] if (SharedData::exponentialHeightFogSettings.useVanillaFogSettings != 0 && SharedData::exponentialHeightFogSettings.startDistance > 0.0f)
+	{
+		float boundaryDepth;
+		float3 frontPositionWS = ExponentialHeightFog::ComputeCellWorldPosition(dispatchID, float3(0.5f, 0.5f, 0.0f), boundaryDepth);
+		float3 backPositionWS = ExponentialHeightFog::ComputeCellWorldPosition(dispatchID, float3(0.5f, 0.5f, 1.0f), boundaryDepth);
+#if defined(VOLUMETRIC_FOG_FAR_GRID)
+		float nearDistance = length(frontPositionWS);
+#else
+		float nearDistance = dispatchID.z == 0u ? 0.0f : length(frontPositionWS);
+#endif
+		extinction = ExponentialHeightFog::EvaluateFogExtinctionSegment(
+			nearDistance, length(backPositionWS), positionWS, FrameBuffer::CameraPosAdjust.xyz);
+	}
+	else
+	{
+		extinction = ExponentialHeightFog::EvaluateHeightFogExtinction(positionWS, FrameBuffer::CameraPosAdjust.xyz);
+	}
+	float3 scattering = extinction * saturate(SharedData::exponentialHeightFogSettings.volumetricFogAlbedo.rgb) *
+	                    SharedData::exponentialHeightFogSettings.volumetricFogAlbedo.a;
+
+	VBufferA[dispatchID] = float4(scattering, extinction);
+}

@@ -1,0 +1,426 @@
+#include "IBL.h"
+
+#include "Deferred.h"
+#include "DynamicCubemaps.h"
+#include "JiayeStatement.h"
+#include "Shadercache.h"
+#include "State.h"
+
+#include "Effects11.h"
+#include "Effects11/SettingManager.h"
+#include "Globals.h"
+
+#include "../I18n/I18n.h"
+#include <DDSTextureLoader.h>
+#include <DirectXTex.h>
+
+#define I18N_KEY_PREFIX "feature.ibl."
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+	IBL::Settings,
+	EnableIBL,
+	PreserveFogLuminance,
+	UseStaticIBL,
+	DALCAmount,
+	EnvIBLScale,
+	SkyIBLScale,
+	EnvIBLSaturation,
+	SkyIBLSaturation,
+	FogAmount,
+	DALCMode,
+	SkylightingAffectsEnv,
+	DisableInWorldMap,
+	DisableInLoadingScreen,
+	EffectNormalization,
+	EffectNormalizationMult,
+	MinEffectMult,
+	EnableReflectionFallback,
+	ReflectionFallbackDistance)
+
+void IBL::DrawSettings()
+{
+	const Util::LockedSection enbLock(IsManagedByENB(),
+		T("common.settings_managed_by_enb", "This setting is managed by Effects 11."));
+
+	ImGui::Checkbox(T(TKEY("enable_ibl"), "Enable IBL"), (bool*)&settings.EnableIBL);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("enable_ibl_tooltip"), "Toggle IBL. When enabled, ambient lighting is derived from cubemap spherical harmonics instead of the vanilla system."));
+	}
+	ImGui::SliderFloat(T(TKEY("env_ibl_scale"), "Env IBL Scale"), &settings.EnvIBLScale, 0.0f, 10.0f, "%.2f");
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("env_ibl_scale_tooltip"), "Intensity multiplier for the environment IBL (from Dynamic Cubemaps).\nControls how strongly the surrounding environment contributes to ambient lighting."));
+	}
+	ImGui::SliderFloat(T(TKEY("sky_ibl_scale"), "Sky IBL Scale"), &settings.SkyIBLScale, 0.0f, 10.0f, "%.2f");
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("sky_ibl_scale_tooltip"), "Intensity multiplier for the sky IBL (from the game's native reflections cubemap).\nControls how strongly the sky contributes to ambient lighting."));
+	}
+	ImGui::SliderFloat(T(TKEY("env_ibl_saturation"), "Env IBL Saturation"), &settings.EnvIBLSaturation, 0.0f, 2.0f, "%.2f");
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("env_ibl_saturation_tooltip"), "Color saturation of the environment IBL.\nLower values produce more neutral ambient light; higher values produce more vivid color."));
+	}
+	ImGui::SliderFloat(T(TKEY("sky_ibl_saturation"), "Sky IBL Saturation"), &settings.SkyIBLSaturation, 0.0f, 2.0f, "%.2f");
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("sky_ibl_saturation_tooltip"), "Color saturation of the sky IBL.\nLower values produce more neutral ambient light; higher values produce more vivid color."));
+	}
+	ImGui::SliderFloat(T(TKEY("dalc_amount"), "DALC Amount"), &settings.DALCAmount, 0.0f, 1.0f, "%.2f");
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("dalc_amount_tooltip"),
+							  "Blends the IBL brightness toward the game's vanilla ambient (DALC) level.\n"
+							  "0 = no matching (pure IBL brightness), 1 = fully matched to vanilla ambient."));
+	}
+	{
+		const char* dalcModeNames[] = {
+			T(TKEY("dalc_mode_luminance_ratio"), "Luminance Ratio"),
+			T(TKEY("dalc_mode_color_ratio"), "Color Ratio"),
+			T(TKEY("dalc_mode_dalc_plus_sky"), "DALC + Sky")
+		};
+		int dalcMode = static_cast<int>(settings.DALCMode);
+		if (ImGui::Combo(T(TKEY("dalc_mode"), "DALC Mode"), &dalcMode, dalcModeNames, IM_ARRAYSIZE(dalcModeNames))) {
+			settings.DALCMode = static_cast<uint>(dalcMode);
+		}
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("dalc_mode_tooltip"),
+								  "How the DALC-to-IBL brightness ratio is computed:\n"
+								  "Luminance Ratio: Scalar ratio from overall luminance (loses DALC color tint).\n"
+								  "Color Ratio: Per-channel ratio (preserves DALC color tint).\n"
+								  "DALC + Sky: Uses vanilla ambient as base, with sky IBL added on top."));
+		}
+	}
+	ImGui::Checkbox(T(TKEY("skylighting_affects_env"), "Skylighting Affects Env/DALC"), (bool*)&settings.SkylightingAffectsEnv);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("skylighting_affects_env_tooltip"),
+							  "Applies Skylighting visibility to both sky IBL and the environment/DALC contribution.\n"
+							  "When disabled, Skylighting only modulates sky IBL."));
+	}
+	ImGui::Checkbox(T(TKEY("use_static_ibl"), "Use Static IBL For Out-of-World Objects"), (bool*)&settings.UseStaticIBL);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("use_static_ibl_tooltip"), "Uses pre-baked static IBL cubemap textures for objects rendered outside the game world (e.g. inventory items, loading screens)."));
+	}
+	ImGui::Checkbox(T(TKEY("enable_reflection_fallback"), "Reflection Cubemap Distance Fallback"), (bool*)&settings.EnableReflectionFallback);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("enable_reflection_fallback_tooltip"), "Fades the dynamic environment IBL toward the ReflectionsCubemap-only IBL at distance, matching Water's reflection cubemap distance fallback."));
+	}
+	ImGui::SliderFloat(T(TKEY("reflection_fallback_distance"), "Reflection Fallback Distance"), &settings.ReflectionFallbackDistance, 0.0f, 100000.0f, "%.0f");
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("reflection_fallback_distance_tooltip"), "Distance at which IBL is fully transitioned to the ReflectionsCubemap-only contribution."));
+	}
+	ImGui::SliderFloat(T(TKEY("fog_mix"), "Fog Mix"), &settings.FogAmount, 0.0f, 1.0f, "%.2f");
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("fog_mix_tooltip"), "Blends the fog color toward the IBL ambient color.\n0 = vanilla fog, 1 = fog fully tinted by IBL."));
+	}
+	ImGui::Checkbox(T(TKEY("preserve_fog_luminance"), "Preserve Fog Luminance"), (bool*)&settings.PreserveFogLuminance);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("preserve_fog_luminance_tooltip"), "When Fog Mix is active, rescales the IBL-tinted fog to keep the original fog brightness.\nPrevents fog from becoming too bright or too dark."));
+	}
+	ImGui::Checkbox(T(TKEY("disable_in_world_map"), "Disable in world map"), &settings.DisableInWorldMap);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("disable_in_world_map_tooltip"), "Disables IBL while the world map is open."));
+	}
+	ImGui::Checkbox(T(TKEY("disable_in_loading_screen"), "Disable in loading screens"), &settings.DisableInLoadingScreen);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("disable_in_loading_screen_tooltip"), "Disables IBL during loading screens and the main menu."));
+	}
+	ImGui::Checkbox(T(TKEY("effect_normalization"), "Effect Normalization"), (bool*)&settings.EffectNormalization);
+	if (auto _tt = Util::HoverTooltipWrapper()) {
+		ImGui::Text("%s", T(TKEY("effect_normalization_tooltip"), "Normalizes effect shader brightness based on IBL brightness."));
+	}
+	ImGui::SliderFloat(T(TKEY("effect_normalization_multiplier"), "Effect Normalization Multiplier"), &settings.EffectNormalizationMult, 0.0f, 100.0f, "%.2f");
+	ImGui::SliderFloat(T(TKEY("minimum_effect_multiplier"), "Minimum Effect Multiplier"), &settings.MinEffectMult, 0.0f, 10.0f, "%.2f");
+
+	JiayeStatement::GetSingleton()->DrawJSInfo();
+}
+
+#undef I18N_KEY_PREFIX
+
+void IBL::LoadSettings(json& o_json)
+{
+	settings = o_json;
+	if (settings.DALCMode == 3) {
+		// Preserve the former "DALC + Sky (Directional)" result with the new
+		// independent source mode and Skylighting option.
+		settings.DALCMode = 2;
+		settings.SkylightingAffectsEnv = 1;
+	}
+}
+
+void IBL::SaveSettings(json& o_json)
+{
+	o_json = settings;
+}
+
+void IBL::RestoreDefaultSettings()
+{
+	settings = {};
+}
+
+IBL::PerFrame IBL::GetCommonBufferData() const
+{
+	const bool sceneDisabled = IsDisabledForCurrentScene();
+	PerFrame data = {
+		.EnableIBL = sceneDisabled ? 0u : settings.EnableIBL,
+		.PreserveFogLuminance = settings.PreserveFogLuminance,
+		.UseStaticIBL = settings.UseStaticIBL,
+		.DALCAmount = settings.DALCAmount,
+		.EnvIBLScale = settings.EnvIBLScale,
+		.SkyIBLScale = settings.SkyIBLScale,
+		.EnvIBLSaturation = settings.EnvIBLSaturation,
+		.SkyIBLSaturation = settings.SkyIBLSaturation,
+		.FogAmount = settings.FogAmount,
+		.DALCMode = settings.DALCMode,
+		.SkylightingAffectsEnv = settings.SkylightingAffectsEnv,
+		.EnableReflectionFallback = settings.EnableReflectionFallback,
+		.ReflectionFallbackDistance = settings.ReflectionFallbackDistance,
+		.ENBSkyFalloff = globals::features::effects11.OwnsFeature(E11Handoff::Feature::IBL)
+	};
+
+	if (!sceneDisabled && IsManagedByENB()) {
+		auto& settingManager = SettingManager::GetSingleton();
+		data.EnableIBL = Util::IsInterior() ? 0u : 1u;
+		data.EnvIBLScale = 0.0f;
+		data.SkyIBLScale = settingManager.GetInterpolatedTimeOfDayValue("MultiplicativeAmount", "IMAGEBASEDLIGHTING");
+		data.DALCAmount = 1.0f;
+		data.EnvIBLSaturation = 1.0f;
+		data.SkyIBLSaturation = 1.0f;
+		data.DALCMode = 3;
+		data.FogAmount = 0.0f;
+	}
+
+	return data;
+}
+
+bool IBL::IsManagedByENB() const
+{
+	return globals::features::effects11.OwnsFeature(E11Handoff::Feature::IBL) && SettingManager::GetSingleton().GetValue<bool>("EnableImageBasedLighting", "EFFECT");
+}
+
+bool IBL::IsDisabledForCurrentScene() const
+{
+	const auto state = globals::state;
+	if (!state)
+		return false;
+
+	const bool inLoadingScreen = settings.DisableInLoadingScreen && state->IsMainOrLoadingMenuOpen();
+	const bool inWorldMap = settings.DisableInWorldMap && state->isMapMenuOpen;
+	return inLoadingScreen || inWorldMap;
+}
+
+void IBL::ReflectionsPrepass()
+{
+	if (loaded) {
+		auto context = globals::d3d::context;
+
+		bool sceneDisabled = IsDisabledForCurrentScene();
+
+		// Set PS shader resource
+		{
+			std::array<ID3D11ShaderResourceView*, 4> srvs = {
+				sceneDisabled ? nullptr : envIBLTexture->srv.get(),
+				sceneDisabled ? nullptr : skyIBLTexture->srv.get(),
+				staticDiffuseIBLTexture ? staticDiffuseIBLTexture->srv.get() : nullptr,
+				staticSpecularIBLTexture ? staticSpecularIBLTexture->srv.get() : nullptr
+			};
+			context->PSSetShaderResources(76, 4, srvs.data());
+		}
+	}
+}
+
+void IBL::Prepass()
+{
+	if (IsDisabledForCurrentScene())
+		return;
+
+	auto context = globals::d3d::context;
+
+	auto& dynamicCubemaps = globals::features::dynamicCubemaps;
+
+	auto& envTexture = dynamicCubemaps.envTexture;
+
+	// Unset PS shader resource
+	{
+		ID3D11ShaderResourceView* views[2]{ nullptr, nullptr };
+		context->PSSetShaderResources(76, 2, views);
+	}
+
+	std::array<ID3D11ShaderResourceView*, 1> srvs = { (dynamicCubemaps.IsEnabled() && envTexture) ? envTexture->srv.get() : nullptr };
+	std::array<ID3D11UnorderedAccessView*, 1> uavs = { envIBLTexture->uav.get() };
+	std::array<ID3D11SamplerState*, 1> samplers = { Deferred::GetSingleton()->linearSampler };
+
+	// IBL - Environment cubemap SH projection (skip for DALC-based modes that don't use EnvIBL)
+	if (settings.DALCMode < 2) {
+		samplers[0] = Deferred::GetSingleton()->linearSampler;
+
+		context->CSSetSamplers(0, (uint)samplers.size(), samplers.data());
+		context->CSSetShaderResources(0, (uint)srvs.size(), srvs.data());
+		context->CSSetUnorderedAccessViews(0, (uint)uavs.size(), uavs.data(), nullptr);
+		context->CSSetShader(GetDiffuseIBLCS(), nullptr, 0);
+		globals::profiler->BeginPass("IBL::EnvDiffuseIBL");
+		context->Dispatch(1, 1, 1);
+		globals::profiler->EndPass();
+	} else {
+		// Still need to set sampler and shader for sky IBL dispatch below
+		context->CSSetSamplers(0, (uint)samplers.size(), samplers.data());
+		context->CSSetShader(GetDiffuseIBLCS(), nullptr, 0);
+	}
+
+	// IBL with sky (use game's native reflections cubemap directly)
+	{
+		auto renderer = globals::game::renderer;
+		auto& reflections = renderer->GetRendererData().cubemapRenderTargets[RE::RENDER_TARGETS_CUBEMAP::kREFLECTIONS];
+		srvs.at(0) = reflections.SRV;
+		uavs.at(0) = skyIBLTexture->uav.get();
+
+		context->CSSetShaderResources(0, (uint)srvs.size(), srvs.data());
+		context->CSSetUnorderedAccessViews(0, (uint)uavs.size(), uavs.data(), nullptr);
+		globals::profiler->BeginPass("IBL::SkyDiffuseIBL");
+		context->Dispatch(1, 1, 1);
+		globals::profiler->EndPass();
+	}
+
+	// Reset
+	{
+		srvs.fill(nullptr);
+		uavs.fill(nullptr);
+		samplers.fill(nullptr);
+
+		context->CSSetSamplers(0, (uint)samplers.size(), samplers.data());
+		context->CSSetShaderResources(0, (uint)srvs.size(), srvs.data());
+		context->CSSetUnorderedAccessViews(0, (uint)uavs.size(), uavs.data(), nullptr);
+		context->CSSetShader(nullptr, nullptr, 0);
+	}
+
+	// Set PS shader resource
+	{
+		ID3D11ShaderResourceView* views[2]{ envIBLTexture->srv.get(), skyIBLTexture->srv.get() };
+		context->PSSetShaderResources(76, 2, views);
+	}
+}
+
+void IBL::SetupResources()
+{
+	GetDiffuseIBLCS();
+
+	{
+		D3D11_TEXTURE2D_DESC texDesc{
+			.Width = 3,
+			.Height = 1,
+			.MipLevels = 1,
+			.ArraySize = 1,
+			.Format = DXGI_FORMAT_R16G16B16A16_FLOAT,
+			.SampleDesc = { 1, 0 },
+			.Usage = D3D11_USAGE_DEFAULT,
+			.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
+			.CPUAccessFlags = 0,
+			.MiscFlags = 0
+		};
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+			.Format = texDesc.Format,
+			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+			.Texture2D = {
+				.MostDetailedMip = 0,
+				.MipLevels = texDesc.MipLevels }
+		};
+		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {
+			.Format = texDesc.Format,
+			.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D,
+			.Texture2D = { .MipSlice = 0 }
+		};
+
+		envIBLTexture = new Texture2D(texDesc);
+		envIBLTexture->CreateSRV(srvDesc);
+		envIBLTexture->CreateUAV(uavDesc);
+		skyIBLTexture = new Texture2D(texDesc);
+		skyIBLTexture->CreateSRV(srvDesc);
+		skyIBLTexture->CreateUAV(uavDesc);
+	}
+
+	auto device = globals::d3d::device;
+
+	logger::debug("Loading static Diffuse IBL textures...");
+	{
+		DirectX::ScratchImage image;
+		try {
+			std::filesystem::path path = "Data\\Shaders\\IBL\\DiffuseIBL.dds";
+
+			DX::ThrowIfFailed(LoadFromDDSFile(path.c_str(), DirectX::DDS_FLAGS_NONE, nullptr, image));
+		} catch (const DX::com_exception& e) {
+			logger::error("{}", e.what());
+			return;
+		}
+
+		ID3D11Resource* pResource = nullptr;
+		try {
+			DX::ThrowIfFailed(CreateTexture(device,
+				image.GetImages(), image.GetImageCount(),
+				image.GetMetadata(), &pResource));
+		} catch (const DX::com_exception& e) {
+			logger::error("{}", e.what());
+			return;
+		}
+
+		staticDiffuseIBLTexture = eastl::make_unique<Texture2D>(reinterpret_cast<ID3D11Texture2D*>(pResource), "IBL::StaticDiffuse");
+
+		staticDiffuseIBLTexture->desc.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+			.Format = staticDiffuseIBLTexture->desc.Format,
+			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE,
+			.TextureCube = {
+				.MostDetailedMip = 0,
+				.MipLevels = 1 }
+		};
+		staticDiffuseIBLTexture->CreateSRV(srvDesc);
+	}
+
+	logger::debug("Loading static Specular IBL textures...");
+	{
+		DirectX::ScratchImage image;
+		try {
+			std::filesystem::path path = "Data\\Shaders\\IBL\\SpecIBL.dds";
+
+			DX::ThrowIfFailed(LoadFromDDSFile(path.c_str(), DirectX::DDS_FLAGS_NONE, nullptr, image));
+		} catch (const DX::com_exception& e) {
+			logger::error("{}", e.what());
+			return;
+		}
+
+		ID3D11Resource* pResource = nullptr;
+		try {
+			DX::ThrowIfFailed(CreateTexture(device,
+				image.GetImages(), image.GetImageCount(),
+				image.GetMetadata(), &pResource));
+		} catch (const DX::com_exception& e) {
+			logger::error("{}", e.what());
+			return;
+		}
+
+		staticSpecularIBLTexture = eastl::make_unique<Texture2D>(reinterpret_cast<ID3D11Texture2D*>(pResource), "IBL::StaticSpecular");
+
+		staticSpecularIBLTexture->desc.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+			.Format = staticSpecularIBLTexture->desc.Format,
+			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE,
+			.TextureCube = {
+				.MostDetailedMip = 0,
+				.MipLevels = 8 }
+		};
+		staticSpecularIBLTexture->CreateSRV(srvDesc);
+	}
+}
+
+void IBL::ClearShaderCache()
+{
+	if (diffuseIBLCS)
+		diffuseIBLCS->Release();
+	diffuseIBLCS = nullptr;
+}
+
+ID3D11ComputeShader* IBL::GetDiffuseIBLCS()
+{
+	std::vector<std::pair<const char*, const char*>> defines;
+	if (globals::features::dynamicCubemaps.loaded)
+		defines.push_back({ "DYNAMIC_CUBEMAPS", nullptr });
+	if (!diffuseIBLCS)
+		diffuseIBLCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\IBL\\DiffuseIBLCS.hlsl", defines, "cs_5_0"));
+	return diffuseIBLCS;
+}

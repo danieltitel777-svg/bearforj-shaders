@@ -1,0 +1,4 @@
+<fomod>
+    <Name>Bearforj Shaders vb 1.0</Name>
+    <Description>Install Windswept normally and place it ABOVE Bearforj Shaders in the MO2 left pane so our Lighting.hlsl and Utility.hlsl override it; only its DLL stays active. The DLL is not included.</Description>
+</fomod>
