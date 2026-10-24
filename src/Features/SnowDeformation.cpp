@@ -22,6 +22,12 @@
 #define I18N_KEY_PREFIX "feature.snow_deformation."
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+	SnowDeformation::GroundType,
+	id,
+	depth,
+	textures)
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	SnowDeformation::Settings,
 	Enabled,
 	IncludeNPCs,
@@ -34,10 +40,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	Lifetime,
 	TrianglePixels,
 	GroundDeformation,
-	SoftGroundDepth,
-	RoadDepth,
-	SoftGroundTextures,
-	RoadTextures)
+	GroundTypes)
 
 namespace
 {
@@ -125,22 +128,30 @@ namespace
 	constexpr int32_t kFlagClear = 2;
 	constexpr int32_t kFlagSeed = 4;
 
-	struct GroundTextureDefaults
-	{
-		std::vector<std::string> soft;
-		std::vector<std::string> roads;
-	};
-
 	// File names verified from the STEP terrain normal-map list, the Skyrim LOD atlas, and the
 	// main-road names road01fallforest01 / road01reach01. GroundTextures.json is the packaged copy.
-	GroundTextureDefaults HardcodedGroundTextures()
+	// coastbeach is the sand pair. riverbededge is its own type: the name is not mud, dirt, sand or road.
+	std::vector<SnowDeformation::GroundType> HardcodedGroundTypes()
 	{
-		return {
-			{ "dirt01.dds", "dirt02.dds", "dirtpath01.dds", "dirtsnowpath01.dds", "fallforestdirt01.dds",
-				"frozenmarshdirtslopes01.dds", "reachdirt01.dds", "volcanictundradirt01.dds", "volcanictundradirt02.dds",
-				"dirtcliffs01.dds", "rivermud.dds", "riverbededge.dds", "coastbeach01.dds", "coastbeach02.dds" },
-			{ "road01.dds", "road01fallforest01.dds", "road01reach01.dds", "road01snow01.dds" }
+		auto make = [](const char* a_id, float a_depth, std::initializer_list<const char*> a_names) {
+			SnowDeformation::GroundType type;
+			type.id = a_id;
+			type.depth = a_depth;
+			type.textures.assign(a_names.begin(), a_names.end());
+			return type;
 		};
+		return {
+			make("mud", 2.4f, { "rivermud.dds" }),
+			make("dirt", 2.4f, { "dirt01.dds", "dirt02.dds", "dirtpath01.dds", "dirtsnowpath01.dds", "fallforestdirt01.dds", "frozenmarshdirtslopes01.dds", "reachdirt01.dds", "volcanictundradirt01.dds", "volcanictundradirt02.dds", "dirtcliffs01.dds" }),
+			make("sand", 2.4f, { "coastbeach01.dds", "coastbeach02.dds" }),
+			make("riverbed", 2.4f, { "riverbededge.dds" }),
+			make("road", 0.72f, { "road01.dds", "road01fallforest01.dds", "road01reach01.dds", "road01snow01.dds" })
+		};
+	}
+
+	float DefaultGroundDepth(const std::string& a_id)
+	{
+		return a_id == "road" ? 0.72f : 2.4f;
 	}
 
 	std::string CanonicalGroundFile(std::string_view a_path)
@@ -175,9 +186,37 @@ namespace
 		return names;
 	}
 
-	GroundTextureDefaults ReadGroundTextureFile()
+	std::unordered_map<std::string, std::string> GroundFileTypes(const std::vector<SnowDeformation::GroundType>& a_types)
 	{
-		auto fallback = HardcodedGroundTextures();
+		std::unordered_map<std::string, std::string> fileToType;
+		for (const auto& type : a_types) {
+			for (const auto& name : type.textures) {
+				auto key = CanonicalGroundFile(name);
+				if (!key.empty())
+					fileToType[std::move(key)] = type.id;
+			}
+		}
+		return fileToType;
+	}
+
+	void AssignGroundNames(std::vector<SnowDeformation::GroundType>& a_types, const std::vector<std::string>& a_names, const std::unordered_map<std::string, std::string>& a_fileToType, const std::string& a_fallbackId)
+	{
+		for (const auto& name : a_names) {
+			auto key = CanonicalGroundFile(name);
+			std::string id = a_fallbackId;
+			if (!key.empty()) {
+				if (const auto it = a_fileToType.find(key); it != a_fileToType.end())
+					id = it->second;
+			}
+			const auto found = std::find_if(a_types.begin(), a_types.end(), [&](const SnowDeformation::GroundType& a_type) { return a_type.id == id; });
+			if (found != a_types.end())
+				found->textures.push_back(name);
+		}
+	}
+
+	std::vector<SnowDeformation::GroundType> ReadGroundTextureFile()
+	{
+		auto fallback = HardcodedGroundTypes();
 		try {
 			// Deployed with the feature shaders, not under Shaders/Features (that directory is the ini).
 			const auto path = Util::PathHelpers::GetShadersPath() / "SnowDeformation" / "GroundTextures.json";
@@ -187,15 +226,41 @@ namespace
 				return fallback;
 			}
 			const json data = json::parse(in);
-			if (data.contains("softGround")) {
-				auto parsed = TextureNamesFromJson(data["softGround"]);
+			if (data.contains("types") && data["types"].is_array()) {
+				std::vector<SnowDeformation::GroundType> parsed;
+				for (const auto& entry : data["types"]) {
+					if (!entry.is_object() || !entry.contains("id") || !entry["id"].is_string())
+						continue;
+					SnowDeformation::GroundType type;
+					type.id = entry["id"].get<std::string>();
+					if (type.id.empty())
+						continue;
+					type.depth = entry.contains("depth") && entry["depth"].is_number() ? entry["depth"].get<float>() : DefaultGroundDepth(type.id);
+					if (entry.contains("textures"))
+						type.textures = TextureNamesFromJson(entry["textures"]);
+					parsed.push_back(std::move(type));
+				}
 				if (!parsed.empty())
-					fallback.soft = std::move(parsed);
+					return parsed;
 			}
-			if (data.contains("roads")) {
-				auto parsed = TextureNamesFromJson(data["roads"]);
-				if (!parsed.empty())
-					fallback.roads = std::move(parsed);
+			const auto legacySoft = data.contains("softGround") ? TextureNamesFromJson(data["softGround"]) : std::vector<std::string>{};
+			const auto legacyRoads = data.contains("roads") ? TextureNamesFromJson(data["roads"]) : std::vector<std::string>{};
+			if (!legacySoft.empty() || !legacyRoads.empty()) {
+				const auto fileToType = GroundFileTypes(fallback);
+				if (!legacySoft.empty()) {
+					for (auto& type : fallback) {
+						if (type.id != "road")
+							type.textures.clear();
+					}
+					AssignGroundNames(fallback, legacySoft, fileToType, "dirt");
+				}
+				if (!legacyRoads.empty()) {
+					for (auto& type : fallback) {
+						if (type.id == "road")
+							type.textures.clear();
+					}
+					AssignGroundNames(fallback, legacyRoads, fileToType, "road");
+				}
 			}
 		} catch (const std::exception& exception) {
 			logger::warn("[SnowDeformation] Ground texture list could not be read: {}", exception.what());
@@ -953,11 +1018,9 @@ void SnowDeformation::EnsureGroundDefaults()
 {
 	if (groundListFromUser)
 		return;
-	if (!settings.SoftGroundTextures.empty() || !settings.RoadTextures.empty())
+	if (!settings.GroundTypes.empty())
 		return;
-	auto defaults = ReadGroundTextureFile();
-	settings.SoftGroundTextures = std::move(defaults.soft);
-	settings.RoadTextures = std::move(defaults.roads);
+	settings.GroundTypes = ReadGroundTextureFile();
 	RebuildGroundLookup();
 }
 
@@ -965,17 +1028,14 @@ void SnowDeformation::RebuildGroundLookup()
 {
 	groundLookup.clear();
 	const float snowDepth = std::max(settings.Depth, 1.0f);
-	const float soft = std::clamp(settings.SoftGroundDepth, 0.0f, 20.0f) / snowDepth;
-	const float road = std::clamp(settings.RoadDepth, 0.0f, 20.0f) / snowDepth;
-	auto add = [&](const std::vector<std::string>& a_names, float a_scale) {
-		for (const auto& name : a_names) {
+	for (const auto& type : settings.GroundTypes) {
+		const float scale = std::clamp(type.depth, 0.0f, 20.0f) / snowDepth;
+		for (const auto& name : type.textures) {
 			auto key = CanonicalGroundFile(name);
-			if (!key.empty() && a_scale > 0.0f)
-				groundLookup[std::move(key)] = a_scale;
+			if (!key.empty() && scale > 0.0f)
+				groundLookup[std::move(key)] = scale;
 		}
-	};
-	add(settings.SoftGroundTextures, soft);
-	add(settings.RoadTextures, road);
+	}
 }
 
 float SnowDeformation::GroundScaleForPath(std::string_view a_path) const
@@ -2640,7 +2700,13 @@ bool SnowDeformation::PrepareCamera(DrawKind a_kind, bool a_clamped)
 	key.clamped = a_clamped;
 	key.shadow = a_kind == DrawKind::Shadow;
 	key.ground = settings.GroundDeformation;
-	key.groundDecal = settings.GroundDeformation ? std::clamp(settings.SoftGroundDepth, 0.0f, 20.0f) / std::max(settings.Depth, 1.0f) : 0.0f;
+	float decalDepth = 0.0f;
+	if (settings.GroundDeformation) {
+		for (const auto& type : settings.GroundTypes)
+			decalDepth = std::max(decalDepth, std::clamp(type.depth, 0.0f, 20.0f));
+	}
+	// Decals have no landscape blend weights, so every ground print in a decal uses the deepest type.
+	key.groundDecal = settings.GroundDeformation ? decalDepth / std::max(settings.Depth, 1.0f) : 0.0f;
 	key.valid = true;
 
 	const auto m = [&](int a_row, int a_column) { return static_cast<double>(key.viewProj[a_row * 4 + a_column]); };
@@ -3287,18 +3353,36 @@ void SnowDeformation::DrawSettings()
 	if (ImGui::Checkbox(T(TKEY("ground_deformation"), "Press Mud, Dirt, Sand and Roads"), &settings.GroundDeformation))
 		RebuildGroundLookup();
 	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextWrapped("%s", T(TKEY("ground_deformation_tooltip"), "Off keeps the original snow prints. On also presses listed mud, dirt and sand, shallower than snow, and listed main roads only slightly. Match is by texture file name, so a same-path retexture still matches. Snow on top of those textures stays on the snow path."));
-	if (ImGui::SliderFloat(T(TKEY("soft_ground_depth"), "Mud, Dirt and Sand Depth"), &settings.SoftGroundDepth, 0.0f, 20.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
-		RebuildGroundLookup();
-	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextWrapped("%s", T(TKEY("soft_ground_depth_tooltip"), "Print depth on the mud, dirt and sand list, in game units. Snow print depth is the slider above."));
-	if (ImGui::SliderFloat(T(TKEY("road_depth"), "Main Road Depth"), &settings.RoadDepth, 0.0f, 20.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
-		RebuildGroundLookup();
-	if (auto _tt = Util::HoverTooltipWrapper())
-		ImGui::TextWrapped("%s", T(TKEY("road_depth_tooltip"), "Print depth on the main-road list, in game units. A file name on both lists uses this road depth."));
+		ImGui::TextWrapped("%s", T(TKEY("ground_deformation_tooltip"), "Off keeps the original snow prints. On presses each listed ground type to its own depth. Match is by texture file name, so a same-path retexture still matches. Snow on top of those textures stays on the snow path. A file name on two types uses the later type."));
 
-	auto editNames = [&](const char* a_id, const char* a_label, std::vector<std::string>& a_names, char* a_buffer) {
-		if (!ImGui::TreeNode(a_id, "%s", a_label))
+	auto depthLabel = [](const std::string& a_id) -> const char* {
+		if (a_id == "mud")
+			return "Mud Depth";
+		if (a_id == "dirt")
+			return "Dirt Depth";
+		if (a_id == "sand")
+			return "Sand Depth";
+		if (a_id == "riverbed")
+			return "Riverbed Depth";
+		if (a_id == "road")
+			return "Main Road Depth";
+		return nullptr;
+	};
+	auto textureLabel = [](const std::string& a_id) -> const char* {
+		if (a_id == "mud")
+			return "Mud Textures";
+		if (a_id == "dirt")
+			return "Dirt Textures";
+		if (a_id == "sand")
+			return "Sand Textures";
+		if (a_id == "riverbed")
+			return "Riverbed Textures";
+		if (a_id == "road")
+			return "Main Road Textures";
+		return nullptr;
+	};
+	auto editNames = [&](const char* a_label, std::vector<std::string>& a_names, char* a_buffer) {
+		if (!ImGui::TreeNode("##textures", "%s", a_label))
 			return;
 		int remove = -1;
 		for (int i = 0; i < static_cast<int>(a_names.size()); ++i) {
@@ -3314,7 +3398,6 @@ void SnowDeformation::DrawSettings()
 			groundListFromUser = true;
 			RebuildGroundLookup();
 		}
-		ImGui::PushID(a_id);
 		ImGui::InputText("##add", a_buffer, 260);
 		ImGui::SameLine();
 		if (ImGui::Button(T(TKEY("ground_add"), "Add")) && a_buffer[0] != '\0') {
@@ -3323,13 +3406,24 @@ void SnowDeformation::DrawSettings()
 			groundListFromUser = true;
 			RebuildGroundLookup();
 		}
-		ImGui::PopID();
 		ImGui::TreePop();
 	};
-	static char softAdd[260] = {};
-	static char roadAdd[260] = {};
-	editNames("##soft_ground_textures", T(TKEY("soft_ground_textures"), "Mud, Dirt and Sand Textures"), settings.SoftGroundTextures, softAdd);
-	editNames("##road_textures", T(TKEY("road_textures"), "Main Road Textures"), settings.RoadTextures, roadAdd);
+	static std::unordered_map<std::string, std::array<char, 260>> addBuffers;
+	for (auto& type : settings.GroundTypes) {
+		ImGui::PushID(type.id.c_str());
+		const std::string depthKey = std::string(I18N_KEY_PREFIX) + "ground_depth_" + type.id;
+		const std::string depthFallback = type.id + " Depth";
+		const char* knownDepth = depthLabel(type.id);
+		if (ImGui::SliderFloat(T(depthKey, knownDepth ? knownDepth : depthFallback.c_str()), &type.depth, 0.0f, 20.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+			RebuildGroundLookup();
+		if (auto _tt = Util::HoverTooltipWrapper())
+			ImGui::TextWrapped("%s", T(TKEY("ground_type_depth_tooltip"), "Print depth for this ground type, in game units. Snow print depth is the slider above."));
+		const std::string texturesKey = std::string(I18N_KEY_PREFIX) + "ground_textures_" + type.id;
+		const std::string texturesFallback = type.id + " Textures";
+		const char* knownTextures = textureLabel(type.id);
+		editNames(T(texturesKey, knownTextures ? knownTextures : texturesFallback.c_str()), type.textures, addBuffers[type.id].data());
+		ImGui::PopID();
+	}
 
 	if (ImGui::TreeNodeEx(T(TKEY("debug"), "Debug"))) {
 		ImGui::Text("%s: %u", T(TKEY("debug_stamps"), "Stamps last frame"), debugShown.stamps);
@@ -3352,16 +3446,52 @@ void SnowDeformation::DrawSettings()
 
 void SnowDeformation::LoadSettings(json& o_json)
 {
-	const bool userSoft = o_json.is_object() && o_json.contains("SoftGroundTextures");
-	const bool userRoads = o_json.is_object() && o_json.contains("RoadTextures");
+	const bool object = o_json.is_object();
+	const bool userTypes = object && o_json.contains("GroundTypes");
+	const bool userSoft = object && o_json.contains("SoftGroundTextures");
+	const bool userRoads = object && o_json.contains("RoadTextures");
 	settings = o_json;
-	groundListFromUser = userSoft || userRoads;
-	if (!userSoft || !userRoads) {
+	groundListFromUser = userTypes || userSoft || userRoads;
+	if (!userTypes) {
 		auto file = ReadGroundTextureFile();
-		if (!userSoft)
-			settings.SoftGroundTextures = std::move(file.soft);
-		if (!userRoads)
-			settings.RoadTextures = std::move(file.roads);
+		const auto fileToType = GroundFileTypes(file);
+		if (userSoft && o_json["SoftGroundTextures"].is_array()) {
+			for (auto& type : file) {
+				if (type.id != "road")
+					type.textures.clear();
+			}
+			AssignGroundNames(file, TextureNamesFromJson(o_json["SoftGroundTextures"]), fileToType, "dirt");
+		}
+		if (userRoads && o_json["RoadTextures"].is_array()) {
+			for (auto& type : file) {
+				if (type.id == "road")
+					type.textures.clear();
+			}
+			AssignGroundNames(file, TextureNamesFromJson(o_json["RoadTextures"]), fileToType, "road");
+		}
+		auto savedDepth = [&](const char* a_key, float& a_out) {
+			if (!object || !o_json.contains(a_key) || !o_json[a_key].is_number())
+				return false;
+			a_out = o_json[a_key].get<float>();
+			return std::isfinite(a_out);
+		};
+		float softDepth = 0.0f;
+		float roadDepth = 0.0f;
+		const bool hasSoftDepth = savedDepth("SoftGroundDepth", softDepth);
+		const bool hasRoadDepth = savedDepth("RoadDepth", roadDepth);
+		if (hasSoftDepth) {
+			for (auto& type : file) {
+				if (type.id != "road")
+					type.depth = softDepth;
+			}
+		}
+		if (hasRoadDepth) {
+			for (auto& type : file) {
+				if (type.id == "road")
+					type.depth = roadDepth;
+			}
+		}
+		settings.GroundTypes = std::move(file);
 	}
 	const Settings defaults{};
 	auto sanitize = [](float& a_value, float a_default, float a_min, float a_max) {
@@ -3371,8 +3501,8 @@ void SnowDeformation::LoadSettings(json& o_json)
 	sanitize(settings.Depth, defaults.Depth, 1.0f, 20.0f);
 	sanitize(settings.Lifetime, defaults.Lifetime, 10.0f, 1800.0f);
 	sanitize(settings.TrianglePixels, defaults.TrianglePixels, 2.0f, 32.0f);
-	sanitize(settings.SoftGroundDepth, defaults.SoftGroundDepth, 0.0f, 20.0f);
-	sanitize(settings.RoadDepth, defaults.RoadDepth, 0.0f, 20.0f);
+	for (auto& type : settings.GroundTypes)
+		type.depth = std::clamp(std::isfinite(type.depth) ? type.depth : DefaultGroundDepth(type.id), 0.0f, 20.0f);
 	RebuildGroundLookup();
 }
 
@@ -3384,9 +3514,7 @@ void SnowDeformation::SaveSettings(json& o_json)
 void SnowDeformation::RestoreDefaultSettings()
 {
 	settings = {};
-	auto file = ReadGroundTextureFile();
-	settings.SoftGroundTextures = std::move(file.soft);
-	settings.RoadTextures = std::move(file.roads);
+	settings.GroundTypes = ReadGroundTextureFile();
 	groundListFromUser = false;
 	RebuildGroundLookup();
 }
