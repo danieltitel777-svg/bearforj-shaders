@@ -14,6 +14,16 @@ std::vector<std::pair<std::string, std::string>> FidelityFX::dllVersions = {};
 
 void FidelityFX::LoadFFX()
 {
+	// Load the upscaler before the loader so a relative lookup from the loader hits an already-mapped 4.1.1 DLL.
+	// Frame generation stays on its own DLL and is not required for this path.
+	const std::wstring upscalerPath = std::wstring(FidelityFX::PluginDir) + L"\\" + std::wstring(RuntimeUpscalerDllName);
+	runtimeUpscalerModule = LoadLibrary(upscalerPath.c_str());
+	featureRuntimeUpscaler = runtimeUpscalerModule != nullptr;
+	if (featureRuntimeUpscaler)
+		logger::info("[FidelityFX] Loaded {}", stl::utf16_to_utf8(std::wstring(RuntimeUpscalerDllName)).value_or("amd_fidelityfx_upscaler_dx12.dll"));
+	else
+		logger::warn("[FidelityFX] {} was not loaded; FSR upscaling will stay on FSR 3.1", stl::utf16_to_utf8(std::wstring(RuntimeUpscalerDllName)).value_or("amd_fidelityfx_upscaler_dx12.dll"));
+
 	// Load uframe generation DLL and its function pointers
 	std::wstring framegenDllName = L"amd_fidelityfx_framegeneration_dx12.dll";
 	std::wstring framegenPath = std::wstring(FidelityFX::PluginDir) + L"\\" + framegenDllName;
@@ -313,6 +323,7 @@ void FidelityFX::DestroyFSRResources()
 
 	// Reset crash logging flag when resources are destroyed
 	fsrDispatchCrashLogged = false;
+	DestroyRuntimeUpscaler();
 }
 
 FfxResource ffxGetResource(ID3D11Resource* dx11Resource,
@@ -335,6 +346,10 @@ FfxResource ffxGetResource(ID3D11Resource* dx11Resource,
 
 void FidelityFX::Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors, float a_sharpness)
 {
+	// FSR 4.1 does not need frame generation. A failed or disabled runtime path keeps the DX11 FSR 3.1 dispatch below.
+	if (TryRuntimeFsr4Upscale(a_upscalingTexture, a_reactiveMask, a_transparencyCompositionMask, a_motionVectors, a_sharpness))
+		return;
+
 	auto renderer = globals::game::renderer;
 	auto context = globals::d3d::context;
 	auto state = globals::state;

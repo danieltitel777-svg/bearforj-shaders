@@ -3,6 +3,8 @@
 #include <FidelityFX/api/include/dx12/ffx_api_dx12.hpp>
 #include <dxgi1_6.h>
 
+#include <algorithm>
+
 #include "../HDRDisplay.h"
 #include "../Upscaling.h"
 #include "FidelityFX.h"
@@ -549,4 +551,56 @@ void DX12SwapChain::CreateSharedResources()
 	auto& motionVector = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMOTION_VECTOR];
 	motionVector.texture->GetDesc(&texDesc);
 	motionVectorBufferShared12 = new WrappedResource(texDesc, d3d11Device.get(), d3d12Device.get());
+}
+
+void SharedFence::Create(ID3D12Device* a_device12, ID3D11Device5* a_device11)
+{
+	DX::ThrowIfFailed(a_device12->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&fence12)));
+	HANDLE sharedHandle = nullptr;
+	DX::ThrowIfFailed(a_device12->CreateSharedHandle(fence12.get(), nullptr, GENERIC_ALL, nullptr, &sharedHandle));
+	const HRESULT opened = a_device11->OpenSharedFence(sharedHandle, IID_PPV_ARGS(&fence11));
+	CloseHandle(sharedHandle);
+	DX::ThrowIfFailed(opened);
+	fence12->SetName(L"FidelityFX::RuntimeFence");
+}
+
+SharedFence::WaitOutcome SharedFence::CpuWaitOutcome(uint64_t a_value, DWORD a_timeoutMs) const
+{
+	if (!fence12 || a_value == 0)
+		return WaitOutcome::kComplete;
+	if (fence12->GetCompletedValue() >= a_value)
+		return WaitOutcome::kComplete;
+
+	HANDLE fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+	if (!fenceEvent)
+		return WaitOutcome::kFailed;
+	if (FAILED(fence12->SetEventOnCompletion(a_value, fenceEvent))) {
+		CloseHandle(fenceEvent);
+		return WaitOutcome::kFailed;
+	}
+
+	winrt::com_ptr<ID3D12Device> device12;
+	DWORD waitedMs = 0;
+	while (waitedMs < a_timeoutMs) {
+		const DWORD sliceMs = std::min<DWORD>(kRemovalPollMs, a_timeoutMs - waitedMs);
+		const DWORD waitResult = WaitForSingleObject(fenceEvent, sliceMs);
+		if (waitResult == WAIT_OBJECT_0) {
+			CloseHandle(fenceEvent);
+			return WaitOutcome::kComplete;
+		}
+		if (waitResult != WAIT_TIMEOUT) {
+			CloseHandle(fenceEvent);
+			return WaitOutcome::kFailed;
+		}
+		waitedMs += sliceMs;
+		if (!device12)
+			fence12->GetDevice(IID_PPV_ARGS(&device12));
+		if (device12 && FAILED(device12->GetDeviceRemovedReason())) {
+			CloseHandle(fenceEvent);
+			return WaitOutcome::kFailed;
+		}
+	}
+
+	CloseHandle(fenceEvent);
+	return WaitOutcome::kTimeout;
 }

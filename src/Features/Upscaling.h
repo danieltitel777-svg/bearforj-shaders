@@ -67,9 +67,17 @@ public:
 		bool reflexUseMarkersToOptimize = false;
 		bool reflexUseFPSLimit = false;
 		float reflexFPSLimit = 60.0f;
+		// DX12 runtime FSR 4.1. Off keeps the original DX11 FSR 3.1 upscaler. Frame generation is unchanged.
+		bool fsr4RuntimeEnable = false;
 	};
 
 	Settings settings;
+	// Session latch for fsr4RuntimeEnable. The checkbox saves immediately and applies on the next launch.
+	bool fsr4RuntimeEnableBoot = false;
+	bool fsr4RuntimeDefaultApplied = false;
+	bool fsr4RuntimeEnableInJson = false;
+
+	void ApplyFsr4RuntimeDefault(const DXGI_ADAPTER_DESC& a_adapterDesc);
 
 	struct JitterCB
 	{

@@ -1,5 +1,8 @@
 # Normalize all text files to LF
 * text=auto eol=lf
 
+# FidelityFX binaries must stay byte-identical to the SDK drop.
+*.dll binary
+
 # Ensure patch files always use LF line endings
 *.patch text eol=lf

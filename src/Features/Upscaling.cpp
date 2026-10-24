@@ -38,7 +38,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	reflexLowLatencyBoost,
 	reflexUseMarkersToOptimize,
 	reflexUseFPSLimit,
-	reflexFPSLimit);
+	reflexFPSLimit,
+	fsr4RuntimeEnable);
 
 decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChainUpscaling;
 
@@ -69,6 +70,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChainUpscaling(
 
 	auto& upscaling = globals::features::upscaling;
 	upscaling.LoadUpscalingSDKs();
+	upscaling.ApplyFsr4RuntimeDefault(adapterDesc);
 
 	// FLIP_DISCARD requires BufferCount >= 2 and a flip-model-compatible (non-sRGB) format.
 	pSwapChainDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
@@ -188,7 +190,8 @@ void Upscaling::DrawSettings()
 		T(TKEY("method_taa"), "TAA")
 	};
 
-	std::string fsrLabel = "AMD FSR 3.1";
+	fidelityFX.ProbeRuntimeFsr4();
+	std::string fsrLabel = fidelityFX.MenuMethodLabel();
 	upscaleModes.push_back(fsrLabel);
 
 	std::string dlssLabel = "NVIDIA DLSS";
@@ -270,6 +273,23 @@ void Upscaling::DrawSettings()
 
 		if (upscaleMethod == UpscaleMethod::kFSR) {
 			ImGui::SliderFloat(T(TKEY("sharpness"), "Sharpness"), &settings.sharpnessFSR, 0.0f, 1.0f, "%.1f");
+
+			if (fidelityFX.IsRuntimeFsr4AutoEligible() || settings.fsr4RuntimeEnable || fsr4RuntimeEnableBoot) {
+				ImGui::Checkbox(T(TKEY("fsr4_runtime_enable"), "AMD FSR 4.1"), &settings.fsr4RuntimeEnable);
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("fsr4_runtime_enable_tooltip"),
+										  "Uses the DX12 FSR 4.1 runtime on Radeon RX 6000, RX 7000 and RX 9000.\n"
+										  "RX 6000 (Navi 21, 22, 23 and 24, including the RX 6950 XT) is on by default and needs Adrenalin 26.10.1 or newer.\n"
+										  "The method name follows the driver: AMD FSR 4 when the provider is 4.x, otherwise AMD FSR 3.1.\n"
+										  "If FSR 4.1 does not start, this session uses FSR 3.1 and writes that to the log.\n"
+										  "Off keeps the original FSR 3.1 upscaler. Frame generation stays FSR 3.\n"
+										  "Changing this requires a restart."));
+				}
+				if (fsr4RuntimeDefaultApplied && settings.fsr4RuntimeEnable != fsr4RuntimeEnableBoot)
+					ImGui::TextUnformatted(T(TKEY("fsr4_runtime_restart"), "Changing this requires a restart to take effect."));
+				if (fidelityFX.IsRuntimeFsr4FailureLatched())
+					ImGui::TextUnformatted(T(TKEY("fsr4_failed_fallback"), "FSR 4.1 did not start this session. Using FSR 3.1."));
+			}
 		} else if (upscaleMethod == UpscaleMethod::kDLSS) {
 			ImGui::Checkbox(T(TKEY("enable_sharpening"), "Enable Sharpening"), &settings.sharpnessEnabledDLSS);
 			if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -478,6 +498,7 @@ void Upscaling::SaveSettings(json& o_json)
 
 void Upscaling::LoadSettings(json& o_json)
 {
+	fsr4RuntimeEnableInJson = o_json.contains("fsr4RuntimeEnable");
 	settings = o_json;
 
 	// Sanitize loaded settings to ensure enum indices are valid
@@ -522,6 +543,23 @@ void Upscaling::LoadSettings(json& o_json)
 void Upscaling::RestoreDefaultSettings()
 {
 	settings = {};
+	fsr4RuntimeEnableInJson = false;
+}
+
+void Upscaling::ApplyFsr4RuntimeDefault(const DXGI_ADAPTER_DESC& a_adapterDesc)
+{
+	fidelityFX.NoteAdapter(a_adapterDesc);
+	if (fsr4RuntimeDefaultApplied)
+		return;
+
+	if (!fsr4RuntimeEnableInJson && fidelityFX.IsRuntimeFsr4AutoEligible()) {
+		settings.fsr4RuntimeEnable = true;
+		logger::info("[FidelityFX] FSR 4.1 is on by default for this Radeon. Turn off AMD FSR 4.1 to keep FSR 3.1.");
+	}
+
+	fsr4RuntimeEnableBoot = settings.fsr4RuntimeEnable;
+	fsr4RuntimeDefaultApplied = true;
+	logger::info("[FidelityFX] FSR 4.1 runtime is {} for this session", fsr4RuntimeEnableBoot ? "enabled" : "disabled");
 }
 
 void Upscaling::DataLoaded()
@@ -1276,7 +1314,7 @@ void Upscaling::LoadUpscalingSDKs()
 	// Initialize upscaling SDK components during plugin startup
 	// This ensures all SDKs are available before any D3D device creation
 	streamline.LoadInterposer();
-	fidelityFX.LoadFFX();  // Only for frame generation now
+	fidelityFX.LoadFFX();
 }
 
 HANDLE Upscaling::GetFrameLatencyWaitableObject() const

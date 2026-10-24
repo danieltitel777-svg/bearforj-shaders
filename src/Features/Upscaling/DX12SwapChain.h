@@ -24,6 +24,34 @@ public:
 	winrt::com_ptr<ID3D12Resource> resource;
 };
 
+/** @brief D3D12 fence shared into D3D11. Used by the FSR 4.1 runtime upscaler, including when frame generation is off. */
+struct SharedFence
+{
+	static constexpr DWORD kRemovalPollMs = 100;
+	static constexpr DWORD kFenceTimeoutMs = 5000;
+	winrt::com_ptr<ID3D12Fence> fence12;
+	winrt::com_ptr<ID3D11Fence> fence11;
+	uint64_t value = 0;
+
+	uint64_t Next() { return ++value; }
+	void Reset()
+	{
+		fence12 = nullptr;
+		fence11 = nullptr;
+		value = 0;
+	}
+	enum class WaitOutcome : uint8_t
+	{
+		kComplete,
+		kTimeout,
+		kFailed
+	};
+
+	void Create(ID3D12Device* a_device12, ID3D11Device5* a_device11);
+	WaitOutcome CpuWaitOutcome(uint64_t a_value, DWORD a_timeoutMs) const;
+	bool CpuWait(uint64_t a_value, DWORD a_timeoutMs) const { return CpuWaitOutcome(a_value, a_timeoutMs) == WaitOutcome::kComplete; }
+};
+
 struct DXGISwapChainProxy : IDXGISwapChain
 {
 public:

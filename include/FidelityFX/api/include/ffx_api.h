@@ -47,6 +47,9 @@ typedef uint32_t ffxReturnCode_t;
 
 #define FFX_API_EFFECT_MASK 0xffff0000u
 #define FFX_API_EFFECT_ID_GENERAL 0x00000000u
+// Upscaler effect id from FidelityFX SDK 2.3.0 (ffx_api.h). Frame generation keeps its own ids.
+#define FFX_API_EFFECT_ID_UPSCALE 0x00010000u
+#define FFX_API_MAKE_EFFECT_SUB_ID(effectId, subversion) ((effectId & FFX_API_EFFECT_MASK) | (subversion & ~FFX_API_EFFECT_MASK))
 
 // Base Descriptor types
 typedef uint64_t ffxStructType_t;
