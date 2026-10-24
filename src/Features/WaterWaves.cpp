@@ -483,7 +483,7 @@ void WaterWaves::OnSetup(RE::BSShader* a_shader, RE::BSRenderPass*)
 	context->HSSetShader(shaders->hs.get(), nullptr, 0);
 	context->DSSetShader(shaders->ds.get(), nullptr, 0);
 	auto& shadowState = globals::game::shadowState->GetRuntimeData();
-	shadowState.topology = REX::W32::D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
+	shadowState.topology = D3D_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
 	shadowState.stateUpdateFlags.set(RE::BSGraphics::ShaderFlags::DIRTY_PRIMITIVE_TOPO);
 	tessBound = true;
 }
@@ -660,7 +660,7 @@ void WaterWaves::OnRestore()
 	context->HSSetShader(nullptr, nullptr, 0);
 	context->DSSetShader(nullptr, nullptr, 0);
 	auto& shadowState = globals::game::shadowState->GetRuntimeData();
-	shadowState.topology = REX::W32::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	shadowState.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 	shadowState.stateUpdateFlags.set(RE::BSGraphics::ShaderFlags::DIRTY_PRIMITIVE_TOPO);
 	context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	tessBound = false;
