@@ -1,95 +1,129 @@
 #include "ParticleTextureSet.h"
 
+#include "Features/ScreenSpacePhysicalParticles/BearforjWorldQuery.h"
 #include "Features/ScreenSpacePhysicalParticles/ParticleTexturePaths.h"
 #include "Globals.h"
 #include "Utils/D3D.h"
 
 #include <nlohmann/json.hpp>
 
-#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <unordered_map>
 
 namespace ScreenSpacePhysicalParticles
 {
 	namespace
 	{
-		struct FallbackSpan
+		struct AtlasInfo
 		{
-			const char* group;
-			std::size_t begin;
-			std::size_t count;
+			std::string path;
+			std::uint32_t grid{ 4 };
 		};
 
-		constexpr FallbackSpan kFallbackSpans[] = {
-			{ "leaves", 0, 96 },
-			{ "sparks", 96, 4 },
-			{ "fluff", 100, 2 },
-			{ "dandelions", 102, 2 },
-			{ "spores", 104, 2 },
-			{ "fireflies", 106, 2 },
-			{ "moths", 108, 4 },
+		struct LoadedAtlas
+		{
+			winrt::com_ptr<ID3D11Texture2D> texture;
+			UINT width{};
+			UINT height{};
+			DXGI_FORMAT format{ DXGI_FORMAT_UNKNOWN };
+			std::uint32_t grid{ 4 };
 		};
 
-		std::string FileStem(std::string_view a_path)
+		void AddCell(
+			std::vector<ParticleTextureSet::Slice>& a_slices,
+			std::string_view a_group,
+			std::string_view a_wanted,
+			const char* a_id,
+			const char* a_species,
+			const char* a_frame,
+			const char* a_region,
+			const char* a_path,
+			std::uint32_t a_cell,
+			std::uint32_t a_grid,
+			bool a_tint)
 		{
-			const auto slash = a_path.find_last_of("\\/");
-			auto name = slash == std::string_view::npos ? a_path : a_path.substr(slash + 1);
-			const auto dot = name.find_last_of('.');
-			if (dot != std::string_view::npos)
-				name = name.substr(0, dot);
-			return std::string(name);
-		}
-
-		void ParseLeafName(
-			const std::string& a_stem,
-			std::string& a_species,
-			std::string& a_region,
-			std::string& a_frame)
-		{
-			if (a_stem.starts_with("needles_")) {
-				a_species = "pine";
-				a_region = "pine_hjaal";
-				const auto split = a_stem.rfind('_');
-				if (split != std::string::npos)
-					a_frame = a_stem.substr(split + 1);
+			if (a_group != a_wanted)
 				return;
-			}
-			constexpr std::string_view kPrefix = "leaf_";
-			if (!a_stem.starts_with(kPrefix))
-				return;
-			const auto body = std::string_view(a_stem).substr(kPrefix.size());
-			const auto frameSplit = body.rfind('_');
-			if (frameSplit == std::string_view::npos)
-				return;
-			a_frame = std::string(body.substr(frameSplit + 1));
-			const auto rest = body.substr(0, frameSplit);
-			const auto speciesSplit = rest.find('_');
-			if (speciesSplit == std::string_view::npos)
-				return;
-			a_species = std::string(rest.substr(0, speciesSplit));
-			a_region = std::string(rest.substr(speciesSplit + 1));
+			ParticleTextureSet::Slice slice;
+			slice.id = a_id;
+			slice.species = a_species;
+			slice.frame = a_frame;
+			slice.region = a_region;
+			slice.path = a_path;
+			slice.cell = a_cell;
+			slice.grid = a_grid;
+			slice.tint = a_tint;
+			a_slices.push_back(std::move(slice));
 		}
 
 		std::vector<ParticleTextureSet::Slice> FallbackSlices(std::string_view a_group)
 		{
+			const char* leaves = kParticleTexturePaths[0];
+			const char* sparks = kParticleTexturePaths[1];
+			const char* small = kParticleTexturePaths[2];
 			std::vector<ParticleTextureSet::Slice> slices;
-			for (const auto& span : kFallbackSpans) {
-				if (a_group != span.group)
-					continue;
-				const auto end = std::min(span.begin + span.count, kParticleTexturePathCount);
-				slices.reserve(end - span.begin);
-				for (std::size_t index = span.begin; index < end; ++index) {
-					ParticleTextureSet::Slice slice;
-					slice.path = kParticleTexturePaths[index];
-					slice.id = FileStem(slice.path);
-					if (a_group == "leaves")
-						ParseLeafName(slice.id, slice.species, slice.region, slice.frame);
-					slices.push_back(std::move(slice));
+			const auto add4 = [&](const char* a_groupName, const char* a_prefix, const char* a_species, const char* a_region, const char* a_path, std::uint32_t a_base, std::uint32_t a_grid, bool a_tint) {
+				for (std::uint32_t frame = 0; frame < 4; ++frame) {
+					const auto name = std::string(a_prefix) + (frame == 0 ? "01" : frame == 1 ? "02" :
+					                                                          frame == 2 ? "03" :
+					                                                                       "04");
+					AddCell(slices, a_group, a_groupName, name.c_str(), a_species, frame == 0 ? "01" : frame == 1 ? "02" :
+					                                                                              frame == 2 ? "03" :
+					                                                                                           "04",
+						a_region, a_path, a_base + frame, a_grid, a_tint);
 				}
-				break;
-			}
+			};
+			add4("leaves", "leaf_oak_", "oak", "", leaves, 0, 4, true);
+			add4("leaves", "leaf_birch_", "birch", "", leaves, 4, 4, true);
+			add4("leaves", "leaf_aspen_", "aspen", "", leaves, 8, 4, true);
+			add4("leaves", "leaf_maple_", "maple", "", leaves, 12, 4, true);
+			add4("leaves", "needles_pine_hjaal_", "pine", "pine_hjaal", small, 10, 4, false);
+			add4("sparks", "spark_", "", "", sparks, 0, 2, true);
+			AddCell(slices, a_group, "fluff", "fluff_01", "", "01", "", small, 0, 4, true);
+			AddCell(slices, a_group, "fluff", "fluff_02", "", "02", "", small, 1, 4, true);
+			AddCell(slices, a_group, "dandelions", "dandelion_01", "", "01", "", small, 14, 4, true);
+			AddCell(slices, a_group, "dandelions", "dandelion_02", "", "02", "", small, 15, 4, true);
+			AddCell(slices, a_group, "spores", "spore_01", "", "01", "", small, 2, 4, true);
+			AddCell(slices, a_group, "spores", "spore_cluster_01", "", "01", "", small, 3, 4, true);
+			AddCell(slices, a_group, "fireflies", "firefly_01", "", "01", "", small, 4, 4, true);
+			AddCell(slices, a_group, "fireflies", "firefly_glow_01", "", "01", "", small, 5, 4, true);
+			add4("moths", "moth_frame_", "", "", small, 6, 4, true);
 			return slices;
+		}
+
+		void ApplyRegionTints(const nlohmann::json& a_document)
+		{
+			const auto tints = a_document.find("regionTints");
+			if (tints == a_document.end() || !tints->is_object())
+				return;
+			for (std::uint32_t index = 0; index < BearforjParticles::kRegionCount; ++index) {
+				const auto entry = tints->find(BearforjParticles::kRegionNames[index]);
+				if (entry == tints->end() || !entry->is_array() || entry->size() < 3)
+					continue;
+				BearforjParticles::SetRegionTint(
+					index,
+					entry->at(0).get<float>(),
+					entry->at(1).get<float>(),
+					entry->at(2).get<float>());
+			}
+		}
+
+		std::unordered_map<std::string, AtlasInfo> ReadAtlases(const nlohmann::json& a_document)
+		{
+			std::unordered_map<std::string, AtlasInfo> atlases;
+			const auto entries = a_document.find("atlases");
+			if (entries == a_document.end() || !entries->is_object())
+				return atlases;
+			for (const auto& [key, value] : entries->items()) {
+				if (!value.is_object() || !value.contains("path") || !value["path"].is_string())
+					continue;
+				AtlasInfo info;
+				info.path = value["path"].get<std::string>();
+				info.grid = value.value("grid", 4U);
+				atlases.emplace(key, std::move(info));
+			}
+			return atlases;
 		}
 
 		std::vector<ParticleTextureSet::Slice> ConfigSlices(std::string_view a_group)
@@ -104,6 +138,8 @@ namespace ScreenSpacePhysicalParticles
 				logger::error("[PhysicalParticles] Failed to parse {}: {}", kParticleTextureConfigPath, error.what());
 				return {};
 			}
+			ApplyRegionTints(document);
+			const auto atlases = ReadAtlases(document);
 			const auto group = document.find(std::string(a_group));
 			if (group == document.end() || !group->is_array())
 				return {};
@@ -111,19 +147,64 @@ namespace ScreenSpacePhysicalParticles
 			std::vector<ParticleTextureSet::Slice> slices;
 			slices.reserve(group->size());
 			for (const auto& entry : *group) {
-				if (!entry.is_object() || !entry.contains("path") || !entry["path"].is_string())
+				if (!entry.is_object() || !entry.contains("atlas") || !entry["atlas"].is_string())
+					continue;
+				const auto atlas = atlases.find(entry["atlas"].get<std::string>());
+				if (atlas == atlases.end())
 					continue;
 				ParticleTextureSet::Slice slice;
-				slice.path = entry["path"].get<std::string>();
-				slice.id = entry.value("id", FileStem(slice.path));
+				slice.path = atlas->second.path;
+				slice.id = entry.value("id", std::string{});
 				slice.species = entry.value("species", std::string{});
 				slice.region = entry.value("region", std::string{});
 				slice.frame = entry.value("frame", std::string{});
-				if (a_group == "leaves" && slice.species.empty())
-					ParseLeafName(slice.id, slice.species, slice.region, slice.frame);
+				slice.cell = entry.value("cell", 0U);
+				slice.grid = atlas->second.grid;
+				const bool defaultTint = slice.species != "pine" && slice.id.rfind("needles_", 0) != 0;
+				slice.tint = entry.value("tint", defaultTint);
 				slices.push_back(std::move(slice));
 			}
 			return slices;
+		}
+
+		bool LoadAtlas(ID3D11Device* a_device, const ParticleTextureSet::Slice& a_slice, LoadedAtlas& a_atlas)
+		{
+			ID3D11Texture2D* rawTexture = nullptr;
+			ID3D11ShaderResourceView* rawView = nullptr;
+			const auto result = Util::LoadTextureFromFile(
+				a_device,
+				std::filesystem::path(a_slice.path),
+				&rawTexture,
+				&rawView);
+			if (FAILED(result) || !rawTexture) {
+				logger::error(
+					"[PhysicalParticles] Failed to load atlas {} ({:#010x})",
+					a_slice.path,
+					static_cast<std::uint32_t>(result));
+				if (rawView)
+					rawView->Release();
+				return false;
+			}
+			if (rawView)
+				rawView->Release();
+			a_atlas.texture.attach(rawTexture);
+			D3D11_TEXTURE2D_DESC desc{};
+			a_atlas.texture->GetDesc(&desc);
+			if (desc.Width != 2048 || desc.Height != 2048 || a_slice.grid == 0 || desc.Width % a_slice.grid != 0) {
+				logger::error(
+					"[PhysicalParticles] {} is {}x{} grid {}, expected a 2048 atlas",
+					a_slice.path,
+					desc.Width,
+					desc.Height,
+					a_slice.grid);
+				a_atlas.texture = nullptr;
+				return false;
+			}
+			a_atlas.width = desc.Width;
+			a_atlas.height = desc.Height;
+			a_atlas.format = desc.Format;
+			a_atlas.grid = a_slice.grid;
+			return true;
 		}
 	}
 
@@ -140,70 +221,79 @@ namespace ScreenSpacePhysicalParticles
 		slices = ConfigSlices(a_group);
 		if (slices.empty()) {
 			logger::warn(
-				"[PhysicalParticles] {} missing or empty for group {}; using the built-in path list",
+				"[PhysicalParticles] {} missing or empty for group {}; using the built-in atlas layout",
 				kParticleTextureConfigPath,
 				a_group);
 			slices = FallbackSlices(a_group);
 		}
 		if (slices.empty()) {
-			logger::error("[PhysicalParticles] No texture paths for group {}", a_group);
+			logger::error("[PhysicalParticles] No atlas cells for group {}", a_group);
 			return false;
+		}
+
+		std::unordered_map<std::string, LoadedAtlas> atlases;
+		for (const auto& slice : slices) {
+			if (atlases.contains(slice.path))
+				continue;
+			LoadedAtlas atlas;
+			if (!LoadAtlas(device, slice, atlas))
+				atlas = {};
+			atlases.emplace(slice.path, std::move(atlas));
 		}
 
 		struct Source
 		{
-			winrt::com_ptr<ID3D11Texture2D> texture;
+			bool copied{};
 		};
 		std::vector<Source> sources(slices.size());
 		D3D11_TEXTURE2D_DESC expected{};
 		bool haveExpected = false;
 		std::size_t loadedCount = 0;
 		std::size_t donor = 0;
-		for (std::size_t index = 0; index < slices.size(); ++index) {
-			ID3D11Texture2D* rawTexture = nullptr;
-			ID3D11ShaderResourceView* rawView = nullptr;
-			const auto result = Util::LoadTextureFromFile(
-				device,
-				std::filesystem::path(slices[index].path),
-				&rawTexture,
-				&rawView);
-			if (FAILED(result) || !rawTexture) {
-				logger::error(
-					"[PhysicalParticles] Failed to load {} ({:#010x})",
-					slices[index].path,
-					static_cast<std::uint32_t>(result));
-				if (rawView)
-					rawView->Release();
-				continue;
-			}
-			if (rawView)
-				rawView->Release();
+		const auto cellBox = [](const LoadedAtlas& a_atlas, std::uint32_t a_cell) {
+			const UINT cell = a_atlas.width / a_atlas.grid;
+			D3D11_BOX box{};
+			box.left = (a_cell % a_atlas.grid) * cell;
+			box.top = (a_cell / a_atlas.grid) * cell;
+			box.front = 0;
+			box.right = box.left + cell;
+			box.bottom = box.top + cell;
+			box.back = 1;
+			return box;
+		};
 
-			winrt::com_ptr<ID3D11Texture2D> textureSlot;
-			textureSlot.attach(rawTexture);
-			D3D11_TEXTURE2D_DESC desc{};
-			textureSlot->GetDesc(&desc);
-			if (desc.Width == 0 || desc.Height == 0 || desc.Width > 2048 || desc.Height > 2048) {
+		for (std::size_t index = 0; index < slices.size(); ++index) {
+			const auto atlas = atlases.find(slices[index].path);
+			if (atlas == atlases.end() || !atlas->second.texture)
+				continue;
+			const auto cellCount = atlas->second.grid * atlas->second.grid;
+			if (slices[index].cell >= cellCount) {
 				logger::error(
-					"[PhysicalParticles] {} is {}x{}, outside 1..2048",
-					slices[index].path,
-					desc.Width,
-					desc.Height);
+					"[PhysicalParticles] {} cell {} is outside the {}x{} atlas",
+					slices[index].id,
+					slices[index].cell,
+					atlas->second.grid,
+					atlas->second.grid);
 				continue;
 			}
+			const UINT cell = atlas->second.width / atlas->second.grid;
 			if (!haveExpected) {
-				expected = desc;
+				expected.Width = cell;
+				expected.Height = cell;
+				expected.Format = atlas->second.format;
+				expected.MipLevels = 1;
+				expected.ArraySize = 1;
+				expected.SampleDesc.Count = 1;
 				haveExpected = true;
 				donor = index;
-			} else if (desc.Width != expected.Width || desc.Height != expected.Height ||
-					   desc.Format != expected.Format) {
+			} else if (cell != expected.Width || atlas->second.format != expected.Format) {
 				logger::error(
-					"[PhysicalParticles] {} does not match the {} group size or format",
-					slices[index].path,
+					"[PhysicalParticles] {} does not match the {} group cell size or format",
+					slices[index].id,
 					a_group);
 				continue;
 			}
-			sources[index].texture = std::move(textureSlot);
+			sources[index].copied = true;
 			++loadedCount;
 		}
 
@@ -228,13 +318,24 @@ namespace ScreenSpacePhysicalParticles
 			return false;
 		}
 
-		for (std::size_t index = 0; index < sources.size(); ++index) {
-			auto* source = sources[index].texture ? sources[index].texture.get() : sources[donor].texture.get();
-			if (!source)
-				continue;
-			const UINT destination = D3D11CalcSubresource(0, static_cast<UINT>(index), 1);
-			context->CopySubresourceRegion(texture.get(), destination, 0, 0, 0, source, 0, nullptr);
-		}
+		const auto copyCell = [&](std::size_t a_index, std::size_t a_source) {
+			const auto atlas = atlases.find(slices[a_source].path);
+			if (atlas == atlases.end() || !atlas->second.texture)
+				return;
+			const auto box = cellBox(atlas->second, slices[a_source].cell);
+			const UINT destination = D3D11CalcSubresource(0, static_cast<UINT>(a_index), 1);
+			context->CopySubresourceRegion(
+				texture.get(),
+				destination,
+				0,
+				0,
+				0,
+				atlas->second.texture.get(),
+				0,
+				&box);
+		};
+		for (std::size_t index = 0; index < sources.size(); ++index)
+			copyCell(index, sources[index].copied ? index : donor);
 
 		D3D11_SHADER_RESOURCE_VIEW_DESC viewDesc{};
 		viewDesc.Format = arrayDesc.Format;
@@ -253,11 +354,20 @@ namespace ScreenSpacePhysicalParticles
 
 		loaded = true;
 		logger::info(
-			"[PhysicalParticles] Loaded {}/{} individual DDS slices for {}",
+			"[PhysicalParticles] Copied {}/{} atlas cells for {}",
 			loadedCount,
 			slices.size(),
 			a_group);
 		return true;
+	}
+
+	std::uint32_t ParticleTextureSet::UntintedSliceBase() const noexcept
+	{
+		for (std::uint32_t index = 0; index < slices.size(); ++index) {
+			if (!slices[index].tint)
+				return index;
+		}
+		return slices.empty() ? 0xFFFFFFFFU : static_cast<std::uint32_t>(slices.size());
 	}
 
 	std::uint32_t ParticleTextureSet::Find(
@@ -265,34 +375,28 @@ namespace ScreenSpacePhysicalParticles
 		std::string_view a_region,
 		std::string_view a_frame) const noexcept
 	{
-		const auto find = [&](std::string_view a_wantedSpecies,
-							  std::string_view a_wantedRegion,
-							  std::string_view a_wantedFrame) -> std::uint32_t {
+		(void)a_region;
+		const auto find = [&](std::string_view a_wantedSpecies, std::string_view a_wantedFrame) -> std::uint32_t {
 			for (std::uint32_t index = 0; index < slices.size(); ++index) {
 				if (slices[index].species == a_wantedSpecies &&
-					slices[index].region == a_wantedRegion &&
 					(a_wantedFrame.empty() || slices[index].frame == a_wantedFrame))
 					return index;
 			}
 			return UINT32_MAX;
 		};
-		if (const auto exact = find(a_species, a_region, a_frame); exact != UINT32_MAX)
-			return exact;
-		if (const auto anyFrame = find(a_species, a_region, {}); anyFrame != UINT32_MAX)
-			return anyFrame;
 		if (a_species == "pine") {
-			if (const auto needles = find("pine", "pine_hjaal", a_frame); needles != UINT32_MAX)
+			if (const auto needles = find("pine", a_frame); needles != UINT32_MAX)
 				return needles;
-			if (const auto needles = find("pine", "pine_hjaal", {}); needles != UINT32_MAX)
+			if (const auto needles = find("pine", {}); needles != UINT32_MAX)
 				return needles;
 		}
-		if (const auto neutral = find(a_species, "neutral", a_frame); neutral != UINT32_MAX)
-			return neutral;
-		if (const auto neutral = find(a_species, "neutral", {}); neutral != UINT32_MAX)
-			return neutral;
-		if (const auto oak = find("oak", "neutral", a_frame); oak != UINT32_MAX)
+		if (const auto exact = find(a_species, a_frame); exact != UINT32_MAX)
+			return exact;
+		if (const auto anyFrame = find(a_species, {}); anyFrame != UINT32_MAX)
+			return anyFrame;
+		if (const auto oak = find("oak", a_frame); oak != UINT32_MAX)
 			return oak;
-		if (const auto oak = find("oak", "neutral", {}); oak != UINT32_MAX)
+		if (const auto oak = find("oak", {}); oak != UINT32_MAX)
 			return oak;
 		return 0;
 	}

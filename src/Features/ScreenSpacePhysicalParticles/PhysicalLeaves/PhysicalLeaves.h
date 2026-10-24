@@ -121,9 +121,13 @@ private:
 		std::uint32_t debugWhiteQuads{};
 		std::uint32_t visibleSegmentBase{};
 		std::uint32_t particleCapacity{};
-		std::uint32_t pad{};
+		std::uint32_t needleSliceBase{ 0xFFFFFFFFU };
+
+		float3 regionTint{ 1.0F, 1.0F, 1.0F };
+		float regionTintPad{};
 	};
 	STATIC_ASSERT_ALIGNAS_16(RenderCB);
+	static_assert(sizeof(RenderCB) == 32);
 
 	struct alignas(16) SharedMaintenanceCB
 	{

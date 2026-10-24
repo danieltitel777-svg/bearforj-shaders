@@ -1280,6 +1280,9 @@ void PhysicalLeaves::DrawSharedParticles(
 	renderConstants.debugWhiteQuads = settings.debugWhiteQuads ? 1U : 0U;
 	renderConstants.visibleSegmentBase = a_context.visibleSegmentBase;
 	renderConstants.particleCapacity = a_context.particleCapacity;
+	renderConstants.needleSliceBase = leafTextures.UntintedSliceBase();
+	const auto regionTint = BearforjParticles::RegionTint(BearforjParticles::CurrentRegionIndex());
+	renderConstants.regionTint = { regionTint.red, regionTint.green, regionTint.blue };
 	renderCB->Update(renderConstants);
 	ID3D11Buffer* renderConstantsBuffer = renderCB->CB();
 	context->VSSetConstantBuffers(0, 1, &renderConstantsBuffer);

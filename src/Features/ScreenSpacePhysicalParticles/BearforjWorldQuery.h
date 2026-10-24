@@ -38,6 +38,28 @@ namespace BearforjParticles
 	// Returns: Lowercase region name, or "default" when the index is out of range.
 	[[nodiscard]] std::string_view RegionName(std::uint32_t a_region) noexcept;
 
+	struct RegionTintColor
+	{
+		float red{ 1.0F };
+		float green{ 1.0F };
+		float blue{ 1.0F };
+	};
+
+	// Summary: Returns the runtime leaf tint for one region.
+	// Args:
+	//   a_region: Region index in kRegionNames. Out of range uses neutral.
+	// Returns: RGB multiplier. Neutral is white.
+	[[nodiscard]] RegionTintColor RegionTint(std::uint32_t a_region) noexcept;
+
+	// Summary: Replaces one region tint from particles.json.
+	// Args:
+	//   a_region: Region index in kRegionNames.
+	//   a_red: Red multiplier.
+	//   a_green: Green multiplier.
+	//   a_blue: Blue multiplier.
+	// Returns: None.
+	void SetRegionTint(std::uint32_t a_region, float a_red, float a_green, float a_blue) noexcept;
+
 	// Summary: Classifies a tree form from its model path.
 	// Args:
 	//   a_base: Base form of a placed reference.

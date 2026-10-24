@@ -4,10 +4,9 @@
 
 namespace ScreenSpacePhysicalParticles
 {
-	// Every individual DDS under Data\Shaders\PhysicalParticles\.
-	// particles.json is the runtime list; this array is the same set so the
-	// package audit can see each path from C++. Files are 2048 DXT5 straight
-	// alpha and are added at integration.
+	// Shipped DDS atlases under Data\Shaders\PhysicalParticles\.
+	// particles.json names every cell. The 36 source images are packed into
+	// these three 2048 DXT5 straight-alpha atlases and are added at integration.
 	extern const char* const kParticleTexturePaths[];
 	extern const std::size_t kParticleTexturePathCount;
 	extern const char* const kParticleTextureConfigPath;

@@ -2,8 +2,9 @@
 #include "PhysicalLeaves/PhysicalLeavesShared.hlsli"
 #include "ScreenSpacePhysicalParticles/ProceduralQuad.hlsli"
 
-// Renders SSPP-visible leaves from one slice of the per-region texture array.
-// appearance.w is frame 01 of the species/region set. Variation picks frames 01-04.
+// Renders SSPP-visible leaves from the neutral leaf atlas.
+// appearance.w is frame 01 of the species. Variation picks frames 01-04.
+// RegionTint multiplies neutral leaves. Needle slices stay untinted.
 // Grounded leaves rest at a stable random tilt; airborne leaves billboard.
 
 cbuffer RenderSettings : register(b0)
@@ -11,7 +12,9 @@ cbuffer RenderSettings : register(b0)
 	uint DebugWhiteQuads;
 	uint VisibleSegmentBase;
 	uint ParticleCapacity;
-	uint RenderSettingsPad;
+	uint NeedleSliceBase;
+	float3 RegionTint;
+	float RegionTintPad;
 };
 
 #if defined(VSHADER)
@@ -133,6 +136,8 @@ float4 PSMain(VertexOutput input) : SV_TARGET
 	float frame = min(floor(saturate(input.Variation) * 4.0f), 3.0f);
 	float slice = max(round(input.Slice) + frame, 0.0f);
 	float4 leaf = LeafSlices.Sample(LeafSampler, float3(saturate(input.TexCoord), slice));
+	float3 tint = slice >= (float)NeedleSliceBase ? float3(1.0f, 1.0f, 1.0f) : RegionTint;
+	leaf.rgb *= tint;
 	leaf.a *= input.Opacity;
 	clip(leaf.a - 0.05f);
 	return leaf;

@@ -656,7 +656,7 @@ void PhysicalWorldParticles::ClearShaderCache()
 void PhysicalWorldParticles::DrawSettings()
 {
 	ImGui::TextWrapped(
-		"Kinds are switched on the Screen-Space Physical Particles page. Textures are individual 2048 DXT5 files in Data\\Shaders\\PhysicalParticles\\.");
+		"Kinds are switched on the Screen-Space Physical Particles page. Textures are 2048 DXT5 atlases in Data\\Shaders\\PhysicalParticles\\.");
 	for (std::uint32_t kind = 0; kind < kKindCount; ++kind) {
 		ImGui::TextDisabled(
 			"%s: %u slices",

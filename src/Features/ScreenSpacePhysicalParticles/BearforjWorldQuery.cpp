@@ -113,6 +113,30 @@ namespace BearforjParticles
 		return a_region < kRegionCount ? kRegionNames[a_region] : kRegionNames[kRegionCount - 1];
 	}
 
+	namespace
+	{
+		RegionTintColor g_regionTints[kRegionCount] = {
+			{ 0.55F, 0.78F, 0.36F },
+			{ 0.90F, 0.78F, 0.46F },
+			{ 0.62F, 0.66F, 0.45F },
+			{ 0.70F, 0.66F, 0.60F },
+			{ 0.40F, 0.58F, 0.48F },
+			{ 1.0F, 1.0F, 1.0F }
+		};
+	}
+
+	RegionTintColor RegionTint(std::uint32_t a_region) noexcept
+	{
+		return a_region < kRegionCount ? g_regionTints[a_region] : g_regionTints[kRegionCount - 1];
+	}
+
+	void SetRegionTint(std::uint32_t a_region, float a_red, float a_green, float a_blue) noexcept
+	{
+		if (a_region >= kRegionCount)
+			return;
+		g_regionTints[a_region] = { a_red, a_green, a_blue };
+	}
+
 	std::uint32_t SpeciesIndex(const RE::TESForm* a_base) noexcept
 	{
 		const auto model = ModelText(a_base);
