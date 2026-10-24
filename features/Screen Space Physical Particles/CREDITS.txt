@@ -1,0 +1,10 @@
+Screen-space physical particles are adapted from D7ry's Community Shaders branch
+dev/dtry/sspp at commit c9663e0222f97748fd530fef1abd09fd9affd767.
+https://github.com/D7ry/skyrim-community-shaders
+
+Bearforj keeps that blood and leaf simulation and adds tree-only leaves, magic
+sparks, grass fluff, dandelions, glowing mushroom spores, fireflies, and moths.
+New particle art is one 2048 DXT5 straight-alpha DDS per slice. Those files
+are added at integration and are not in this package. They belong in
+Data\Shaders\PhysicalParticles\, and the full list is
+Data\Shaders\PhysicalParticles\particles.json.

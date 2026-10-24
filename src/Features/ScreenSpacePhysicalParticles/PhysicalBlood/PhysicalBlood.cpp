@@ -191,6 +191,10 @@ void PhysicalBlood::UpdateWaterField(float a_deltaTime)
 		1.0F / static_cast<float>(kWaterFieldSize)
 	};
 	globals::features::unifiedWater.GetFlowmapMapping(constants.flowOffsetX, constants.flowOffsetY, constants.flowWidth, constants.flowHeight);
+	const bool recentered = constants.center.x != constants.previousCenter.x ||
+	                        constants.center.y != constants.previousCenter.y;
+	const bool partial = !recentered && EnsureWaterTileResources();
+	constants.pad = partial ? 1.0F : 0.0F;
 	waterFieldCB->Update(constants);
 
 	auto* context = globals::d3d::context;
@@ -213,14 +217,65 @@ void PhysicalBlood::UpdateWaterField(float a_deltaTime)
 	context->CSSetSamplers(0, 1, &linearSampler);
 	context->CSSetShader(waterAdvectCS.get(), nullptr, 0);
 	globals::profiler->BeginPass("PhysicalBlood::WaterAdvection");
-	// TODO(PhysicalBlood): Track active 16x16 tiles and dispatch only those tiles
-	// plus the halo needed by transport, diffusion, and field recentering.
-	context->Dispatch(kWaterFieldSize / 8, kWaterFieldSize / 8, 1);
+	if (partial) {
+		const std::uint32_t argsInit[4] = { 0U, 1U, 1U, 0U };
+		context->UpdateSubresource(waterDispatchArgs.get(), 0, nullptr, argsInit, 0, 0);
+		ID3D11ShaderResourceView* markSRVs[2] = {
+			waterDensitySRV[currentWaterDensity].get(),
+			waterSourceSRV.get()
+		};
+		ID3D11UnorderedAccessView* markUAV = waterTileMaskUAV[0].get();
+		context->CSSetShaderResources(0, 2, markSRVs);
+		context->CSSetUnorderedAccessViews(0, 1, &markUAV, nullptr);
+		context->CSSetShader(waterTileMarkCS.get(), nullptr, 0);
+		context->Dispatch(16, 16, 1);
+		ID3D11UnorderedAccessView* nullMark{};
+		context->CSSetUnorderedAccessViews(0, 1, &nullMark, nullptr);
+
+		ID3D11ShaderResourceView* haloSRV[3] = { nullptr, nullptr, waterTileMaskSRV[0].get() };
+		ID3D11UnorderedAccessView* haloUAV = waterTileMaskUAV[1].get();
+		context->CSSetShaderResources(0, 3, haloSRV);
+		context->CSSetUnorderedAccessViews(0, 1, &haloUAV, nullptr);
+		context->CSSetShader(waterTileHaloCS.get(), nullptr, 0);
+		context->Dispatch(16, 16, 1);
+		context->CSSetUnorderedAccessViews(0, 1, &nullMark, nullptr);
+
+		// Compact the dilated mask. The halo UAV must be unbound before this SRV.
+		ID3D11ShaderResourceView* compactSRV[3] = { nullptr, nullptr, waterTileMaskSRV[1].get() };
+		context->CSSetShaderResources(0, 3, compactSRV);
+		ID3D11UnorderedAccessView* compactUAVs[3] = {
+			nullptr,
+			waterActiveTilesUAV.get(),
+			waterDispatchArgsUAV.get()
+		};
+		context->CSSetUnorderedAccessViews(0, 3, compactUAVs, nullptr);
+		context->CSSetShader(waterTileCompactCS.get(), nullptr, 0);
+		context->Dispatch(16, 16, 1);
+		ID3D11UnorderedAccessView* nullCompact[3]{};
+		context->CSSetUnorderedAccessViews(0, 3, nullCompact, nullptr);
+		ID3D11ShaderResourceView* nullCompactSRVs[3]{};
+		context->CSSetShaderResources(0, 3, nullCompactSRVs);
+
+		const float clearDensity[4]{};
+		context->ClearUnorderedAccessViewFloat(waterDensityUAV[next].get(), clearDensity);
+		ID3D11ShaderResourceView* advectSRVs[4] = {
+			waterDensitySRV[currentWaterDensity].get(),
+			globals::features::unifiedWater.GetFlowmapSRV(),
+			waterSourceSRV.get(),
+			waterActiveTilesSRV.get()
+		};
+		context->CSSetShaderResources(0, 4, advectSRVs);
+		context->CSSetUnorderedAccessViews(0, 2, outputs, nullptr);
+		context->CSSetShader(waterAdvectCS.get(), nullptr, 0);
+		context->DispatchIndirect(waterDispatchArgs.get(), 0);
+	} else {
+		context->Dispatch(kWaterFieldSize / 8, kWaterFieldSize / 8, 1);
+	}
 	globals::profiler->EndPass();
-	ID3D11ShaderResourceView* nullSRVs[3]{};
+	ID3D11ShaderResourceView* nullSRVs[4]{};
 	ID3D11UnorderedAccessView* nullUAVs[2]{};
 	ID3D11SamplerState* nullSampler{};
-	context->CSSetShaderResources(0, 3, nullSRVs);
+	context->CSSetShaderResources(0, 4, nullSRVs);
 	context->CSSetUnorderedAccessViews(0, 2, nullUAVs, nullptr);
 	context->CSSetSamplers(0, 1, &nullSampler);
 	context->CSSetShader(nullptr, nullptr, 0);
@@ -481,17 +536,92 @@ void PhysicalBlood::PostComposite()
 void PhysicalBlood::EnsureShaders()
 {
 	if (ownedSplatDrawArgsCS && sharedTerminalEventCS && sharedAirborneVS &&
-		sharedAirbornePS && sharedSplatVS && sharedSplatPS && waterAdvectCS)
+		sharedAirbornePS && sharedSplatVS && sharedSplatPS && waterAdvectCS &&
+		waterTileMarkCS && waterTileHaloCS && waterTileCompactCS)
 		return;
 	EnsureSharedShaders();
 	if (!waterAdvectCS)
 		waterAdvectCS.attach(static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\PhysicalBlood\\WaterBloodCS.hlsl", {}, "cs_5_0", "AdvectMain")));
+	if (!waterTileMarkCS)
+		waterTileMarkCS.attach(static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\PhysicalBlood\\WaterTileCompactCS.hlsl", {}, "cs_5_0", "MarkMain")));
+	if (!waterTileHaloCS)
+		waterTileHaloCS.attach(static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\PhysicalBlood\\WaterTileCompactCS.hlsl", {}, "cs_5_0", "HaloMain")));
+	if (!waterTileCompactCS)
+		waterTileCompactCS.attach(static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\PhysicalBlood\\WaterTileCompactCS.hlsl", {}, "cs_5_0", "CompactMain")));
+}
+
+bool PhysicalBlood::EnsureWaterTileResources()
+{
+	auto* device = globals::d3d::device;
+	if (!device || !waterTileMarkCS || !waterTileHaloCS || !waterTileCompactCS)
+		return false;
+	if (waterDispatchArgs && waterActiveTilesSRV && waterTileMaskSRV[0] && waterTileMaskSRV[1])
+		return true;
+
+	D3D11_TEXTURE2D_DESC mask{};
+	mask.Width = kWaterFieldSize / 8;
+	mask.Height = kWaterFieldSize / 8;
+	mask.MipLevels = 1;
+	mask.ArraySize = 1;
+	mask.Format = DXGI_FORMAT_R32_UINT;
+	mask.SampleDesc.Count = 1;
+	mask.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+	for (std::uint32_t index = 0; index < waterTileMask.size(); ++index) {
+		if (FAILED(device->CreateTexture2D(&mask, nullptr, waterTileMask[index].put())))
+			return false;
+		if (FAILED(device->CreateUnorderedAccessView(waterTileMask[index].get(), nullptr, waterTileMaskUAV[index].put())))
+			return false;
+		if (FAILED(device->CreateShaderResourceView(waterTileMask[index].get(), nullptr, waterTileMaskSRV[index].put())))
+			return false;
+	}
+
+	const auto tileCount = (kWaterFieldSize / 8) * (kWaterFieldSize / 8);
+	D3D11_BUFFER_DESC tiles{};
+	tiles.ByteWidth = static_cast<UINT>(sizeof(std::uint32_t) * tileCount);
+	tiles.Usage = D3D11_USAGE_DEFAULT;
+	tiles.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+	tiles.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+	tiles.StructureByteStride = sizeof(std::uint32_t);
+	if (FAILED(device->CreateBuffer(&tiles, nullptr, waterActiveTiles.put())))
+		return false;
+	D3D11_UNORDERED_ACCESS_VIEW_DESC tileUAV{};
+	tileUAV.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+	tileUAV.Format = DXGI_FORMAT_UNKNOWN;
+	tileUAV.Buffer.NumElements = tileCount;
+	D3D11_SHADER_RESOURCE_VIEW_DESC tileSRV{};
+	tileSRV.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+	tileSRV.Format = DXGI_FORMAT_UNKNOWN;
+	tileSRV.Buffer.NumElements = tileCount;
+	if (FAILED(device->CreateUnorderedAccessView(waterActiveTiles.get(), &tileUAV, waterActiveTilesUAV.put())) ||
+		FAILED(device->CreateShaderResourceView(waterActiveTiles.get(), &tileSRV, waterActiveTilesSRV.put())))
+		return false;
+
+	D3D11_BUFFER_DESC args{};
+	args.ByteWidth = sizeof(std::uint32_t) * 4;
+	args.Usage = D3D11_USAGE_DEFAULT;
+	args.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+	args.MiscFlags = D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS;
+	const std::uint32_t initial[4] = { 0U, 1U, 1U, 0U };
+	const D3D11_SUBRESOURCE_DATA initialData{ initial, 0, 0 };
+	if (FAILED(device->CreateBuffer(&args, &initialData, waterDispatchArgs.put())))
+		return false;
+	D3D11_UNORDERED_ACCESS_VIEW_DESC argsUAV{};
+	argsUAV.Format = DXGI_FORMAT_R32_UINT;
+	argsUAV.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+	argsUAV.Buffer.NumElements = 4;
+	return SUCCEEDED(device->CreateUnorderedAccessView(
+		waterDispatchArgs.get(),
+		&argsUAV,
+		waterDispatchArgsUAV.put()));
 }
 
 void PhysicalBlood::ClearShaderCache()
 {
 	sharedEmissionReady.store(false, std::memory_order_release);
 	waterAdvectCS = nullptr;
+	waterTileMarkCS = nullptr;
+	waterTileHaloCS = nullptr;
+	waterTileCompactCS = nullptr;
 	ownedSplatDrawArgsCS = nullptr;
 	sharedTerminalEventCS = nullptr;
 	sharedAirborneVS = nullptr;

@@ -4,6 +4,7 @@
 #include "Feature.h"
 #include "Features/ScreenSpacePhysicalParticles/Collision/PlayerCollisionProvider.h"
 #include "Features/ScreenSpacePhysicalParticles/Core/ParticleRuntime.h"
+#include "Features/ScreenSpacePhysicalParticles/ParticleTextureSet.h"
 
 #include <array>
 #include <atomic>
@@ -97,6 +98,7 @@ private:
 	{
 		RE::NiPoint3 boundsMin{};
 		RE::NiPoint3 boundsMax{};
+		std::uint32_t species{ 2 };
 	};
 
 	struct alignas(16) LeafSidecarGPU
@@ -176,6 +178,8 @@ private:
 	// Deprecated grass-derived seeding retained behind
 	// PHYSICAL_LEAVES_ENABLE_DEPRECATED_GRASS_SEEDING.
 	void ScanLoadedGrassNeighborhood();
+	void ScanLoadedTrees();
+	void ConfigureCanopyEmission();
 	[[nodiscard]] std::uint32_t QueueGrassRegion(
 		std::uint32_t a_sceneKey,
 		const RE::NiPoint3& a_boundsMin,
@@ -216,7 +220,19 @@ private:
 	std::uint32_t lastWorldspaceKey{};
 	std::uint32_t lastGrassScanCellKey{};
 	std::uint32_t grassScanCountdown{};
+	std::uint32_t activeRegionIndex{ 5 };
 	bool sharedConfigured{};
+	ParticleTextureSet leafTextures;
+	std::array<ScreenSpacePhysicalParticles::Core::EmissionProfileID, 5> canopyEmissionProfiles{
+		ScreenSpacePhysicalParticles::Core::kInvalidRoute,
+		ScreenSpacePhysicalParticles::Core::kInvalidRoute,
+		ScreenSpacePhysicalParticles::Core::kInvalidRoute,
+		ScreenSpacePhysicalParticles::Core::kInvalidRoute,
+		ScreenSpacePhysicalParticles::Core::kInvalidRoute
+	};
+	ScreenSpacePhysicalParticles::Core::ParticleTemplateID canopyTemplate{
+		ScreenSpacePhysicalParticles::Core::kInvalidRoute
+	};
 
 	ScreenSpacePhysicalParticles::Core::FeatureID sharedOwnerFeature{
 		ScreenSpacePhysicalParticles::Core::kInvalidRoute

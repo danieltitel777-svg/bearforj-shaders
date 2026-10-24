@@ -1,6 +1,7 @@
 Texture2D<float> PreviousDensity : register(t0);
 Texture2D<float4> Flowmap : register(t1);
 Texture2D<uint> Sources : register(t2);
+StructuredBuffer<uint> ActiveTiles : register(t3);
 RWTexture2D<float> OutputDensity : register(u0);
 RWTexture1D<uint> OutputActivity : register(u1);
 SamplerState LinearClampSampler : register(s0);
@@ -80,7 +81,11 @@ float2 GetFlowVelocity(float2 worldPosition, uint2 flowDimensions)
 //   groupIndex: Linear thread index used for group-shared initialization and reduction.
 // Returns: Nothing; writes OutputDensity and may set OutputActivity.
 [numthreads(8, 8, 1)]
-void AdvectMain(uint3 dispatchID : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
+void AdvectMain(
+	uint3 dispatchID : SV_DispatchThreadID,
+	uint groupIndex : SV_GroupIndex,
+	uint3 groupID : SV_GroupID,
+	uint3 groupThreadID : SV_GroupThreadID)
 {
 	if (groupIndex == 0u) {
 		GroupDensityActive = 0u;
@@ -93,9 +98,16 @@ void AdvectMain(uint3 dispatchID : SV_DispatchThreadID, uint groupIndex : SV_Gro
 	}
 	GroupMemoryBarrierWithGroupSync();
 
+	uint2 texelID = dispatchID.xy;
+	if (Padding0 >= 0.5f) {
+		uint tile = ActiveTiles[groupID.x];
+		texelID = uint2(tile & 127u, tile >> 7u) * 8u + groupThreadID.xy;
+	}
+	bool live = all(texelID < 1024u);
+
 	float2 texel = InverseDimensions;
 	float2 halfTexel = 0.5f * texel;
-	float2 uv = (float2(dispatchID.xy) + 0.5f) * texel;
+	float2 uv = (float2(texelID) + 0.5f) * texel;
 	float2 worldPosition = Center + (uv - 0.5f) * Extent;
 
 	float2 displacement = GetFlowVelocity(worldPosition, GroupFlowDimensions);
@@ -107,7 +119,9 @@ void AdvectMain(uint3 dispatchID : SV_DispatchThreadID, uint groupIndex : SV_Gro
 	}
 	float2 previousWorld = worldPosition - midpointDisplacement;
 	float2 previousUV = (previousWorld - PreviousCenter) / Extent + 0.5f;
-	float density = LoadPrevious(previousUV, halfTexel);
+	float density = 0.0f;
+	if (live) {
+	density = LoadPrevious(previousUV, halfTexel);
 	[branch]
 	if (DiffusionBlend > 0.0f) {
 		float cardinalNeighbors = LoadPrevious(previousUV + float2(texel.x, 0), halfTexel) +
@@ -121,12 +135,13 @@ void AdvectMain(uint3 dispatchID : SV_DispatchThreadID, uint groupIndex : SV_Gro
 		float isotropicNeighborhood = (cardinalNeighbors * 4.0f + diagonalNeighbors) / 20.0f;
 		density = lerp(density, isotropicNeighborhood, DiffusionBlend);
 	}
-	density += (float)Sources.Load(int3(dispatchID.xy, 0)) / 65536.0f;
+	density += (float)Sources.Load(int3(texelID, 0)) / 65536.0f;
 	density = clamp(density * DecayMultiplier, 0.0f, 16.0f);
 	density = density >= MIN_ACTIVE_DENSITY ? density : 0.0f;
-	OutputDensity[dispatchID.xy] = density;
+	OutputDensity[texelID] = density;
 	if (density > 0.0f)
 		InterlockedOr(GroupDensityActive, 1u);
+	}
 
 	GroupMemoryBarrierWithGroupSync();
 	if (groupIndex == 0u && GroupDensityActive != 0u)

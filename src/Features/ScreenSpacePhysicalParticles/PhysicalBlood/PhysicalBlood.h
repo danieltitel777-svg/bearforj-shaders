@@ -362,6 +362,18 @@ private:
 	std::uint32_t nextWaterActivityReadback{};
 	std::uint32_t nextWaterActivityReadbackToRead{};
 	winrt::com_ptr<ID3D11ComputeShader> waterAdvectCS;
+	std::array<winrt::com_ptr<ID3D11Texture2D>, 2> waterTileMask;
+	std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, 2> waterTileMaskUAV;
+	std::array<winrt::com_ptr<ID3D11ShaderResourceView>, 2> waterTileMaskSRV;
+	winrt::com_ptr<ID3D11Buffer> waterActiveTiles;
+	winrt::com_ptr<ID3D11UnorderedAccessView> waterActiveTilesUAV;
+	winrt::com_ptr<ID3D11ShaderResourceView> waterActiveTilesSRV;
+	winrt::com_ptr<ID3D11Buffer> waterDispatchArgs;
+	winrt::com_ptr<ID3D11UnorderedAccessView> waterDispatchArgsUAV;
+	winrt::com_ptr<ID3D11ComputeShader> waterTileMarkCS;
+	winrt::com_ptr<ID3D11ComputeShader> waterTileHaloCS;
+	winrt::com_ptr<ID3D11ComputeShader> waterTileCompactCS;
+	[[nodiscard]] bool EnsureWaterTileResources();
 	winrt::com_ptr<ID3D11ComputeShader> ownedSplatDrawArgsCS;
 	winrt::com_ptr<ID3D11ComputeShader> sharedTerminalEventCS;
 	winrt::com_ptr<ID3D11VertexShader> sharedAirborneVS;

@@ -2,9 +2,9 @@
 #include "PhysicalLeaves/PhysicalLeavesShared.hlsli"
 #include "ScreenSpacePhysicalParticles/ProceduralQuad.hlsli"
 
-// Renders SSPP-visible leaves using either the first atlas frame or a diagnostic
-// white material. Grounded leaves rest at a stable random tilt from their support
-// plane; airborne leaves billboard.
+// Renders SSPP-visible leaves from one slice of the per-region texture array.
+// appearance.w is frame 01 of the species/region set. Variation picks frames 01-04.
+// Grounded leaves rest at a stable random tilt; airborne leaves billboard.
 
 cbuffer RenderSettings : register(b0)
 {
@@ -28,6 +28,8 @@ struct VertexOutput
 	float4 Position : SV_POSITION;
 	float2 TexCoord : TEXCOORD0;
 	float Opacity : TEXCOORD1;
+	float Slice : TEXCOORD2;
+	float Variation : TEXCOORD3;
 };
 
 // Summary: Expands one visible leaf into a surface-aligned or camera-facing quad.
@@ -100,23 +102,26 @@ VertexOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID
 		FrameBuffer::CameraViewProj,
 		float4(vertexPosition, 1.0f));
 	output.Opacity = saturate(appearance.y);
+	output.Slice = appearance.w;
+	output.Variation = appearance.z;
 	return output;
 }
 #endif
 
 #if defined(PSHADER)
-Texture2D<float4> LeafAtlas : register(t2);
+Texture2DArray<float4> LeafSlices : register(t2);
 SamplerState LeafSampler : register(s0);
-static const float2 LEAF_ATLAS_TEXEL_INSET = 0.5f / 1024.0f;
 
 struct VertexOutput
 {
 	float4 Position : SV_POSITION;
 	float2 TexCoord : TEXCOORD0;
 	float Opacity : TEXCOORD1;
+	float Slice : TEXCOORD2;
+	float Variation : TEXCOORD3;
 };
 
-// Summary: Shades one leaf fragment from the atlas or debug-white material.
+// Summary: Shades one leaf fragment from the texture array or debug-white material.
 // Args:
 //   input: Rasterized leaf UV and opacity.
 // Returns: Leaf color and alpha coverage.
@@ -125,12 +130,9 @@ float4 PSMain(VertexOutput input) : SV_TARGET
 	if (DebugWhiteQuads != 0u)
 		return float4(1.0f, 1.0f, 1.0f, input.Opacity);
 
-	float2 frameMaximum = 1.0f / 8.0f - LEAF_ATLAS_TEXEL_INSET;
-	float2 atlasUV = lerp(
-		LEAF_ATLAS_TEXEL_INSET,
-		frameMaximum,
-		saturate(input.TexCoord));
-	float4 leaf = LeafAtlas.Sample(LeafSampler, atlasUV);
+	float frame = min(floor(saturate(input.Variation) * 4.0f), 3.0f);
+	float slice = max(round(input.Slice) + frame, 0.0f);
+	float4 leaf = LeafSlices.Sample(LeafSampler, float3(saturate(input.TexCoord), slice));
 	leaf.a *= input.Opacity;
 	clip(leaf.a - 0.05f);
 	return leaf;

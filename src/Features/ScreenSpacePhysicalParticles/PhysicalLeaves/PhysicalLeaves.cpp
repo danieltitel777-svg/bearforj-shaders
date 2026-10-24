@@ -3,6 +3,7 @@
 #include "Deferred.h"
 #include "Features/ScreenSpacePhysicalParticles/Collision/PlayerCollisionProvider.h"
 #include "Features/ScreenSpacePhysicalParticles/OrthographicHeightField.h"
+#include "Features/ScreenSpacePhysicalParticles/BearforjWorldQuery.h"
 #include "Features/ScreenSpacePhysicalParticles/ScreenSpacePhysicalParticles.h"
 #include "Globals.h"
 #include "State.h"
@@ -11,6 +12,7 @@
 #include <DDSTextureLoader.h>
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <limits>
 #include <vector>
 
@@ -340,6 +342,132 @@ void PhysicalLeaves::ScanLoadedGrassNeighborhood()
 	}
 }
 
+void PhysicalLeaves::ConfigureCanopyEmission()
+{
+	using namespace ScreenSpacePhysicalParticles::Core;
+	if (sharedSimulationProfile == kInvalidRoute || sharedRenderClass == kInvalidRoute)
+		return;
+	if (!leafTextures.SRV())
+		leafTextures.LoadGroup("leaves");
+
+	auto& runtime = ParticleRuntime::GetSingleton();
+	ParticleTemplateGPU canopy{};
+	canopy.simulationProfile = sharedSimulationProfile;
+	canopy.renderClass = sharedRenderClass;
+	canopy.lifecyclePhase = static_cast<std::uint32_t>(LifecyclePhase::kDynamic);
+	canopy.persistentListID = kInvalidRoute;
+	canopy.customInitialization = kInvalidRoute;
+	canopy.spawnPlacement = static_cast<std::uint32_t>(SpawnPlacement::kDirect);
+	canopyTemplate = runtime.RegisterParticleTemplate("PhysicalLeaves.Canopy", canopy);
+
+	activeRegionIndex = BearforjParticles::CurrentRegionIndex();
+	const auto region = BearforjParticles::RegionName(activeRegionIndex);
+	for (std::uint32_t species = 0; species < BearforjParticles::kSpeciesCount; ++species) {
+		EmissionProfileGPU emission{};
+		emission.initialSpeed.range = { 40.0F, 120.0F };
+		emission.initialSpeed.type = static_cast<std::uint32_t>(DistributionType::kUniform);
+		emission.initialSpeed.shape = 1.0F;
+		emission.horizontalAngleDegrees.range = { 0.0F, 360.0F };
+		emission.horizontalAngleDegrees.type = static_cast<std::uint32_t>(DistributionType::kUniform);
+		emission.horizontalAngleDegrees.shape = 1.0F;
+		emission.verticalAngleDegrees.range = { 0.0F, 18.0F };
+		emission.verticalAngleDegrees.type = static_cast<std::uint32_t>(DistributionType::kUniform);
+		emission.verticalAngleDegrees.shape = 1.0F;
+		emission.lifetime.range = {
+			settings.particleLifetime * 0.80F,
+			settings.particleLifetime * 1.20F
+		};
+		emission.lifetime.type = static_cast<std::uint32_t>(DistributionType::kUniform);
+		emission.lifetime.shape = 1.0F;
+		emission.radius.range = {
+			settings.particleSize * 0.80F,
+			settings.particleSize * 1.20F
+		};
+		emission.radius.type = static_cast<std::uint32_t>(DistributionType::kUniform);
+		emission.radius.shape = 1.0F;
+		emission.opacity.range = { 1.0F, 1.0F };
+		emission.opacity.type = static_cast<std::uint32_t>(DistributionType::kConstant);
+		emission.opacity.shape = 1.0F;
+		emission.generalScalar = static_cast<float>(leafTextures.Find(
+			BearforjParticles::SpeciesName(species),
+			region,
+			"01"));
+		emission.spawnShape = static_cast<std::uint32_t>(EmitterShape::kBox);
+		emission.spawnPlacement = static_cast<std::uint32_t>(SpawnPlacement::kDirect);
+		emission.trajectoryPolicy = static_cast<std::uint32_t>(
+			EmissionTrajectoryPolicy::kBoundedIndependent);
+		canopyEmissionProfiles[species] = runtime.RegisterEmissionProfile(
+			std::format("PhysicalLeaves.Canopy.{}", BearforjParticles::SpeciesName(species)),
+			emission);
+	}
+}
+
+void PhysicalLeaves::ScanLoadedTrees()
+{
+	auto* player = RE::PlayerCharacter::GetSingleton();
+	auto* cell = player ? player->GetParentCell() : nullptr;
+	if (!player || !cell || canopyTemplate == ScreenSpacePhysicalParticles::Core::kInvalidRoute)
+		return;
+	if (grassScanCountdown > 0U) {
+		--grassScanCountdown;
+		return;
+	}
+	grassScanCountdown = 20U;
+	observedPatches.clear();
+
+	const auto playerPosition = player->GetPosition();
+	constexpr float kCutoff = 3072.0F;
+	auto visit = [&](RE::TESObjectCELL* a_cell) {
+		if (!a_cell)
+			return;
+		a_cell->ForEachReferenceInRange(playerPosition, kCutoff, [&](RE::TESObjectREFR* a_ref) {
+			if (!BearforjParticles::IsTreeReference(a_ref))
+				return RE::BSContainer::ForEachResult::kContinue;
+			const auto* base = a_ref->GetBaseObject();
+			const auto position = a_ref->GetPosition();
+			const auto scale = std::max(a_ref->GetScale(), 0.25F);
+			float radius = 160.0F;
+			float bottom = 220.0F;
+			float top = 640.0F;
+			if (const auto* bound = base ? base->As<RE::TESBoundObject>() : nullptr) {
+				radius = std::max({
+					std::abs(static_cast<float>(bound->boundData.boundMin.x)),
+					std::abs(static_cast<float>(bound->boundData.boundMax.x)),
+					std::abs(static_cast<float>(bound->boundData.boundMin.y)),
+					std::abs(static_cast<float>(bound->boundData.boundMax.y)),
+					96.0F });
+				bottom = std::max(static_cast<float>(bound->boundData.boundMax.z) * 0.45F, 64.0F);
+				top = std::max(static_cast<float>(bound->boundData.boundMax.z), bottom + 64.0F);
+			}
+			ObservedPatch patch{};
+			patch.species = BearforjParticles::SpeciesIndex(base);
+			patch.boundsMin = {
+				position.x - radius * scale,
+				position.y - radius * scale,
+				position.z + bottom * scale
+			};
+			patch.boundsMax = {
+				position.x + radius * scale,
+				position.y + radius * scale,
+				position.z + top * scale
+			};
+			observedPatches[a_ref->GetFormID()] = patch;
+			return RE::BSContainer::ForEachResult::kContinue;
+		});
+	};
+	visit(cell);
+	if (auto* tes = RE::TES::GetSingleton(); tes && cell->IsExteriorCell()) {
+		tes->ForEachCell([&](RE::TESObjectCELL* a_other) {
+			if (a_other && a_other != cell && a_other->IsAttached())
+				visit(a_other);
+		});
+	}
+	if (observedPatches.empty())
+		RetireSharedEmitters();
+	else
+		SynchronizeSharedEmitters();
+}
+
 void PhysicalLeaves::SetupResources()
 {
 	if (!globals::features::screenSpacePhysicalParticles.loaded) {
@@ -398,16 +526,11 @@ void PhysicalLeaves::SetupSharedGraphicsResources()
 	}
 
 	if (!leafTextureSRV) {
-		const auto textureResult = DirectX::CreateDDSTextureFromFile(
-			device,
-			globals::d3d::context,
-			L"Data\\Shaders\\PhysicalLeaves\\fxaspenleafanim.dds",
-			nullptr,
-			leafTextureSRV.put());
-		if (FAILED(textureResult)) {
-			logger::error(
-				"[PhysicalLeaves] Failed to load fxaspenleafanim.dds ({:#010x})",
-				static_cast<std::uint32_t>(textureResult));
+		if (leafTextures.LoadGroup("leaves")) {
+			if (auto* view = leafTextures.SRV())
+				leafTextureSRV.copy_from(view);
+		} else {
+			logger::error("[PhysicalLeaves] Leaf textures were not loaded from particles.json");
 		}
 	}
 	if (!leafSampler) {
@@ -610,9 +733,11 @@ void PhysicalLeaves::SetupSharedRuntime()
 	rendererDesc.drawOrder = 300U;
 	rendererDesc.vertexCountPerInstance = 4U;
 	rendererDesc.cullRadiusScale = 1.5F;
-	rendererDesc.maximumDistance = 0.0F;
+	rendererDesc.maximumDistance = 4096.0F;
 	rendererDesc.cullingFlags = static_cast<std::uint32_t>(
-		ScreenSpacePhysicalParticles::Core::RenderCullFlags::kFrustum);
+								   ScreenSpacePhysicalParticles::Core::RenderCullFlags::kFrustum) |
+	                           static_cast<std::uint32_t>(
+								   ScreenSpacePhysicalParticles::Core::RenderCullFlags::kDistance);
 	rendererDesc.drawProfilerName = "PhysicalLeaves::ParticleRender";
 	sharedRenderClass = runtime.RegisterRenderer(
 		"PhysicalLeaves.Leaf",
@@ -740,7 +865,9 @@ void PhysicalLeaves::ConfigureSharedRuntime()
 		EmissionTrajectoryPolicy::kBoundedIndependent);
 	sharedEmissionProfile = runtime.RegisterEmissionProfile(
 		"PhysicalLeaves.GroundCover", emission);
-	sharedConfigured = sharedEmissionProfile != kInvalidRoute;
+	ConfigureCanopyEmission();
+	sharedConfigured = sharedEmissionProfile != kInvalidRoute &&
+	                   canopyTemplate != kInvalidRoute;
 }
 
 // Summary: Queues one flat 20-by-20-meter leaf field at the player's base height.
@@ -835,13 +962,16 @@ ScreenSpacePhysicalParticles::Core::EmitterDesc PhysicalLeaves::BuildSharedEmitt
 		(a_patch.boundsMin.y + a_patch.boundsMax.y) * 0.5F,
 		(a_patch.boundsMin.z + a_patch.boundsMax.z) * 0.5F
 	};
-	emitter.forward = { 0.0F, 0.0F, 1.0F };
+	emitter.forward = { 0.0F, 0.0F, -1.0F };
 	emitter.right = { 1.0F, 0.0F, 0.0F };
 	emitter.vertical = { 0.0F, 1.0F, 0.0F };
 	emitter.seed = static_cast<std::uint32_t>(
 		a_patchKey ^ (a_patchKey >> 32U) ^ 0x1EAFC001U);
-	emitter.particleTemplate = sharedParticleTemplate;
-	emitter.emissionProfile = sharedEmissionProfile;
+	const auto species = std::min(a_patch.species, 4U);
+	emitter.particleTemplate = canopyTemplate != kInvalidRoute ? canopyTemplate : sharedParticleTemplate;
+	emitter.emissionProfile = canopyEmissionProfiles[species] != kInvalidRoute ?
+	                              canopyEmissionProfiles[species] :
+	                              sharedEmissionProfile;
 	emitter.boundsMin = {
 		a_patch.boundsMin.x, a_patch.boundsMin.y, a_patch.boundsMin.z
 	};
@@ -849,14 +979,23 @@ ScreenSpacePhysicalParticles::Core::EmitterDesc PhysicalLeaves::BuildSharedEmitt
 		a_patch.boundsMax.x, a_patch.boundsMax.y, a_patch.boundsMax.z
 	};
 	emitter.particlesPerSecond = 0.0F;
-	const auto fullTarget = static_cast<std::uint32_t>(
-		std::clamp(settings.leavesPerTile, 1, 64));
-	emitter.targetAlive = 0U;
-	emitter.maximumAlive = 0U;
+	const auto* player = RE::PlayerCharacter::GetSingleton();
+	const auto playerPosition = player ? player->GetPosition() : RE::NiPoint3{};
+	const auto dx = emitter.origin.x - playerPosition.x;
+	const auto dy = emitter.origin.y - playerPosition.y;
+	const auto distanceScale = std::clamp(1.0F - std::sqrt(dx * dx + dy * dy) / 3072.0F, 0.0F, 1.0F);
+	const auto amount = globals::features::screenSpacePhysicalParticles.ParticleAmountScale();
+	auto fullTarget = static_cast<std::uint32_t>(std::lround(
+		static_cast<float>(std::clamp(settings.leavesPerTile, 1, 64)) * 0.25F * amount * distanceScale));
+	fullTarget = std::min(fullTarget, 64U);
+	emitter.targetAlive = fullTarget;
+	emitter.maximumAlive = fullTarget;
 	emitter.priority = 100U;
 	emitter.ownerFeature = sharedOwnerFeature;
 	emitter.ownerCell = static_cast<std::uint32_t>(a_patchKey);
 	emitter.flags = static_cast<std::uint32_t>(EmitterFlags::kEnabled);
+	if (fullTarget > 0U)
+		emitter.flags |= static_cast<std::uint32_t>(EmitterFlags::kMaintainDensity);
 
 	if (heightField.Ready()) {
 		const auto fieldCenter = heightField.Center();
@@ -1189,6 +1328,16 @@ void PhysicalLeaves::PostComposite()
 #if PHYSICAL_LEAVES_ENABLE_DEPRECATED_GRASS_SEEDING
 	ScanLoadedGrassNeighborhood();
 	SynchronizeSharedEmitters();
+#else
+	if (!globals::features::screenSpacePhysicalParticles.IsKindEnabled(
+			ScreenSpacePhysicalParticlesFeature::ParticleKind::kLeaves)) {
+		if (!sharedEmitters.empty())
+			RetireSharedEmitters();
+	} else {
+		if (sharedConfigured && BearforjParticles::CurrentRegionIndex() != activeRegionIndex)
+			ConfigureCanopyEmission();
+		ScanLoadedTrees();
+	}
 #endif
 }
 
@@ -1234,7 +1383,14 @@ void PhysicalLeaves::DrawSettings()
 			"feature.physical_leaves.leaves_per_tile_tooltip",
 			"Number of leaves seeded into each 2048-unit landscape quadrant with a painted grass-bearing layer. Changing this rebuilds the current leaf population.");
 #else
-		ImGui::TextDisabled("Automatic grass-derived leaf seeding is deprecated and disabled.");
+		reseed |= ImGui::SliderInt(
+			T("feature.physical_leaves.leaves_per_tile", "Leaves per tree"),
+			&settings.leavesPerTile,
+			1,
+			64);
+		drawTooltip(
+			"feature.physical_leaves.leaves_per_tile_tooltip",
+			"Target leaves around each nearby tree canopy, before distance and the global amount scale. Leaves spawn from trees only.");
 #endif
 		reseed |= ImGui::SliderFloat(T("feature.physical_leaves.particle_size", "Leaf half-size"), &settings.particleSize, 2.0F, 32.0F, "%.1f");
 		drawTooltip(

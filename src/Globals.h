@@ -32,6 +32,7 @@ struct PerformanceOverlay;
 struct ScreenSpacePhysicalParticlesFeature;
 struct PhysicalBlood;
 struct PhysicalLeaves;
+struct PhysicalWorldParticles;
 struct WetnessEffects;
 struct ExtendedTranslucency;
 struct Upscaling;
@@ -124,6 +125,7 @@ namespace globals
 		extern ScreenSpacePhysicalParticlesFeature screenSpacePhysicalParticles;
 		extern PhysicalBlood physicalBlood;
 		extern PhysicalLeaves physicalLeaves;
+		extern PhysicalWorldParticles physicalWorldParticles;
 		extern WetnessEffects wetnessEffects;
 		extern ExtendedTranslucency extendedTranslucency;
 		extern Upscaling upscaling;

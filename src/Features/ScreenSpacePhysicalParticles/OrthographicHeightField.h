@@ -27,6 +27,8 @@ namespace ScreenSpacePhysicalParticles
 		static constexpr float kExteriorExtent = kExteriorCellWidth * kExteriorGridWidth;
 		static constexpr float kExteriorHalfExtent = kExteriorExtent * 0.5F;
 		static constexpr float kSolidWorldUnitsPerTexel = 4.0F;
+		static constexpr std::uint32_t kSolidGeometriesPerChunk = 64;
+		static constexpr float kSolidChunkMoveThreshold = 256.0F;
 		static constexpr float kVerticalRange = 8192.0F;
 		static constexpr float kMissingHeight = -100000.0F;
 
@@ -198,6 +200,12 @@ namespace ScreenSpacePhysicalParticles
 		std::uint32_t lastWorldspaceKey{};
 		std::uint32_t lastCellKey{};
 		std::uint32_t lastSolidCaptureFrame{ static_cast<std::uint32_t>(-1) };
+		std::uint32_t solidChunkCursor{};
+		std::uint32_t solidChunkWorldKey{};
+		std::uint32_t solidChunkCellKey{};
+		float2 solidChunkCenter{};
+		bool solidChunkActive{};
+		bool solidChunkInterior{};
 		Util::FrameChecker captureFrame;
 		bool lastInterior{};
 		bool hasCaptureAnchor{};

@@ -2,6 +2,7 @@
 
 #include "Deferred.h"
 #include "Features/CloudShadows.h"
+#include "Features/ScreenSpacePhysicalParticles/ScreenSpacePhysicalParticles.h"
 #include "Features/ScreenSpaceShadows.h"
 #include "Features/TerrainShadows.h"
 #include "Features/VolumetricShadows.h"
@@ -528,6 +529,9 @@ bool PhysicalBlood::QueueSharedBurst(
 	const auto particleTemplate = static_cast<ParticleTemplateID>(routing);
 	if (ownerFeature == kInvalidRoute || particleTemplate == kInvalidRoute)
 		return false;
+	const auto amountScale = globals::features::screenSpacePhysicalParticles.ParticleAmountScale();
+	if (amountScale <= 0.0F)
+		return false;
 
 	const auto forward = NormalizeDirection(a_direction);
 	const RE::NiPoint3 referenceUp = std::abs(forward.z) > 0.98F ?
@@ -543,7 +547,7 @@ bool PhysicalBlood::QueueSharedBurst(
 	request.seed = a_seed;
 	request.right = { right.x, right.y, right.z };
 	request.count = static_cast<std::uint32_t>(std::clamp(
-		static_cast<int>(a_emission.particlesPerHit * request.strength),
+		static_cast<int>(a_emission.particlesPerHit * request.strength * amountScale),
 		1,
 		static_cast<int>(ParticleRuntime::kMaximumCapacity)));
 	request.vertical = { vertical.x, vertical.y, vertical.z };

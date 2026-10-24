@@ -1,0 +1,777 @@
+{
+  "folder": "Data\\Shaders\\PhysicalParticles\\",
+  "format": "DXT5",
+  "alpha": "straight",
+  "size": 2048,
+  "notes": "Bearforj physical particle textures. One DDS per file, not an atlas. Every file is 2048x2048 DXT5 with straight alpha and lives directly in Data\\Shaders\\PhysicalParticles\\. The DDS files are added at integration and are not generated in this package. Each JSON group is one texture array; slices stay in this order, including when a file is missing at load (the loader repeats another slice in that group so indices do not shift). Leaf frames 01-04 are shape variants of one species and region. Region selection follows the player worldspace and location, with neutral as the fallback. pine_hjaal is the Hjaalmarch set: leaf_{aspen|birch|oak}_pine_hjaal and needles_pine_hjaal. Maple has no pine_hjaal set and uses neutral there. Pine trees use needles_pine_hjaal in every region, because that is the only needle set. moth_frame_01..04 is a flipbook in frame order. spark_01..04 are tinted to the spell color.",
+  "leaves": [
+    {
+      "id": "aspen_falkreath_rift_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_falkreath_rift_01.dds",
+      "species": "aspen",
+      "region": "falkreath_rift",
+      "frame": "01"
+    },
+    {
+      "id": "aspen_falkreath_rift_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_falkreath_rift_02.dds",
+      "species": "aspen",
+      "region": "falkreath_rift",
+      "frame": "02"
+    },
+    {
+      "id": "aspen_falkreath_rift_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_falkreath_rift_03.dds",
+      "species": "aspen",
+      "region": "falkreath_rift",
+      "frame": "03"
+    },
+    {
+      "id": "aspen_falkreath_rift_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_falkreath_rift_04.dds",
+      "species": "aspen",
+      "region": "falkreath_rift",
+      "frame": "04"
+    },
+    {
+      "id": "aspen_whiterun_tundra_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_whiterun_tundra_01.dds",
+      "species": "aspen",
+      "region": "whiterun_tundra",
+      "frame": "01"
+    },
+    {
+      "id": "aspen_whiterun_tundra_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_whiterun_tundra_02.dds",
+      "species": "aspen",
+      "region": "whiterun_tundra",
+      "frame": "02"
+    },
+    {
+      "id": "aspen_whiterun_tundra_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_whiterun_tundra_03.dds",
+      "species": "aspen",
+      "region": "whiterun_tundra",
+      "frame": "03"
+    },
+    {
+      "id": "aspen_whiterun_tundra_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_whiterun_tundra_04.dds",
+      "species": "aspen",
+      "region": "whiterun_tundra",
+      "frame": "04"
+    },
+    {
+      "id": "aspen_reach_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_reach_01.dds",
+      "species": "aspen",
+      "region": "reach",
+      "frame": "01"
+    },
+    {
+      "id": "aspen_reach_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_reach_02.dds",
+      "species": "aspen",
+      "region": "reach",
+      "frame": "02"
+    },
+    {
+      "id": "aspen_reach_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_reach_03.dds",
+      "species": "aspen",
+      "region": "reach",
+      "frame": "03"
+    },
+    {
+      "id": "aspen_reach_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_reach_04.dds",
+      "species": "aspen",
+      "region": "reach",
+      "frame": "04"
+    },
+    {
+      "id": "aspen_solstheim_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_solstheim_01.dds",
+      "species": "aspen",
+      "region": "solstheim",
+      "frame": "01"
+    },
+    {
+      "id": "aspen_solstheim_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_solstheim_02.dds",
+      "species": "aspen",
+      "region": "solstheim",
+      "frame": "02"
+    },
+    {
+      "id": "aspen_solstheim_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_solstheim_03.dds",
+      "species": "aspen",
+      "region": "solstheim",
+      "frame": "03"
+    },
+    {
+      "id": "aspen_solstheim_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_solstheim_04.dds",
+      "species": "aspen",
+      "region": "solstheim",
+      "frame": "04"
+    },
+    {
+      "id": "aspen_neutral_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_neutral_01.dds",
+      "species": "aspen",
+      "region": "neutral",
+      "frame": "01"
+    },
+    {
+      "id": "aspen_neutral_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_neutral_02.dds",
+      "species": "aspen",
+      "region": "neutral",
+      "frame": "02"
+    },
+    {
+      "id": "aspen_neutral_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_neutral_03.dds",
+      "species": "aspen",
+      "region": "neutral",
+      "frame": "03"
+    },
+    {
+      "id": "aspen_neutral_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_neutral_04.dds",
+      "species": "aspen",
+      "region": "neutral",
+      "frame": "04"
+    },
+    {
+      "id": "birch_falkreath_rift_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_falkreath_rift_01.dds",
+      "species": "birch",
+      "region": "falkreath_rift",
+      "frame": "01"
+    },
+    {
+      "id": "birch_falkreath_rift_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_falkreath_rift_02.dds",
+      "species": "birch",
+      "region": "falkreath_rift",
+      "frame": "02"
+    },
+    {
+      "id": "birch_falkreath_rift_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_falkreath_rift_03.dds",
+      "species": "birch",
+      "region": "falkreath_rift",
+      "frame": "03"
+    },
+    {
+      "id": "birch_falkreath_rift_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_falkreath_rift_04.dds",
+      "species": "birch",
+      "region": "falkreath_rift",
+      "frame": "04"
+    },
+    {
+      "id": "birch_whiterun_tundra_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_whiterun_tundra_01.dds",
+      "species": "birch",
+      "region": "whiterun_tundra",
+      "frame": "01"
+    },
+    {
+      "id": "birch_whiterun_tundra_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_whiterun_tundra_02.dds",
+      "species": "birch",
+      "region": "whiterun_tundra",
+      "frame": "02"
+    },
+    {
+      "id": "birch_whiterun_tundra_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_whiterun_tundra_03.dds",
+      "species": "birch",
+      "region": "whiterun_tundra",
+      "frame": "03"
+    },
+    {
+      "id": "birch_whiterun_tundra_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_whiterun_tundra_04.dds",
+      "species": "birch",
+      "region": "whiterun_tundra",
+      "frame": "04"
+    },
+    {
+      "id": "birch_reach_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_reach_01.dds",
+      "species": "birch",
+      "region": "reach",
+      "frame": "01"
+    },
+    {
+      "id": "birch_reach_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_reach_02.dds",
+      "species": "birch",
+      "region": "reach",
+      "frame": "02"
+    },
+    {
+      "id": "birch_reach_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_reach_03.dds",
+      "species": "birch",
+      "region": "reach",
+      "frame": "03"
+    },
+    {
+      "id": "birch_reach_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_reach_04.dds",
+      "species": "birch",
+      "region": "reach",
+      "frame": "04"
+    },
+    {
+      "id": "birch_solstheim_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_solstheim_01.dds",
+      "species": "birch",
+      "region": "solstheim",
+      "frame": "01"
+    },
+    {
+      "id": "birch_solstheim_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_solstheim_02.dds",
+      "species": "birch",
+      "region": "solstheim",
+      "frame": "02"
+    },
+    {
+      "id": "birch_solstheim_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_solstheim_03.dds",
+      "species": "birch",
+      "region": "solstheim",
+      "frame": "03"
+    },
+    {
+      "id": "birch_solstheim_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_solstheim_04.dds",
+      "species": "birch",
+      "region": "solstheim",
+      "frame": "04"
+    },
+    {
+      "id": "birch_neutral_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_neutral_01.dds",
+      "species": "birch",
+      "region": "neutral",
+      "frame": "01"
+    },
+    {
+      "id": "birch_neutral_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_neutral_02.dds",
+      "species": "birch",
+      "region": "neutral",
+      "frame": "02"
+    },
+    {
+      "id": "birch_neutral_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_neutral_03.dds",
+      "species": "birch",
+      "region": "neutral",
+      "frame": "03"
+    },
+    {
+      "id": "birch_neutral_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_neutral_04.dds",
+      "species": "birch",
+      "region": "neutral",
+      "frame": "04"
+    },
+    {
+      "id": "oak_falkreath_rift_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_falkreath_rift_01.dds",
+      "species": "oak",
+      "region": "falkreath_rift",
+      "frame": "01"
+    },
+    {
+      "id": "oak_falkreath_rift_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_falkreath_rift_02.dds",
+      "species": "oak",
+      "region": "falkreath_rift",
+      "frame": "02"
+    },
+    {
+      "id": "oak_falkreath_rift_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_falkreath_rift_03.dds",
+      "species": "oak",
+      "region": "falkreath_rift",
+      "frame": "03"
+    },
+    {
+      "id": "oak_falkreath_rift_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_falkreath_rift_04.dds",
+      "species": "oak",
+      "region": "falkreath_rift",
+      "frame": "04"
+    },
+    {
+      "id": "oak_whiterun_tundra_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_whiterun_tundra_01.dds",
+      "species": "oak",
+      "region": "whiterun_tundra",
+      "frame": "01"
+    },
+    {
+      "id": "oak_whiterun_tundra_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_whiterun_tundra_02.dds",
+      "species": "oak",
+      "region": "whiterun_tundra",
+      "frame": "02"
+    },
+    {
+      "id": "oak_whiterun_tundra_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_whiterun_tundra_03.dds",
+      "species": "oak",
+      "region": "whiterun_tundra",
+      "frame": "03"
+    },
+    {
+      "id": "oak_whiterun_tundra_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_whiterun_tundra_04.dds",
+      "species": "oak",
+      "region": "whiterun_tundra",
+      "frame": "04"
+    },
+    {
+      "id": "oak_reach_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_reach_01.dds",
+      "species": "oak",
+      "region": "reach",
+      "frame": "01"
+    },
+    {
+      "id": "oak_reach_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_reach_02.dds",
+      "species": "oak",
+      "region": "reach",
+      "frame": "02"
+    },
+    {
+      "id": "oak_reach_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_reach_03.dds",
+      "species": "oak",
+      "region": "reach",
+      "frame": "03"
+    },
+    {
+      "id": "oak_reach_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_reach_04.dds",
+      "species": "oak",
+      "region": "reach",
+      "frame": "04"
+    },
+    {
+      "id": "oak_solstheim_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_solstheim_01.dds",
+      "species": "oak",
+      "region": "solstheim",
+      "frame": "01"
+    },
+    {
+      "id": "oak_solstheim_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_solstheim_02.dds",
+      "species": "oak",
+      "region": "solstheim",
+      "frame": "02"
+    },
+    {
+      "id": "oak_solstheim_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_solstheim_03.dds",
+      "species": "oak",
+      "region": "solstheim",
+      "frame": "03"
+    },
+    {
+      "id": "oak_solstheim_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_solstheim_04.dds",
+      "species": "oak",
+      "region": "solstheim",
+      "frame": "04"
+    },
+    {
+      "id": "oak_neutral_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_neutral_01.dds",
+      "species": "oak",
+      "region": "neutral",
+      "frame": "01"
+    },
+    {
+      "id": "oak_neutral_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_neutral_02.dds",
+      "species": "oak",
+      "region": "neutral",
+      "frame": "02"
+    },
+    {
+      "id": "oak_neutral_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_neutral_03.dds",
+      "species": "oak",
+      "region": "neutral",
+      "frame": "03"
+    },
+    {
+      "id": "oak_neutral_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_neutral_04.dds",
+      "species": "oak",
+      "region": "neutral",
+      "frame": "04"
+    },
+    {
+      "id": "maple_falkreath_rift_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_falkreath_rift_01.dds",
+      "species": "maple",
+      "region": "falkreath_rift",
+      "frame": "01"
+    },
+    {
+      "id": "maple_falkreath_rift_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_falkreath_rift_02.dds",
+      "species": "maple",
+      "region": "falkreath_rift",
+      "frame": "02"
+    },
+    {
+      "id": "maple_falkreath_rift_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_falkreath_rift_03.dds",
+      "species": "maple",
+      "region": "falkreath_rift",
+      "frame": "03"
+    },
+    {
+      "id": "maple_falkreath_rift_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_falkreath_rift_04.dds",
+      "species": "maple",
+      "region": "falkreath_rift",
+      "frame": "04"
+    },
+    {
+      "id": "maple_whiterun_tundra_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_whiterun_tundra_01.dds",
+      "species": "maple",
+      "region": "whiterun_tundra",
+      "frame": "01"
+    },
+    {
+      "id": "maple_whiterun_tundra_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_whiterun_tundra_02.dds",
+      "species": "maple",
+      "region": "whiterun_tundra",
+      "frame": "02"
+    },
+    {
+      "id": "maple_whiterun_tundra_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_whiterun_tundra_03.dds",
+      "species": "maple",
+      "region": "whiterun_tundra",
+      "frame": "03"
+    },
+    {
+      "id": "maple_whiterun_tundra_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_whiterun_tundra_04.dds",
+      "species": "maple",
+      "region": "whiterun_tundra",
+      "frame": "04"
+    },
+    {
+      "id": "maple_reach_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_reach_01.dds",
+      "species": "maple",
+      "region": "reach",
+      "frame": "01"
+    },
+    {
+      "id": "maple_reach_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_reach_02.dds",
+      "species": "maple",
+      "region": "reach",
+      "frame": "02"
+    },
+    {
+      "id": "maple_reach_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_reach_03.dds",
+      "species": "maple",
+      "region": "reach",
+      "frame": "03"
+    },
+    {
+      "id": "maple_reach_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_reach_04.dds",
+      "species": "maple",
+      "region": "reach",
+      "frame": "04"
+    },
+    {
+      "id": "maple_solstheim_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_solstheim_01.dds",
+      "species": "maple",
+      "region": "solstheim",
+      "frame": "01"
+    },
+    {
+      "id": "maple_solstheim_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_solstheim_02.dds",
+      "species": "maple",
+      "region": "solstheim",
+      "frame": "02"
+    },
+    {
+      "id": "maple_solstheim_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_solstheim_03.dds",
+      "species": "maple",
+      "region": "solstheim",
+      "frame": "03"
+    },
+    {
+      "id": "maple_solstheim_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_solstheim_04.dds",
+      "species": "maple",
+      "region": "solstheim",
+      "frame": "04"
+    },
+    {
+      "id": "maple_neutral_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_neutral_01.dds",
+      "species": "maple",
+      "region": "neutral",
+      "frame": "01"
+    },
+    {
+      "id": "maple_neutral_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_neutral_02.dds",
+      "species": "maple",
+      "region": "neutral",
+      "frame": "02"
+    },
+    {
+      "id": "maple_neutral_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_neutral_03.dds",
+      "species": "maple",
+      "region": "neutral",
+      "frame": "03"
+    },
+    {
+      "id": "maple_neutral_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_maple_neutral_04.dds",
+      "species": "maple",
+      "region": "neutral",
+      "frame": "04"
+    },
+    {
+      "id": "aspen_pine_hjaal_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_pine_hjaal_01.dds",
+      "species": "aspen",
+      "region": "pine_hjaal",
+      "frame": "01"
+    },
+    {
+      "id": "aspen_pine_hjaal_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_pine_hjaal_02.dds",
+      "species": "aspen",
+      "region": "pine_hjaal",
+      "frame": "02"
+    },
+    {
+      "id": "aspen_pine_hjaal_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_pine_hjaal_03.dds",
+      "species": "aspen",
+      "region": "pine_hjaal",
+      "frame": "03"
+    },
+    {
+      "id": "aspen_pine_hjaal_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_aspen_pine_hjaal_04.dds",
+      "species": "aspen",
+      "region": "pine_hjaal",
+      "frame": "04"
+    },
+    {
+      "id": "birch_pine_hjaal_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_pine_hjaal_01.dds",
+      "species": "birch",
+      "region": "pine_hjaal",
+      "frame": "01"
+    },
+    {
+      "id": "birch_pine_hjaal_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_pine_hjaal_02.dds",
+      "species": "birch",
+      "region": "pine_hjaal",
+      "frame": "02"
+    },
+    {
+      "id": "birch_pine_hjaal_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_pine_hjaal_03.dds",
+      "species": "birch",
+      "region": "pine_hjaal",
+      "frame": "03"
+    },
+    {
+      "id": "birch_pine_hjaal_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_birch_pine_hjaal_04.dds",
+      "species": "birch",
+      "region": "pine_hjaal",
+      "frame": "04"
+    },
+    {
+      "id": "oak_pine_hjaal_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_pine_hjaal_01.dds",
+      "species": "oak",
+      "region": "pine_hjaal",
+      "frame": "01"
+    },
+    {
+      "id": "oak_pine_hjaal_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_pine_hjaal_02.dds",
+      "species": "oak",
+      "region": "pine_hjaal",
+      "frame": "02"
+    },
+    {
+      "id": "oak_pine_hjaal_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_pine_hjaal_03.dds",
+      "species": "oak",
+      "region": "pine_hjaal",
+      "frame": "03"
+    },
+    {
+      "id": "oak_pine_hjaal_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\leaf_oak_pine_hjaal_04.dds",
+      "species": "oak",
+      "region": "pine_hjaal",
+      "frame": "04"
+    },
+    {
+      "id": "needles_pine_hjaal_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\needles_pine_hjaal_01.dds",
+      "species": "pine",
+      "region": "pine_hjaal",
+      "frame": "01"
+    },
+    {
+      "id": "needles_pine_hjaal_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\needles_pine_hjaal_02.dds",
+      "species": "pine",
+      "region": "pine_hjaal",
+      "frame": "02"
+    },
+    {
+      "id": "needles_pine_hjaal_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\needles_pine_hjaal_03.dds",
+      "species": "pine",
+      "region": "pine_hjaal",
+      "frame": "03"
+    },
+    {
+      "id": "needles_pine_hjaal_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\needles_pine_hjaal_04.dds",
+      "species": "pine",
+      "region": "pine_hjaal",
+      "frame": "04"
+    }
+  ],
+  "sparks": [
+    {
+      "id": "spark_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\spark_01.dds",
+      "frame": "01"
+    },
+    {
+      "id": "spark_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\spark_02.dds",
+      "frame": "02"
+    },
+    {
+      "id": "spark_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\spark_03.dds",
+      "frame": "03"
+    },
+    {
+      "id": "spark_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\spark_04.dds",
+      "frame": "04"
+    }
+  ],
+  "fluff": [
+    {
+      "id": "fluff_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\fluff_01.dds",
+      "frame": "01"
+    },
+    {
+      "id": "fluff_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\fluff_02.dds",
+      "frame": "02"
+    }
+  ],
+  "dandelions": [
+    {
+      "id": "dandelion_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\dandelion_01.dds",
+      "frame": "01"
+    },
+    {
+      "id": "dandelion_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\dandelion_02.dds",
+      "frame": "02"
+    }
+  ],
+  "spores": [
+    {
+      "id": "spore_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\spore_01.dds",
+      "frame": "01"
+    },
+    {
+      "id": "spore_cluster_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\spore_cluster_01.dds",
+      "frame": "01"
+    }
+  ],
+  "fireflies": [
+    {
+      "id": "firefly_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\firefly_01.dds",
+      "frame": "01"
+    },
+    {
+      "id": "firefly_glow_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\firefly_glow_01.dds",
+      "frame": "01"
+    }
+  ],
+  "moths": [
+    {
+      "id": "moth_frame_01",
+      "path": "Data\\Shaders\\PhysicalParticles\\moth_frame_01.dds",
+      "frame": "01",
+      "flipbook": true
+    },
+    {
+      "id": "moth_frame_02",
+      "path": "Data\\Shaders\\PhysicalParticles\\moth_frame_02.dds",
+      "frame": "02",
+      "flipbook": true
+    },
+    {
+      "id": "moth_frame_03",
+      "path": "Data\\Shaders\\PhysicalParticles\\moth_frame_03.dds",
+      "frame": "03",
+      "flipbook": true
+    },
+    {
+      "id": "moth_frame_04",
+      "path": "Data\\Shaders\\PhysicalParticles\\moth_frame_04.dds",
+      "frame": "04",
+      "flipbook": true
+    }
+  ]
+}

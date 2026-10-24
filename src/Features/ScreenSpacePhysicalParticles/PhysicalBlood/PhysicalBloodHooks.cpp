@@ -77,6 +77,10 @@ RE::BSTempEffectParticle* PhysicalBlood::ParticleEffectSpawnHook::thunk(
 	RE::NiAVObject* a_target)
 {
 	auto& feature = globals::features::physicalBlood;
+	if (!globals::features::screenSpacePhysicalParticles.IsKindEnabled(
+			ScreenSpacePhysicalParticlesFeature::ParticleKind::kBlood)) {
+		return func(a_cell, a_lifetime, a_modelName, a_rotation, a_position, a_scale, a_flags, a_target);
+	}
 	const bool suppressOriginal =
 		a_modelName && feature.HandleEffectSpawn(a_position, a_rotation.GetVectorY(), a_modelName);
 	if (suppressOriginal)
@@ -94,7 +98,9 @@ void PhysicalBlood::ActorProcessHitHook::thunk(RE::Actor* a_target, RE::HitData&
 	auto& feature = globals::features::physicalBlood;
 
 	try {
-		if (feature.hookFeatureEnabled.load(std::memory_order_acquire)) {
+		if (feature.hookFeatureEnabled.load(std::memory_order_acquire) &&
+			globals::features::screenSpacePhysicalParticles.IsKindEnabled(
+				ScreenSpacePhysicalParticlesFeature::ParticleKind::kBlood)) {
 			const auto profiles = feature.LoadBloodMeshProfiles();
 			if (profiles) {
 				const auto onHit = std::ranges::find_if(*profiles, [](const auto& a_profile) {

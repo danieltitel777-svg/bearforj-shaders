@@ -752,13 +752,29 @@ namespace ScreenSpacePhysicalParticles
 			std::clamp(measuredPlayerHeight, 32.0F, 512.0F) :
 			128.0F;
 		const auto refreshFrames = static_cast<std::uint32_t>(std::clamp(
-			globals::features::screenSpacePhysicalParticles.settings.orthographicRefreshFrames, 10, 300));
+			globals::features::screenSpacePhysicalParticles.settings.orthographicRefreshFrames, 20, 300));
 		const bool manualRecapture = recaptureRequested;
 		const bool solidCaptureDue = manualRecapture ||
 			lastSolidCaptureFrame == static_cast<std::uint32_t>(-1) ||
 			frame - lastSolidCaptureFrame >= refreshFrames;
 		auto* solidWorldRoot = solidCaptureDue ? RE::Main::WorldRootNode() : nullptr;
 		const bool captureSolid = solidCaptureDue && solidWorldRoot;
+		const float chunkMoveX = playerPosition.x - solidChunkCenter.x;
+		const float chunkMoveY = playerPosition.y - solidChunkCenter.y;
+		const bool chunkMoved = !solidChunkActive ||
+			worldspaceKey != solidChunkWorldKey || cellKey != solidChunkCellKey ||
+			interior != solidChunkInterior ||
+			(chunkMoveX * chunkMoveX + chunkMoveY * chunkMoveY) >
+				(kSolidChunkMoveThreshold * kSolidChunkMoveThreshold);
+		const bool continueSolidChunk = solidChunkActive && !manualRecapture && !chunkMoved;
+		if (solidChunkActive && !continueSolidChunk && !manualRecapture && !solidCaptureDue) {
+			lastSolidCaptureFrame = frame;
+			solidCandidateScratch.clear();
+			solidSeenScratch.clear();
+		}
+		if (!continueSolidChunk)
+			solidChunkActive = false;
+		const bool collectSolidNow = captureSolid && !continueSolidChunk;
 		if (solidCaptureDue && !solidWorldRoot) {
 			if (!worldRootUnavailableLogged) {
 				logger::warn("[SSPP] Orthographic solid capture skipped: world root unavailable");
@@ -780,7 +796,7 @@ namespace ScreenSpacePhysicalParticles
 		if (manualRecapture || waterContextChanged || !waterSnapshotMatches)
 			QueueWaterSystemSnapshot();
 		const bool captureWater = manualRecapture || waterContextChanged || waterSnapshotChanged;
-		if (!captureSolid && !captureWater)
+		if (!captureSolid && !captureWater && !continueSolidChunk)
 			return;
 		recaptureRequested = false;
 
@@ -795,7 +811,7 @@ namespace ScreenSpacePhysicalParticles
 			}
 		}
 		auto* tes = globals::game::tes;
-		if (captureSolid) {
+		if (collectSolidNow) {
 			center = { playerPosition.x, playerPosition.y };
 			// Resolution scales coverage at four world units per texel.
 			halfExtent = static_cast<float>(dimension) * kSolidWorldUnitsPerTexel * 0.5F;
@@ -816,8 +832,10 @@ namespace ScreenSpacePhysicalParticles
 		auto& seen = solidSeenScratch;
 		auto& waterTerrainCandidates = waterTerrainCandidateScratch;
 		auto& seenWaterTerrain = waterTerrainSeenScratch;
-		candidates.clear();
-		seen.clear();
+		if (!continueSolidChunk) {
+			candidates.clear();
+			seen.clear();
+		}
 		waterTerrainCandidates.clear();
 		seenWaterTerrain.clear();
 		candidates.reserve(2048);
@@ -899,7 +917,7 @@ namespace ScreenSpacePhysicalParticles
 			return RE::BSVisit::BSVisitControl::kContinue;
 		};
 		const auto collectSolidRoot = [&](RE::NiAVObject* a_root) {
-			if (captureSolid)
+			if (collectSolidNow)
 				TraverseCaptureGeometries(a_root, collectSolidCandidate);
 		};
 		const auto collectWaterTerrainRoot = [&](RE::NiAVObject* a_root) {
@@ -907,7 +925,7 @@ namespace ScreenSpacePhysicalParticles
 				TraverseCaptureGeometries(a_root, collectWaterTerrainCandidate);
 		};
 		// LAND meshes are separate from the live world root and are collected below.
-		if (captureSolid)
+		if (collectSolidNow)
 			collectSolidRoot(solidWorldRoot);
 
 		std::array<RE::TESObjectCELL*, kExteriorGridWidth * kExteriorGridWidth> capturedCells{};
@@ -927,7 +945,7 @@ namespace ScreenSpacePhysicalParticles
 							continue;
 						const float cellMinimumX = static_cast<float>(coordinates->cellX) * kExteriorCellWidth;
 						const float cellMinimumY = static_cast<float>(coordinates->cellY) * kExteriorCellWidth;
-						const bool overlapsSolid = captureSolid &&
+						const bool overlapsSolid = collectSolidNow &&
 							cellMinimumX + kExteriorCellWidth >= center.x - halfExtent &&
 							cellMinimumX <= center.x + halfExtent &&
 							cellMinimumY + kExteriorCellWidth >= center.y - halfExtent &&
@@ -1048,19 +1066,31 @@ namespace ScreenSpacePhysicalParticles
 		context->OMSetDepthStencilState(nullptr, 0U);
 		context->RSSetState(rasterizerState.get());
 		context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		if (captureSolid) {
+		if (captureSolid || continueSolidChunk) {
+			const bool beginCycle = !continueSolidChunk;
+			if (beginCycle) {
+				context->ClearRenderTargetView(heightRTV.get(), clear);
+				solidChunkCursor = 0;
+				capturedGeometryCount = 0;
+				capturedTerrainCount = 0;
+				capturedStaticCount = 0;
+				solidChunkCenter = center;
+				solidChunkWorldKey = worldspaceKey;
+				solidChunkCellKey = cellKey;
+				solidChunkInterior = interior;
+			}
 			const D3D11_VIEWPORT viewport{ 0.0F, 0.0F, static_cast<float>(dimension), static_cast<float>(dimension), 0.0F, 1.0F };
 			context->RSSetViewports(1, &viewport);
-			context->ClearRenderTargetView(heightRTV.get(), clear);
 			ID3D11RenderTargetView* target = heightRTV.get();
 			context->OMSetRenderTargets(1, &target, nullptr);
 			context->VSSetShader(captureVS.get(), nullptr, 0);
 			context->PSSetShader(capturePS.get(), nullptr, 0);
-			capturedGeometryCount = 0;
-			capturedTerrainCount = 0;
-			capturedStaticCount = 0;
+			const auto chunkEnd = std::min(
+				candidates.size(),
+				static_cast<std::size_t>(solidChunkCursor) + kSolidGeometriesPerChunk);
 			globals::profiler->BeginPass("SSPP::OrthographicSolidCapture");
-			for (const auto& candidate : candidates) {
+			for (std::size_t index = solidChunkCursor; index < chunkEnd; ++index) {
+				const auto& candidate = candidates[index];
 				if (DrawGeometry(candidate.get(), center, halfExtent, topZ, bottomZ)) {
 					++capturedGeometryCount;
 					const auto& flags = candidate->GetGeometryRuntimeData().shaderProperty->flags;
@@ -1070,8 +1100,15 @@ namespace ScreenSpacePhysicalParticles
 				}
 			}
 			globals::profiler->EndPass();
-			ready = capturedGeometryCount > 0;
-			lastSolidCaptureFrame = frame;
+			solidChunkCursor = static_cast<std::uint32_t>(chunkEnd);
+			if (solidChunkCursor >= candidates.size()) {
+				solidChunkActive = false;
+				lastSolidCaptureFrame = frame;
+				ready = capturedGeometryCount > 0;
+			} else {
+				solidChunkActive = true;
+				ready = capturedGeometryCount > 0 || ready;
+			}
 		}
 
 		if (captureWater) {
@@ -1144,8 +1181,12 @@ namespace ScreenSpacePhysicalParticles
 				lastWaterSnapshotRevision = waterSnapshot->revision;
 		}
 		context->OMSetRenderTargets(0, nullptr, nullptr);
-		candidates.clear();
-		seen.clear();
+		if (!solidChunkActive) {
+			candidates.clear();
+			seen.clear();
+		} else {
+			seen.clear();
+		}
 		waterTerrainCandidates.clear();
 		seenWaterTerrain.clear();
 		waterCandidates.clear();

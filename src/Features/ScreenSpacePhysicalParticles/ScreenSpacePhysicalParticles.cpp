@@ -6,6 +6,9 @@
 #include "Features/ScreenSpacePhysicalParticles/OrthographicHeightField.h"
 #include "Features/ScreenSpacePhysicalParticles/ScreenSpaceCollisionDepth.h"
 #include "Features/ScreenSpacePhysicalParticles/StressTest.h"
+#include "Features/ScreenSpacePhysicalParticles/PhysicalBlood/PhysicalBlood.h"
+#include "Features/ScreenSpacePhysicalParticles/PhysicalLeaves/PhysicalLeaves.h"
+#include "Features/ScreenSpacePhysicalParticles/PhysicalWorld/PhysicalWorldParticles.h"
 #include "Globals.h"
 #include "Profiler.h"
 #include "Utils/UI.h"
@@ -335,7 +338,14 @@ void ScreenSpacePhysicalParticlesFeature::PostComposite()
 	ScopedParticleContextState stateScope(globals::d3d::context);
 	auto& heightField = ScreenSpacePhysicalParticles::OrthographicHeightField::GetSingleton();
 	auto& particleRuntime = ScreenSpacePhysicalParticles::Core::ParticleRuntime::GetSingleton();
-	const auto requestedCapacity = static_cast<std::uint32_t>(settings.particleCapacity);
+	const auto amountPercent = std::clamp(settings.particleAmount, 0, 100);
+	const auto scaledCapacity = kHardParticleLimit * amountPercent / 100;
+	const auto requestedCapacity = static_cast<std::uint32_t>(std::clamp(
+		scaledCapacity,
+		static_cast<int>(ScreenSpacePhysicalParticles::Core::ParticleRuntime::kMinimumCapacity),
+		kHardParticleLimit));
+	settings.particleCapacity = static_cast<std::int32_t>(requestedCapacity);
+	particleCapacityDraft = settings.particleCapacity;
 	if (!particleRuntime.Ready() || particleRuntime.Capacity() != requestedCapacity)
 		particleRuntime.SetupResources(requestedCapacity);
 	const auto registeredFeatureCount = particleRuntime.RegisteredFeatureCount();
@@ -455,15 +465,23 @@ void ScreenSpacePhysicalParticlesFeature::DrawSettings()
 		"These counters cover every feature registered with the shared SSPP stable-slot pool."));
 	ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x, 360.0F));
 	ImGui::SliderInt(
-		T("feature.screen_space_physical_particles.particle_capacity", "Global particle capacity"),
-		&particleCapacityDraft,
-		static_cast<int>(ScreenSpacePhysicalParticles::Core::ParticleRuntime::kMinimumCapacity),
-		static_cast<int>(ScreenSpacePhysicalParticles::Core::ParticleRuntime::kMaximumCapacity));
-	if (ImGui::IsItemDeactivatedAfterEdit())
-		settings.particleCapacity = particleCapacityDraft;
+		T("feature.screen_space_physical_particles.particle_amount", "Particle amount"),
+		&settings.particleAmount,
+		0,
+		100,
+		"%d%%");
 	Util::AddTooltip(T(
-		"feature.screen_space_physical_particles.particle_capacity_tooltip",
-		"Shared stable-slot capacity for SSPP 2.0 clients. Changing it rebuilds the pool and clears its current particles."));
+		"feature.screen_space_physical_particles.particle_amount_tooltip",
+		"Scales how many particles spawn. The pool never exceeds 16384. Zero keeps the smallest pool and spawns nothing."));
+	ImGui::TextDisabled("Hard particle limit: %d", kHardParticleLimit);
+	ImGui::Checkbox("Blood", &settings.kindBlood);
+	ImGui::Checkbox("Leaves", &settings.kindLeaves);
+	ImGui::Checkbox("Magic sparks", &settings.kindMagic);
+	ImGui::Checkbox("Grass fluff", &settings.kindFluff);
+	ImGui::Checkbox("Dandelions", &settings.kindDandelion);
+	ImGui::Checkbox("Mushroom spores", &settings.kindSpores);
+	ImGui::Checkbox("Fireflies", &settings.kindFireflies);
+	ImGui::Checkbox("Moths", &settings.kindMoths);
 	ImGui::BeginDisabled(
 		!particleRuntime.Ready() && !ScreenSpacePhysicalParticles::StressTest::Running());
 	if (ImGui::Button(T(
@@ -1076,11 +1094,11 @@ void ScreenSpacePhysicalParticlesFeature::DrawSettings()
 			"feature.screen_space_physical_particles.orthographic_refresh_frames",
 			"Solid height refresh interval (frames)"),
 		&settings.orthographicRefreshFrames,
-		10,
+		20,
 		300);
 	Util::AddTooltip(T(
 		"feature.screen_space_physical_particles.orthographic_refresh_frames_tooltip",
-		"Refresh the player-centered solid height field every 10-300 frames. Coverage depends on the selected resolution."));
+		"Refresh the player-centered solid height field every 20-300 frames. Coverage depends on the selected resolution."));
 	ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x, 360.0F));
 	ImGui::SliderInt(
 		T(
@@ -1246,11 +1264,20 @@ void ScreenSpacePhysicalParticlesFeature::DrawSettings()
 
 void ScreenSpacePhysicalParticlesFeature::LoadSettings(json& a_json)
 {
+	settings.particleAmount = std::clamp(a_json.value("ParticleAmount", settings.particleAmount), 0, 100);
 	settings.particleCapacity = std::clamp(
 		a_json.value("ParticleCapacity", settings.particleCapacity),
 		static_cast<int>(ScreenSpacePhysicalParticles::Core::ParticleRuntime::kMinimumCapacity),
-		static_cast<int>(ScreenSpacePhysicalParticles::Core::ParticleRuntime::kMaximumCapacity));
+		kHardParticleLimit);
 	particleCapacityDraft = settings.particleCapacity;
+	settings.kindBlood = a_json.value("KindBlood", settings.kindBlood);
+	settings.kindLeaves = a_json.value("KindLeaves", settings.kindLeaves);
+	settings.kindMagic = a_json.value("KindMagic", settings.kindMagic);
+	settings.kindFluff = a_json.value("KindFluff", settings.kindFluff);
+	settings.kindDandelion = a_json.value("KindDandelion", settings.kindDandelion);
+	settings.kindSpores = a_json.value("KindSpores", settings.kindSpores);
+	settings.kindFireflies = a_json.value("KindFireflies", settings.kindFireflies);
+	settings.kindMoths = a_json.value("KindMoths", settings.kindMoths);
 	settings.featureParticleBudgets.clear();
 	if (const auto budgets = a_json.find("FeatureParticleBudgets");
 		budgets != a_json.end() && budgets->is_object()) {
@@ -1267,7 +1294,7 @@ void ScreenSpacePhysicalParticlesFeature::LoadSettings(json& a_json)
 		}
 	}
 	settings.orthographicRefreshFrames = std::clamp(
-		a_json.value("OrthographicRefreshFrames", settings.orthographicRefreshFrames), 10, 300);
+		a_json.value("OrthographicRefreshFrames", settings.orthographicRefreshFrames), 20, 300);
 	settings.orthographicResolution = std::clamp(
 		a_json.value("OrthographicResolution", settings.orthographicResolution), 256, 1024);
 	settings.heightFieldDebug = a_json.value("HeightFieldDebug", settings.heightFieldDebug);
@@ -1280,6 +1307,15 @@ void ScreenSpacePhysicalParticlesFeature::SaveSettings(json& a_json)
 {
 	a_json = {
 		{ "ParticleCapacity", settings.particleCapacity },
+		{ "ParticleAmount", settings.particleAmount },
+		{ "KindBlood", settings.kindBlood },
+		{ "KindLeaves", settings.kindLeaves },
+		{ "KindMagic", settings.kindMagic },
+		{ "KindFluff", settings.kindFluff },
+		{ "KindDandelion", settings.kindDandelion },
+		{ "KindSpores", settings.kindSpores },
+		{ "KindFireflies", settings.kindFireflies },
+		{ "KindMoths", settings.kindMoths },
 		{ "FeatureParticleBudgets", settings.featureParticleBudgets },
 		{ "OrthographicRefreshFrames", settings.orthographicRefreshFrames },
 		{ "OrthographicResolution", settings.orthographicResolution },
@@ -1295,4 +1331,34 @@ void ScreenSpacePhysicalParticlesFeature::RestoreDefaultSettings()
 	particleCapacityDraft = settings.particleCapacity;
 	debugBurstRejected = false;
 	featureBudgetsPending = true;
+}
+
+bool ScreenSpacePhysicalParticlesFeature::IsKindEnabled(ParticleKind a_kind) const noexcept
+{
+	if (!loaded)
+		return false;
+	switch (a_kind) {
+	case ParticleKind::kBlood:
+		return settings.kindBlood && globals::features::physicalBlood.loaded;
+	case ParticleKind::kLeaves:
+		return settings.kindLeaves && globals::features::physicalLeaves.loaded;
+	case ParticleKind::kMagic:
+		return settings.kindMagic && globals::features::physicalWorldParticles.loaded;
+	case ParticleKind::kFluff:
+		return settings.kindFluff && globals::features::physicalWorldParticles.loaded;
+	case ParticleKind::kDandelion:
+		return settings.kindDandelion && globals::features::physicalWorldParticles.loaded;
+	case ParticleKind::kSpores:
+		return settings.kindSpores && globals::features::physicalWorldParticles.loaded;
+	case ParticleKind::kFireflies:
+		return settings.kindFireflies && globals::features::physicalWorldParticles.loaded;
+	case ParticleKind::kMoths:
+		return settings.kindMoths && globals::features::physicalWorldParticles.loaded;
+	}
+	return false;
+}
+
+float ScreenSpacePhysicalParticlesFeature::ParticleAmountScale() const noexcept
+{
+	return std::clamp(settings.particleAmount, 0, 100) / 100.0F;
 }

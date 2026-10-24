@@ -24,6 +24,7 @@
 #include "Features/ScreenSpacePhysicalParticles/ScreenSpacePhysicalParticles.h"
 #include "Features/ScreenSpacePhysicalParticles/PhysicalBlood/PhysicalBlood.h"
 #include "Features/ScreenSpacePhysicalParticles/PhysicalLeaves/PhysicalLeaves.h"
+#include "Features/ScreenSpacePhysicalParticles/PhysicalWorld/PhysicalWorldParticles.h"
 #include "Features/RemoteControl.h"
 #include "Features/RenderDoc.h"
 #include "Features/ScreenSpaceGI.h"
@@ -236,6 +237,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::screenSpacePhysicalParticles,
 		&globals::features::physicalBlood,
 		&globals::features::physicalLeaves,
+		&globals::features::physicalWorldParticles,
 		&globals::features::performanceOverlay,
 		&globals::features::subsurfaceScattering,
 		&globals::features::terrainShadows,
