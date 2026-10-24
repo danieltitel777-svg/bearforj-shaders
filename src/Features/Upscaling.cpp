@@ -56,8 +56,15 @@ void ApplyLegacyFsr4RuntimeSelectionMigration(Upscaling::Settings& a_settings, F
 	if (a_settings.fsr4RuntimeSelectionSchemaVersion >= Upscaling::kFsr4RuntimeSelectionSchemaVersion)
 		return;
 
+	// The adapter is not known until the device hook. Leave the schema at 0 so that hook can run.
 	if (a_adapterSupport == FidelityFX::Fsr4AdapterSupport::Unsupported)
 		return;
+
+	// RX 6000 selects FSR 4.1 upscaling once. Frame generation stays the FSR 3 path.
+	if (a_adapterSupport == FidelityFX::Fsr4AdapterSupport::RadeonRx6000 && !a_settings.fsr4RuntimeEnable) {
+		a_settings.fsr4RuntimeEnable = true;
+		logger::info("[FidelityFX] Upscaling defaults to AMD FSR 4 on this Radeon RX 6000. Select AMD FSR 3.1 to keep FSR 3.1.");
+	}
 
 	a_settings.fsr4RuntimeSelectionSchemaVersion = Upscaling::kFsr4RuntimeSelectionSchemaVersion;
 }
@@ -216,7 +223,7 @@ void Upscaling::DrawSettings()
 		T(TKEY("method_taa"), "TAA")
 	};
 
-	std::string fsrLabel = "AMD FSR 3.1";
+	std::string fsrLabel = fidelityFX.MenuMethodLabel();
 	upscaleModes.push_back(fsrLabel);
 
 	std::string dlssLabel = "NVIDIA DLSS";
@@ -301,18 +308,27 @@ void Upscaling::DrawSettings()
 
 		if (upscaleMethod == UpscaleMethod::kFSR) {
 			ImGui::SliderFloat(T(TKEY("sharpness"), "Sharpness"), &settings.sharpnessFSR, 0.0f, 1.0f, "%.1f");
-			// Hidden entirely on ineligible GPUs so it can't be toggled somewhere it silently no-ops.
 			if (fidelityFX.IsRuntimeFsr4AutoEligible()) {
-				ImGui::Checkbox(T(TKEY("fsr4_runtime_enable"), "Use Runtime FSR4"), &settings.fsr4RuntimeEnable);
+				const char* fsrUpscaleVersions[] = { "AMD FSR 3.1", "AMD FSR 4" };
+				int fsrUpscaleVersion = settings.fsr4RuntimeEnable ? 1 : 0;
+				if (ImGui::Combo(T(TKEY("fsr_upscale_version"), "Upscaler"), &fsrUpscaleVersion, fsrUpscaleVersions, 2))
+					settings.fsr4RuntimeEnable = fsrUpscaleVersion == 1;
+				if (auto _tt = Util::HoverTooltipWrapper()) {
+					ImGui::Text("%s", T(TKEY("fsr_upscale_version_tooltip"),
+										  "Choose AMD FSR 3.1 or AMD FSR 4 for upscaling.\n"
+										  "AMD FSR 4 uses the DX12 FSR 4.1 runtime on Radeon RX 6000, RX 7000 and RX 9000.\n"
+										  "RX 6000 (Navi 21, 22, 23 and 24, including the RX 6950 XT) selects AMD FSR 4 by default and needs Adrenalin 26.10.1 or newer.\n"
+										  "The method name follows the driver: AMD FSR 4 when the provider is 4.x, otherwise AMD FSR 3.1.\n"
+										  "If AMD FSR 4 does not start, this session uses FSR 3.1 and writes that to the log.\n"
+										  "Frame generation on RX 6000 stays AMD FSR 3.\n"
+										  "Changing this requires a restart."));
+				}
 				if (settings.fsr4RuntimeEnable != fsr4RuntimeEnableBoot)
 					Util::Text::Warning("%s", T(TKEY("fsr4_restart_required"), "Restart the game to apply this change."));
-				if (settings.fsr4RuntimeEnable) {
-					ImGui::TextDisabled("%s: %s", T(TKEY("fsr4_active_path"), "Active path"), fidelityFX.GetDisplayedFsrPathLabel().c_str());
-					if (fidelityFX.IsRuntimeFsr4FailureLatched())
-						Util::Text::Warning("%s", T(TKEY("fsr4_failed_fallback"), "Runtime FSR4 failed this session -- using FSR3 fallback."));
-					else if (fidelityFX.IsRuntimeUpscalerFailureLatched())
-						Util::Text::Warning("%s", T(TKEY("fsr4_runtime_failed_fallback"), "Runtime upscaler DLL failed this session -- using host FSR3 SDK."));
-				}
+				if (fidelityFX.IsRuntimeFsr4FailureLatched())
+					Util::Text::Warning("%s", T(TKEY("fsr4_failed_fallback"), "FSR 4.1 did not start this session. Using FSR 3.1."));
+				else if (settings.fsr4RuntimeEnable && fidelityFX.IsRuntimeUpscalerFailureLatched())
+					Util::Text::Warning("%s", T(TKEY("fsr4_runtime_failed_fallback"), "Runtime upscaler DLL failed this session -- using host FSR 3.1."));
 			}
 		} else if (upscaleMethod == UpscaleMethod::kDLSS) {
 			ImGui::Checkbox(T(TKEY("enable_sharpening"), "Enable Sharpening"), &settings.sharpnessEnabledDLSS);
