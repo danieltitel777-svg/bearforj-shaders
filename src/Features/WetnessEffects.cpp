@@ -5,11 +5,16 @@
 #include "I18n/I18n.h"
 #include "Menu.h"
 #include "SceneSelector.h"
+#include "Skylighting.h"
 #include "State.h"
+#include "Utils/D3D.h"
 #include "Utils/UI.h"
+
+#include <DirectXTex.h>
 
 #include <array>
 #include <cmath>
+#include <filesystem>
 
 #define I18N_KEY_PREFIX "feature.wetness_effects."
 
@@ -67,6 +72,86 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	WallRainNormalStrength,
 	WallRainWetness,
 	WallRainDarkening)
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+	WetnessEffects::VolumetricPuddleSettings,
+	Enable,
+	Depth,
+	EdgeDarkening,
+	Distortion)
+
+static void SanitizeVolumetricPuddleSettings(WetnessEffects::VolumetricPuddleSettings& a_settings)
+{
+	const WetnessEffects::VolumetricPuddleSettings defaults;
+	auto clamp = [](float value, float fallback, float minimum, float maximum) {
+		return std::isfinite(value) ? std::clamp(value, minimum, maximum) : fallback;
+	};
+	a_settings.Enable = a_settings.Enable != 0;
+	a_settings.Depth = clamp(a_settings.Depth, defaults.Depth, 0.05f, 1.0f);
+	a_settings.EdgeDarkening = clamp(a_settings.EdgeDarkening, defaults.EdgeDarkening, 0.0f, 1.0f);
+	a_settings.Distortion = clamp(a_settings.Distortion, defaults.Distortion, 0.0f, 0.15f);
+}
+
+namespace
+{
+	// InTheBottle/Bottled-Shaders Bottle-Compendium
+	// features/Rain Refraction/Shaders/RainRefraction/Raindrops.png
+	// git blob 9bc66b658514c7897a05cb23310fc40cc1710db4 (32x32 RGBA, RGB normal, A coverage).
+	constexpr auto kPuddleRaindropsPath = L"Data\\Shaders\\WetnessEffects\\Raindrops.png";
+
+	WetnessEffects::PuddleRaindropTexture LoadPuddleRaindrops(const std::filesystem::path& a_path)
+	{
+		WetnessEffects::PuddleRaindropTexture result;
+		const auto fail = [&](std::string a_status) {
+			logger::warn("[Wetness Effects] {}: {}", a_path.string(), a_status);
+			result.status = std::move(a_status);
+			return std::move(result);
+		};
+
+		if (!std::filesystem::exists(a_path)) {
+			result.status = std::format("Texture not found: {}", a_path.filename().string());
+			logger::warn("[Wetness Effects] {}", result.status);
+			return result;
+		}
+
+		DirectX::ScratchImage image;
+		HRESULT hr = DirectX::LoadFromWICFile(a_path.c_str(), DirectX::WIC_FLAGS_IGNORE_SRGB, nullptr, image);
+		if (FAILED(hr))
+			return fail(std::format("Failed to load Raindrops.png (HRESULT 0x{:08X})", static_cast<uint32_t>(hr)));
+
+		DirectX::ScratchImage mipImage;
+		hr = DirectX::GenerateMipMaps(image.GetImages(), image.GetImageCount(), image.GetMetadata(), DirectX::TEX_FILTER_DEFAULT, 0, mipImage);
+		if (FAILED(hr))
+			return fail(std::format("Failed to generate Raindrops.png mipmaps (HRESULT 0x{:08X})", static_cast<uint32_t>(hr)));
+
+		DirectX::ScratchImage bc7Image;
+		hr = DirectX::Compress(mipImage.GetImages(), mipImage.GetImageCount(), mipImage.GetMetadata(),
+			DXGI_FORMAT_BC7_UNORM, DirectX::TEX_COMPRESS_BC7_QUICK, 1.0f, bc7Image);
+		if (FAILED(hr))
+			return fail(std::format("Failed to compress Raindrops.png (HRESULT 0x{:08X})", static_cast<uint32_t>(hr)));
+
+		const auto& metadata = bc7Image.GetMetadata();
+		winrt::com_ptr<ID3D11Texture2D> texture;
+		hr = DirectX::CreateTexture(globals::d3d::device, bc7Image.GetImages(), bc7Image.GetImageCount(), metadata,
+			reinterpret_cast<ID3D11Resource**>(texture.put()));
+		if (FAILED(hr))
+			return fail(std::format("Failed to create Raindrops.png texture (HRESULT 0x{:08X})", static_cast<uint32_t>(hr)));
+		Util::SetResourceName(texture.get(), "WetnessEffects::PuddleRaindrops");
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{
+			.Format = DXGI_FORMAT_BC7_UNORM,
+			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+			.Texture2D = { .MostDetailedMip = 0, .MipLevels = static_cast<UINT>(metadata.mipLevels) }
+		};
+		hr = globals::d3d::device->CreateShaderResourceView(texture.get(), &srvDesc, result.srv.put());
+		if (FAILED(hr))
+			return fail(std::format("Failed to create Raindrops.png SRV (HRESULT 0x{:08X})", static_cast<uint32_t>(hr)));
+		Util::SetResourceName(result.srv.get(), "WetnessEffects::PuddleRaindrops SRV");
+
+		logger::info("[Wetness Effects] Loaded puddle raindrops: {} ({}x{}, BC7, {} mips)", a_path.string(), metadata.width, metadata.height, metadata.mipLevels);
+		return result;
+	}
+}
 
 static void SanitizeRainFlowSettings(WetnessEffects::RainFlowSettings& a_settings)
 {
@@ -472,6 +557,43 @@ void WetnessEffects::GameLoaded()
 	CharacterRainSurfaces::QueueLoadedActors();
 }
 
+bool WetnessEffects::SkylightingCoversPuddles() const
+{
+	return globals::features::skylighting.loaded && globals::features::skylighting.settings.EnableSkylighting;
+}
+
+void WetnessEffects::DrawVolumetricPuddleSettings()
+{
+	if (ImGui::TreeNodeEx(T(TKEY("volumetric_puddles"), "Volumetric Puddles"), ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (!SkylightingCoversPuddles()) {
+			ImGui::TextWrapped("%s", T(TKEY("volumetric_puddles_skylighting"), "Skylighting is required, so puddles do not form under roofs. While Skylighting is off, the original puddles are used."));
+		}
+		if (!puddleRaindrops.status.empty())
+			Util::Text::WrappedWarning("%s", puddleRaindrops.status.c_str());
+
+		Util::CheckboxFlag(T(TKEY("enable_volumetric_puddles"), "Volumetric puddles"), volumetricPuddleSettings.Enable);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("enable_volumetric_puddles_tooltip"), "Water collects in depressions of the landscape height map. Stones stick out, edges are darker, and the bottom shows through with a slight distortion. Drying shrinks the pool from the edges to the deepest point. Off uses the original puddles."));
+		}
+
+		ImGui::BeginDisabled(!volumetricPuddleSettings.Enable);
+		BFUI::SliderFloat(T(TKEY("volumetric_puddle_depth"), "Depth"), &volumetricPuddleSettings.Depth, 0.05f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("volumetric_puddle_depth_tooltip"), "How high water rises in the height map. Lower values leave water only in the deepest spots."));
+		}
+		BFUI::SliderFloat(T(TKEY("volumetric_puddle_edge"), "Edge darkening"), &volumetricPuddleSettings.EdgeDarkening, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("volumetric_puddle_edge_tooltip"), "How much darker the shore is than the deep center."));
+		}
+		BFUI::SliderFloat(T(TKEY("volumetric_puddle_distortion"), "Bottom distortion"), &volumetricPuddleSettings.Distortion, 0.0f, 0.15f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("volumetric_puddle_distortion_tooltip"), "How far the visible bottom shifts along the view direction."));
+		}
+		ImGui::EndDisabled();
+		ImGui::TreePop();
+	}
+}
+
 void WetnessEffects::DrawSettings()
 {
 	if (!ImGui::BeginTabBar("##WetnessEffectsTabs"))
@@ -573,6 +695,11 @@ void WetnessEffects::DrawEnvironmentWetnessSettings()
 		BFUI::SliderFloat(T(TKEY("shore_wetness"), "Shore Wetness"), &settings.MaxShoreWetness, 0.0f, 1.0f);
 		ImGui::TreePop();
 	}
+
+	ImGui::Spacing();
+	ImGui::Spacing();
+
+	DrawVolumetricPuddleSettings();
 
 	ImGui::Spacing();
 	ImGui::Spacing();
@@ -1280,6 +1407,13 @@ WetnessEffects::PerFrame WetnessEffects::GetCommonBufferData() const
 	UpdateCharacterRainData(data);
 	data.CharacterStatePadding.x = std::clamp(precipRain, 0.0f, 1.0f);
 
+	{
+		auto vp = volumetricPuddleSettings;
+		SanitizeVolumetricPuddleSettings(vp);
+		const bool enable = settings.EnableWetnessEffects && vp.Enable && SkylightingCoversPuddles() && puddleRaindrops.srv;
+		data.volumetricPuddles = { enable ? 1u : 0u, vp.Depth, vp.EdgeDarkening, vp.Distortion };
+	}
+
 	return data;
 }
 
@@ -1340,6 +1474,11 @@ void WetnessEffects::UpdateCharacterRainData(PerFrame& a_data) const
 	a_data.CharacterStatePadding = float2(0.0f, 0.0f);
 }
 
+void WetnessEffects::SetupResources()
+{
+	puddleRaindrops = LoadPuddleRaindrops(kPuddleRaindropsPath);
+}
+
 void WetnessEffects::Prepass()
 {
 	CharacterRainSurfaces::RefreshPendingActors();
@@ -1349,6 +1488,8 @@ void WetnessEffects::Prepass()
 	auto context = globals::d3d::context;
 
 	context->PSSetShaderResources(70, 1, Util::AsReal(&precipOcclusionTexture.depthSRV));
+	ID3D11ShaderResourceView* puddleSrv = puddleRaindrops.srv.get();
+	context->PSSetShaderResources(75, 1, &puddleSrv);
 }
 
 void WetnessEffects::LoadSettings(json& o_json)
@@ -1358,6 +1499,10 @@ void WetnessEffects::LoadSettings(json& o_json)
 	if (o_json.contains("SurfaceRainFlow") && o_json["SurfaceRainFlow"].is_object())
 		rainFlowSettings = o_json["SurfaceRainFlow"];
 	SanitizeRainFlowSettings(rainFlowSettings);
+	volumetricPuddleSettings = {};
+	if (o_json.contains("VolumetricPuddles") && o_json["VolumetricPuddles"].is_object())
+		volumetricPuddleSettings = o_json["VolumetricPuddles"];
+	SanitizeVolumetricPuddleSettings(volumetricPuddleSettings);
 	if (!o_json.contains("HairWetness") && o_json.contains("SkinWetness"))
 		settings.HairWetness = o_json["SkinWetness"].get<float>();
 	if (!o_json.contains("CharacterDryTime") && o_json.contains("CharacterShelterDryTime"))
@@ -1380,6 +1525,8 @@ void WetnessEffects::SaveSettings(json& o_json)
 	o_json = settings;
 	o_json["DryingSpeed"] = dryingSpeed;
 	o_json["SurfaceRainFlow"] = rainFlowSettings;
+	SanitizeVolumetricPuddleSettings(volumetricPuddleSettings);
+	o_json["VolumetricPuddles"] = volumetricPuddleSettings;
 
 	o_json["DebugSettings"] = debugSettings;
 }
@@ -1389,6 +1536,7 @@ void WetnessEffects::RestoreDefaultSettings()
 	settings = {};
 	dryingSpeed = 1.0f;
 	rainFlowSettings = {};
+	volumetricPuddleSettings = {};
 	characterSurfaceWetness = 0.0f;
 	characterWetnessFrame.Reset();
 	smoothedWetness = 0.0f;

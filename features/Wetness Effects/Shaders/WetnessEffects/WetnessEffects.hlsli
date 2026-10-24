@@ -11,6 +11,8 @@
 namespace WetnessEffects
 {
 	Texture2D<float4> TexPrecipOcclusion : register(t70);
+	// Bottled Raindrops.png (RGB normal, A coverage). t75 is unused by Lighting.hlsl.
+	Texture2D<float4> TexPuddleRaindrops : register(t75);
 
 	// https://github.com/BelmuTM/Noble/blob/master/LICENSE.txt
 
@@ -598,6 +600,48 @@ namespace WetnessEffects
 		if (heightWeight > 0.0 && determinant * determinant > max(1e-20, squaredArea * 1e-8))
 			sampleOffset = float2(offset.x * uvDy.y - offset.y * uvDy.x, offset.y * uvDx.x - offset.x * uvDx.y) / determinant;
 		return sampleOffset;
+	}
+
+	// Standing water in a landscape parallax height field.
+	// Height is (sample - 0.5) * HeightScale: negative is a depression, positive is a stone.
+	// Full fill sits at +0.2 * depth (average ground is under water, stones above it stick out).
+	// Drying lerps the water line down to -depth, so the pool shrinks to the deepest point.
+	// Keep these fractions in sync with tests/test_volumetric_puddle_math.py.
+	struct VolumetricPuddle
+	{
+		float coverage;
+		float edgeBand;
+		float bottomAmount;
+		float2 uvOffset;
+		float2 raindropUv;
+		uint active;
+	};
+
+	VolumetricPuddle EvaluateVolumetricPuddle(float surfaceHeight, float fill, float2 worldXY, float2 viewTangentXY)
+	{
+		VolumetricPuddle result;
+		result.coverage = 0.0;
+		result.edgeBand = 0.0;
+		result.bottomAmount = 0.0;
+		result.uvOffset = 0.0;
+		result.raindropUv = 0.0;
+		result.active = 0;
+
+		float depth = max(SharedData::wetnessEffectsSettings.VolumetricPuddleDepth, 1e-3);
+		float waterLine = lerp(-depth, depth * 0.2, saturate(fill));
+		float shore = depth * 0.08;
+		float coverage = 1.0 - smoothstep(waterLine - shore, waterLine, surfaceHeight);
+		if (coverage <= 0.001)
+			return result;
+
+		float depth01 = saturate((waterLine - surfaceHeight) / depth);
+		result.coverage = coverage;
+		result.edgeBand = coverage * (1.0 - smoothstep(0.05, 0.45, depth01));
+		result.bottomAmount = coverage * smoothstep(0.15, 0.7, depth01);
+		result.uvOffset = clamp(viewTangentXY * depth01 * SharedData::wetnessEffectsSettings.VolumetricPuddleDistortion, -0.08, 0.08);
+		result.raindropUv = worldXY * 0.15;
+		result.active = 1;
+		return result;
 	}
 
 	SurfaceWetnessState GetSurfaceWetnessState(

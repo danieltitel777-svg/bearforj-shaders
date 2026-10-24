@@ -3,6 +3,9 @@
 #include "Buffer.h"
 #include "Utils/FrameLatch.h"
 
+#include <d3d11.h>
+#include <winrt/base.h>
+
 /** @brief Adds dynamic weather-driven wetness, puddle formation, shore wetness, and raindrop effects. */
 struct WetnessEffects : Feature
 {
@@ -26,7 +29,8 @@ public:
 				T("feature.wetness_effects.key_feature_2", "Realistic puddle formation and shore wetness effects"),
 				T("feature.wetness_effects.key_feature_3", "Animated raindrop effects with splashes and ripples"),
 				T("feature.wetness_effects.key_feature_4", "Configurable wetness intensity and weather transitions"),
-				T("feature.wetness_effects.key_feature_5", "Model-attached character droplets, trails, and wet-surface lighting") } };
+				T("feature.wetness_effects.key_feature_5", "Model-attached character droplets, trails, and wet-surface lighting"),
+				T("feature.wetness_effects.key_feature_6", "Volumetric puddles in terrain height-map depressions, requiring Skylighting") } };
 	};
 
 	bool HasShaderDefine(RE::BSShader::Type) override { return true; };
@@ -119,9 +123,19 @@ public:
 			float WallRainTrailLength;
 			float pad[3];
 		} rainFlow;
+		// Appended. Off leaves the original puddle math on the preceding fields untouched.
+		// Depth is in parallax height units ((sample - 0.5) * HeightScale). Full pools sit
+		// just above the midplane; drying lowers the water line toward -Depth.
+		struct VolumetricPuddleData
+		{
+			uint Enable;
+			float Depth;
+			float EdgeDarkening;
+			float Distortion;
+		} volumetricPuddles;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
-	static_assert(sizeof(PerFrame) == 304);
+	static_assert(sizeof(PerFrame) == 320);
 
 	/** @brief Bearforj: Surface Rain Flow settings (drops and streaks on roofs, walls and rocks). */
 	struct RainFlowSettings
@@ -137,6 +151,22 @@ public:
 		float WallRainDarkening = 0.65f;
 	} rainFlowSettings;
 	void DrawRainFlowSettings();
+
+	/** @brief Standing water in landscape parallax depressions. Enable 0 keeps the original puddles. */
+	struct VolumetricPuddleSettings
+	{
+		uint Enable = 1;
+		float Depth = 0.5f;
+		float EdgeDarkening = 0.55f;
+		float Distortion = 0.035f;
+	} volumetricPuddleSettings;
+
+	/** @brief Bottled Raindrops.png (RGB normal, A coverage). Empty status means it loaded. */
+	struct PuddleRaindropTexture
+	{
+		winrt::com_ptr<ID3D11ShaderResourceView> srv;
+		std::string status;
+	} puddleRaindrops;
 
 	struct DebugSettings
 	{
@@ -178,6 +208,8 @@ public:
 	 */
 	PerFrame GetCommonBufferData() const;
 
+	/** @brief Loads Raindrops.png for the volumetric puddle surface. */
+	virtual void SetupResources() override;
 	/** @brief Updates wetness state and binds the per-frame constant buffer. */
 	virtual void Prepass() override;
 	/** @brief Detects Splashes of Storms mod presence for compatibility handling. */
@@ -266,6 +298,8 @@ private:
 	void RestoreCharacterRainDefaults();
 	void UpdateCharacterRainData(PerFrame& a_data) const;
 	void DrawWeatherAnalysis() const;
+	void DrawVolumetricPuddleSettings();
+	bool SkylightingCoversPuddles() const;
 
 	mutable float characterSurfaceWetness = 0.0f;
 	mutable Util::FrameLatch characterWetnessFrame;

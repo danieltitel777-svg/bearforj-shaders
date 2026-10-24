@@ -204,6 +204,12 @@ namespace SharedData
 
 		float WallRainTrailLength;
 		float3 WallRainPad;
+
+		// Bearforj volumetric puddles. Appended so the fields above keep their offsets.
+		uint EnableVolumetricPuddles;
+		float VolumetricPuddleDepth;
+		float VolumetricPuddleEdgeDarkening;
+		float VolumetricPuddleDistortion;
 	};
 
 	struct SkylightingSettings
