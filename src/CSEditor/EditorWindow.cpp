@@ -803,6 +803,8 @@ void EditorWindow::ShowWidgetWindow()
 		// Ctrl+W closes the focused widget; Ctrl+R discards its unsaved changes.
 		if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
 			focusedWidget->SetOpen(false);
+			if (lastFocusedWidget == focusedWidget)
+				lastFocusedWidget = nullptr;
 			lastFocusedWidgetKey.reset();
 		} else if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
 			DiscardWidgetChanges(*focusedWidget);
@@ -2778,6 +2780,8 @@ void EditorWindow::ResetCellLightingWidget()
 	if (!oldWidget)
 		return;
 
+	if (lastFocusedWidget == oldWidget)
+		lastFocusedWidget = nullptr;
 	if (lastFocusedWidgetKey && *lastFocusedWidgetKey == oldWidget->GetFormKey())
 		lastFocusedWidgetKey.reset();
 	if (pendingDeleteWidget == oldWidget)
