@@ -2,7 +2,83 @@ Gerstner displacement is written for this mod from the public deep-water equatio
 (Fournier and Reeves). Nine wavelengths, gravity 687, and the 0.6 / 1.5 / 2.6
 direction spreads follow the same layout described for open water research.
 No ENB, WaveWorks, or other shader source was copied.
+
 The far water flattens between 4000 and 7000 units. Pixel normals keep a wider
 fade, 6000 to 12000, so the shading does not pop when the mesh becomes flat.
 Shore damp uses a 64 by 64 land-height grid (224-unit cells) shared with the
 CPU. It does not read the depth buffer, so the contact band does not flicker.
+
+Flowmap water, LOD water, and a disabled shader cache no longer skip the swell.
+The old gates were:
+
+- WaterWaves.hlsli Displace() was compiled out under FLOWMAP.
+- The hull and domain were compiled only when WATER_WAVES, not LOD, and not FLOWMAP.
+- WaterWaves::OnSetup returned before binding tessellation when the pass was
+  flowmap or LOD, or when the shader cache was off.
+- WaterWavesMath::Evaluate returned a flat sample when Params.flowmap was set.
+- DisplacedHeight returned the flat water height when the cell water form had
+  TESWaterForm::Flag::kEnableFlowmap.
+- The pixel shader skipped crest foam, the wave slope on the normal, the
+  refraction bend, the wave depth distance, and the camera-below tint under FLOWMAP.
+
+Those gates are gone. VR still uses the original triangle list.
+
+TexCoord2.z stays the flow UV on FLOWMAP and the view w on other water. The
+vertex and domain shaders do not overwrite it when FLOWMAP is set.
+
+The vertex and domain shaders sample FlowMapTex (t8) with the same decode as
+GetFlowmapDataWorldSpace: direction is -(rg * 2 - 1), blue is strength. That
+heading is blended with the wind angle. Weight 0 is wind only. The CPU path
+has no flow texture, so actors on a flowing cell still follow the wind.
+
+Crest foam uses the Gerstner Jacobian (1 when the surface is flat, lower when
+a crest folds). On FLOWMAP the foam noise is advected by that same flow vector,
+and the existing depth gradient raises foam where the current runs into
+shallower water.
+
+Crest sunlight adds a fraction of SunColor where the Jacobian has dropped and
+the sun is above the horizon. Skyrim's camera-relative water space is Z-up.
+
+Crest parallax (menu toggle, default on) shifts the fine ripple by the folding
+crest, and adds the existing WaterEffects flowmap or non-flowmap parallax
+offset when WATER_PARALLAX is on. Off stores a negative WaveLook.y so the
+constant-buffer layout does not change; the shader uses abs(WaveLook.y) for
+the detail amount.
+
+Elemental Contact v0.13.2 contributes two things. Shore surf is ShoreWaves::Apply
+and CDWater::ShoreRun. foam.dds is the lace on that shore foam, on rock and
+obstacle foam, on foam along the current, and on the Gerstner crest foam.
+features/Water Waves/Shaders/ShoreWaves/ holds ShoreWaves.hlsli, CDWater.hlsli
+and EISettings.hlsli. The blocks are marked BEARFORJ_EC_WATER_BEGIN. This
+Water.hlsl is still the 0.6.7 shader. Reapply those blocks onto Bottled's
+Water.hlsl at: the line before GetWaterNormal, "float depth = 0", the
+depthAdjustedViewDirection line, "float3 normal = waterData.normal", inside
+ApplyCrestFoam, and the psout.Lighting assignment. bearforj/1-base is on the
+remote now and is not this branch.
+
+Not taken from Elemental Contact: SurfaceFlow, the rain mask, the puddle
+texture, water_normals.dds, wave_height.dds, the detail-normal river cascade,
+the CD ripple slope, caustics, and the waterfall scan.
+
+The water pixel shader constant buffer is PS b13, matching
+ShoreWavesWaterfallCB, and it is not declared when VR is defined because
+Common/VR.hlsli already uses b13. VR water keeps the original shading.
+Foam is PS t107 (foam.dds). Foam height is PS t111 (foam_height.dds).
+
+Shore surf is its own menu toggle. Off writes EI3.w = 1 and zeros the shore
+wave amounts. Foam on rocks, crests and currents stays while the feature is on.
+Foam parallax is a second toggle. On, it offsets the foam UVs by foam_height.dds
+(six-step relief). Off, those samples stay on the original UVs. Small wave
+detail is the Gerstner ripple and its own crest-parallax toggle.
+
+foam_height.dds is the alpha channel of the EC foam.dds. It is R8_UNORM with a
+full mip chain. EC shipped no height map.
+
+A missing game flow texture or sampler would sample unbound and come out pink.
+WaterWaves::BindFlowMaps binds a runtime 1x1 texture when PS t8 or t9 is null
+and copies a bound game texture to VS, DS, and HS. The neutral flow pixel is
+(128, 128, 0, 255): no direction, no strength. The neutral normal is
+(128, 128, 255, 128). Those textures are created in DataLoaded. They are not
+files in the package. The vanilla per-cell flow DDS tiles stay in the game
+BSA and are not shipped here. If foam.dds or foam_height.dds fails to load, a
+1x1 fallback is bound and that texture's effect stays off.
