@@ -1,0 +1,14 @@
+build/
+bin/
+dist/
+.idea/
+.vs*/
+CMakeUserPresets.json
+shadertoolsconfig.json
+.vscode
+
+# Folder view configuration files
+**/.DS_Store
+.claude/settings.local.json
+
+tools/__pycache__/
