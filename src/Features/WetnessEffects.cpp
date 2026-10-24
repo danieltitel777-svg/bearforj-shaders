@@ -2,6 +2,9 @@
 
 #include "CharacterRainSurfaces.h"
 #include "CSEditor.h"
+#include "Utils/D3D.h"
+
+#include <DirectXTex.h>
 #include "CSEditor/SceneManager/SceneWidgetInterceptor.h"
 #include "I18n/I18n.h"
 #include "Menu.h"
@@ -54,7 +57,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	CharacterSpotNormalStrength,
 	CharacterSpotDebug,
 	CharacterCoatIntensity,
-	CharacterWetSheen,
+	EnableWetHair,
 	CharacterRainActivityMultiplier,
 	CharacterDryTime,
 	EnableWeaponRainDrops,
@@ -85,6 +88,7 @@ static void SanitizeWallRainSettings(WetnessEffects::Settings& settings)
 	settings.WallRainDarkening = clamp(settings.WallRainDarkening, defaults.WallRainDarkening, 0.0f, 1.5f);
 
 	settings.EnableCharacterRainSpots = settings.EnableCharacterRainSpots != 0;
+	settings.EnableWetHair = settings.EnableWetHair != 0;
 	settings.EnableWeaponRainDrops = settings.EnableWeaponRainDrops != 0;
 	settings.EnableSkinnedRainStreaks = settings.EnableSkinnedRainStreaks != 0;
 	settings.EnableArmorClothingDryingDrops = settings.EnableArmorClothingDryingDrops != 0;
@@ -95,7 +99,6 @@ static void SanitizeWallRainSettings(WetnessEffects::Settings& settings)
 	settings.CharacterSpotRoughness = clamp(settings.CharacterSpotRoughness, defaults.CharacterSpotRoughness, 0.08f, 0.6f);
 	settings.CharacterSpotNormalStrength = clamp(settings.CharacterSpotNormalStrength, defaults.CharacterSpotNormalStrength, 0.0f, 1.0f);
 	settings.CharacterCoatIntensity = clamp(settings.CharacterCoatIntensity, defaults.CharacterCoatIntensity, 0.0f, 8.0f);
-	settings.CharacterWetSheen = clamp(settings.CharacterWetSheen, defaults.CharacterWetSheen, 0.0f, 1.0f);
 	settings.CharacterRainActivityMultiplier = clamp(settings.CharacterRainActivityMultiplier, defaults.CharacterRainActivityMultiplier, 0.25f, 8.0f);
 	// Jiaye WetFadeTime slider is 0..50. Keep the same range; the shader clamps away from zero.
 	settings.CharacterDryTime = clamp(settings.CharacterDryTime, defaults.CharacterDryTime, 0.05f, 50.0f);
@@ -501,6 +504,13 @@ void WetnessEffects::DrawBearforjWetnessSettings()
 			ImGui::Text("%s", T(TKEY("armor_drying_drops_tooltip"),
 				"Jiaye breaks a drying coat into drops on skin. On extends that to armor and clothes. Hair keeps drops either way."));
 		}
+		bool wetHair = settings.EnableWetHair != 0;
+		if (ImGui::Checkbox(T(TKEY("wet_hair"), "Wet hair"), &wetHair))
+			settings.EnableWetHair = wetHair;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("wet_hair_tooltip"),
+				"Elemental Contact wet hair: clumped strands, darkening, and translucency from hair_sss.dds. Rain drops on hair stay with character rain drops. Off leaves Jiaye hair wetness without that look."));
+		}
 
 		auto characterDisabled = Util::DisableGuard(!settings.EnableCharacterRainSpots);
 		ImGui::SliderFloat(T(TKEY("character_dry_time"), "Character dry time"), &settings.CharacterDryTime, 0.05f, 50.0f, "%.2f sec");
@@ -520,7 +530,6 @@ void WetnessEffects::DrawBearforjWetnessSettings()
 		ImGui::SliderFloat(T(TKEY("character_spot_radius"), "Drop size"), &settings.CharacterSpotRadius, 0.2f, 3.0f, "%.2f units");
 		ImGui::SliderFloat(T(TKEY("character_spot_strength"), "Drop and trail strength"), &settings.CharacterSpotStrength, 0.0f, 1.0f, "%.2f");
 		ImGui::SliderFloat(T(TKEY("character_coat_intensity"), "Droplet highlight"), &settings.CharacterCoatIntensity, 0.0f, 8.0f, "%.2fx");
-		ImGui::SliderFloat(T(TKEY("character_wet_sheen"), "Surface wet sheen"), &settings.CharacterWetSheen, 0.0f, 1.0f, "%.2f");
 		ImGui::SliderFloat(T(TKEY("character_spot_roughness"), "Water roughness"), &settings.CharacterSpotRoughness, 0.08f, 0.6f, "%.2f");
 		ImGui::SliderFloat(T(TKEY("character_spot_normal"), "Droplet normal strength"), &settings.CharacterSpotNormalStrength, 0.0f, 1.0f, "%.2f");
 		bool weaponDrops = settings.EnableWeaponRainDrops != 0;
@@ -1196,6 +1205,38 @@ void WetnessEffects::AdvanceRetainedWetness(PerFrame& a_data) const
 	a_data.CharacterStatePad = 0.0f;
 }
 
+namespace
+{
+	eastl::unique_ptr<Texture2D> hairSssTexture;
+	// Lighting.hlsl HairSSSTex. Landscape seams already use t119.
+	constexpr std::uint32_t kHairSssShaderSlot = 75u;
+}
+
+void WetnessEffects::SetupResources()
+{
+	auto device = globals::d3d::device;
+	DirectX::ScratchImage image;
+	try {
+		std::filesystem::path path = "Data\\Shaders\\WetnessEffects\\hair_sss.dds";
+		DX::ThrowIfFailed(LoadFromDDSFile(path.c_str(), DirectX::DDS_FLAGS_NONE, nullptr, image));
+		ID3D11Resource* resource = nullptr;
+		DX::ThrowIfFailed(CreateTexture(device, image.GetImages(), image.GetImageCount(), image.GetMetadata(), &resource));
+		hairSssTexture = eastl::make_unique<Texture2D>(reinterpret_cast<ID3D11Texture2D*>(resource), "WetnessEffects::HairSSS");
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+			.Format = hairSssTexture->desc.Format,
+			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+			.Texture2D = {
+				.MostDetailedMip = 0,
+				.MipLevels = static_cast<UINT>(image.GetMetadata().mipLevels) }
+		};
+		hairSssTexture->CreateSRV(srvDesc);
+		logger::info("[{}] Loaded hair_sss.dds", GetName());
+	} catch (const DX::com_exception& e) {
+		hairSssTexture.reset();
+		logger::error("[{}] Failed to load Data/Shaders/WetnessEffects/hair_sss.dds: {}", GetName(), e.what());
+	}
+}
+
 void WetnessEffects::Prepass()
 {
 	CharacterRainSurfaces::RefreshPendingActors();
@@ -1205,6 +1246,10 @@ void WetnessEffects::Prepass()
 	auto context = globals::d3d::context;
 
 	context->PSSetShaderResources(70, 1, &precipOcclusionTexture.depthSRV);
+	if (hairSssTexture && hairSssTexture->srv) {
+		ID3D11ShaderResourceView* srv = hairSssTexture->srv.get();
+		context->PSSetShaderResources(kHairSssShaderSlot, 1, &srv);
+	}
 }
 
 void WetnessEffects::LoadSettings(json& o_json)

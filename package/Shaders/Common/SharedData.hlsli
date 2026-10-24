@@ -158,7 +158,7 @@ namespace SharedData
 		float CharacterSpotNormalStrength;
 		uint CharacterSpotDebug;
 		float CharacterCoatIntensity;
-		float CharacterWetSheen;
+		uint EnableWetHair;
 		float CharacterRainActivityMultiplier;
 		float CharacterDryTime;
 		uint EnableWeaponRainDrops;

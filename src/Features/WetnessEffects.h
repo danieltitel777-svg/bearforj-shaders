@@ -83,7 +83,7 @@ public:
 		float CharacterSpotNormalStrength = 0.75f;
 		uint CharacterSpotDebug = 0u;
 		float CharacterCoatIntensity = 5.0f;
-		float CharacterWetSheen = 0.55f;
+		uint EnableWetHair = true;
 		float CharacterRainActivityMultiplier = 2.5f;
 		float CharacterDryTime = 10.0f;
 		uint EnableWeaponRainDrops = true;
@@ -161,6 +161,8 @@ public:
 
 	/** @brief Updates wetness state and binds the per-frame constant buffer. */
 	virtual void Prepass() override;
+	/** @brief Loads hair_sss.dds for Elemental Contact wet hair. */
+	virtual void SetupResources() override;
 	/** @brief Detects Splashes of Storms mod presence for compatibility handling. */
 	virtual void PostPostLoad() override;
 	virtual void DataLoaded() override;

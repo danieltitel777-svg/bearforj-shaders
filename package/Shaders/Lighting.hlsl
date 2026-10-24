@@ -858,6 +858,12 @@ float GetSnowParameterY(float texProjTmp, float alpha)
 #			define CHARACTER_RAIN_SURFACE
 #			include "WetnessEffects/CharacterRainSpots.hlsli"
 #		endif
+#		if defined(HAIR)
+#			include "WetnessEffects/WetHair.hlsli"
+#			include "WetnessEffects/HairSSS.hlsli"
+			// t119 is landscape seam color. Hair SSS uses a free slot.
+			Texture2D<float> HairSSSTex : register(t75);
+#		endif
 #	endif
 
 #	if defined(TERRAIN_BLENDING)
@@ -1676,6 +1682,42 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 	}
 #	endif
 
+#	if defined(HAIR) && defined(WETNESS_EFFECTS)
+	float wetHair = 0.0;
+	float eiHairThin = 0.0;
+	float hairSSSScale = 0.0;
+	if (SharedData::wetnessEffectsSettings.EnableWetHair != 0) {
+		float wetHairRain = saturate(SharedData::wetnessEffectsSettings.SkinWetness * SharedData::wetnessEffectsSettings.Wetness);
+		wetHair = inWorld ? WetHair::Wetness(SharedData::GetWaterData(input.WorldPosition.xyz).w, input.WorldPosition.z, wetHairRain) : 0.0;
+		float2 wetHairStrand = float2(0, 1);
+#		if defined(CS_HAIR_SHADING)
+		if (useHairFlowMap)
+			wetHairStrand = sampledHairFlow.xy;
+#		endif
+		wetHair = saturate(wetHair);
+		baseColor.xyz = WetHair::ApplyAlbedo(baseColor.xyz, TexColorSampler, SampColorSampler, uv, wetHairStrand, wetHair);
+
+		float hairAlpha = saturate(TexColorSampler.Sample(SampColorSampler, uv).w);
+		float thin = 1.0 - smoothstep(0.15, 0.95, hairAlpha);
+		float strand = 0.5;
+#		if defined(CS_HAIR_SHADING)
+		if (SharedData::hairSpecularSettings.Enabled && SharedData::hairSpecularSettings.EnableTangentShift)
+			strand = Hair::TexTangentShift.SampleLevel(SampColorSampler, uv, 0).x;
+		if (useHairFlowMap)
+			strand = lerp(strand, saturate(0.5 + 0.5 * sampledHairFlow.x), 0.35);
+#		endif
+		eiHairThin = saturate(thin * (0.7 + 0.6 * strand) + (1.0 - hairAlpha) * 0.15);
+		// Universal hair_sss.dds. The zip has no per-hair maps, and the EC menu DLL is not included.
+		float hairSssMask = HairSSSTex.Sample(SampColorSampler, uv * float2(1.0, 0.5));
+		eiHairThin = saturate(eiHairThin * (0.45 + 1.1 * hairSssMask) + 0.08 * (1.0 - hairAlpha));
+		hairSSSScale = Color::BRDFScale * (inWorld ? 1.0 : 0.0);
+#		if defined(CS_HAIR_SHADING)
+		if (SharedData::hairSpecularSettings.Enabled)
+			hairSSSScale *= 0.5;
+#		endif
+	}
+#	endif
+
 #	if defined(LOD_LAND_BLEND)
 	float4 lodLandColor;
 	float4 sampledLodLandColor;
@@ -2086,6 +2128,11 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		}
 	}
 #	endif
+#	if defined(HAIR) && !defined(TRUE_PBR) && defined(WETNESS_EFFECTS)
+	material.Shininess *= lerp(1.0, 2.5, wetHair);
+	material.Roughness *= lerp(1.0, 0.6, wetHair);
+	material.SpecularColor *= lerp(1.0, 0.8, wetHair);
+#	endif
 
 	bool dynamicCubemap = false;
 
@@ -2338,10 +2385,7 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		CharacterRainSpots::MinimumWaterRoughness, CharacterRainSpots::MaximumWaterRoughness);
 	characterCoatIntensity = SharedData::wetnessEffectsSettings.CharacterCoatIntensity *
 	                         (heldWeapon ? CharacterRainSpots::WeaponCoatIntensityScale : 1.0f);
-	float characterSheenMask = heldWeapon && SharedData::wetnessEffectsSettings.EnableWeaponRainDrops == 0 ?
-	                               0.0f :
-	                               saturate(characterRetainedWetness * SharedData::wetnessEffectsSettings.CharacterWetSheen);
-	characterCoatMask = max(characterSpotMask, characterSheenMask);
+	characterCoatMask = characterSpotMask;
 	[branch] if (characterRainSurface && characterCoatMask > 0.0f && inWorld)
 	{
 		if (characterSpotMask > 0.0f)
@@ -2554,6 +2598,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #		endif
 #	endif
 	transmissionColor += dirLightOutput.transmission;
+#	if defined(HAIR) && defined(WETNESS_EFFECTS)
+	if (hairSSSScale > 0.0)
+		transmissionColor += hairSSSScale * HairSSS::Transmit(dirLightContext.vertexNormal, dirLightContext.viewDir, dirLightContext.lightDir, dirLightContext.lightColor, dirLightContext.detailedShadow, dirLightContext.softShadow, material.BaseColor.xyz, eiHairThin);
+#	endif
 
 #	if !defined(LOD)
 #		if !defined(LIGHT_LIMIT_FIX)
@@ -2617,6 +2665,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		coatLightsDiffuseColor += pointLightOutput.coatDiffuse;
 #			endif
 		transmissionColor += pointLightOutput.transmission;
+#			if defined(HAIR) && defined(WETNESS_EFFECTS)
+		if (hairSSSScale > 0.0)
+			transmissionColor += hairSSSScale * HairSSS::Transmit(pointLightContext.vertexNormal, pointLightContext.viewDir, pointLightContext.lightDir, pointLightContext.lightColor, pointLightContext.detailedShadow, pointLightContext.softShadow, material.BaseColor.xyz, eiHairThin);
+#			endif
 	}
 
 #		else
@@ -2757,6 +2809,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 		coatLightsDiffuseColor += pointLightOutput.coatDiffuse;
 #			endif
 		transmissionColor += pointLightOutput.transmission;
+#			if defined(HAIR) && defined(WETNESS_EFFECTS)
+		if (hairSSSScale > 0.0)
+			transmissionColor += hairSSSScale * HairSSS::Transmit(pointLightContext.vertexNormal, pointLightContext.viewDir, pointLightContext.lightDir, pointLightContext.lightColor, pointLightContext.detailedShadow, pointLightContext.softShadow, material.BaseColor.xyz, eiHairThin);
+#			endif
 	}
 #		endif
 #	endif
@@ -3008,6 +3064,9 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #	endif
 
 	color.xyz += indirectLobeWeights.diffuse * directionalAmbientColor;
+#	if defined(HAIR) && defined(WETNESS_EFFECTS)
+	transmissionColor *= 1.0 - WetHair::TransmissionCut * wetHair;
+#	endif
 	color.xyz += transmissionColor;
 
 	color.xyz *= vertexColor;
