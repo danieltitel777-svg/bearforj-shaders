@@ -46,8 +46,8 @@ constant-buffer layout does not change; the shader uses abs(WaveLook.y) for
 the detail amount.
 
 Elemental Contact v0.13.2 is copied from the uploaded package, not rewritten.
-features/Water Waves/Shaders/ShoreWaves/ holds ShoreWaves.hlsli, CDWater.hlsli,
-SurfaceFlow.hlsli and EISettings.hlsli. Water.hlsl calls the same shore, river,
+features/Water Waves/Shaders/ShoreWaves/ holds ShoreWaves.hlsli, CDWater.hlsli
+and EISettings.hlsli. SurfaceFlow.hlsli is not in the build. Water.hlsl calls the same shore, river,
 rock, waterfall and CDWater blocks the EC Water.hlsl calls. The blocks are
 marked BEARFORJ_EC_WATER_BEGIN. This Water.hlsl is still the 0.6.7 shader.
 Reapply those blocks onto Bottled's Water.hlsl at: the line before
@@ -73,11 +73,6 @@ foam_height.dds is the alpha channel of the EC foam.dds, the lace the shader
 already uses as coverage. wave_height.dds integrates the EC water_normals.dds
 slopes in the Fourier domain (the same 2048 tile). Both are R8_UNORM with a
 full mip chain. EC shipped no height maps.
-
-SurfaceFlow.hlsli is included so the rain-mask code type-checks. EC binds that
-mask on Lighting draws (t106, and puddles on t110) from RainFlow.cpp. This
-water shader does not write the mask, and EI11-EI18 are zeros here, so the
-rain flow does not appear on the water.
 
 Waterfalls are scanned the same way as Waterfalls.cpp: models whose path
 contains "waterfall", within 4096 units, impact at the water height, radius

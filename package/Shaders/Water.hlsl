@@ -970,17 +970,6 @@ float3 WaterDetailNormal(PS_INPUT input, uint eyeIndex, float normalsDepthFactor
 // This file is the 0.6.7 water shader. Bottled UnifiedWater is not in this branch.
 #if defined(PSHADER) && defined(WATER_WAVES) && !defined(VR)
 #	include "ShoreWaves/ShoreWaves.hlsli"
-// SurfaceFlow is the EC rain-on-ground mask (Lighting PS t106 / t110). This water shader does not
-// write that mask. The constants keep the include type-checking; Strength() stays 0.
-static const float4 EI11 = float4(0, 0, 0, 0);
-static const float4 EI12 = float4(0, 0, 0, 0);
-static const float4 EI13 = float4(0, 0, 0, 0);
-static const float4 EI14 = float4(0, 0, 0, 0);
-static const float4 EI15 = float4(0, 0, 0, 0);
-static const float4 EI16 = float4(0, 0, 0, 0);
-static const float4 EI17 = float4(0, 0, 0, 0);
-static const float4 EI18 = float4(0, 0, 0, 0);
-#	include "ShoreWaves/SurfaceFlow.hlsli"
 #endif
 // BEARFORJ_EC_WATER_END include
 
