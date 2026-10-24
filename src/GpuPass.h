@@ -1,8 +1,12 @@
 #pragma once
 
 #include "Globals.h"
+#include "State.h"
 
 #include <string>
+
+#define CS_GPU_PASS_CAT_IMPL(a, b) a##b
+#define CS_GPU_PASS_CAT(a, b) CS_GPU_PASS_CAT_IMPL(a, b)
 
 // Names one GPU pass for the internal profiler and for RenderDoc/PIX annotations.
 struct ScopedGpuPass
@@ -37,4 +41,4 @@ private:
 	bool annotationOpen = false;
 };
 
-#define CS_GPU_PASS(name) const ScopedGpuPass cs_gpu_pass_scope { name }
+#define CS_GPU_PASS(name) const ScopedGpuPass CS_GPU_PASS_CAT(cs_gpu_pass_scope_, __LINE__) { name }
