@@ -67,15 +67,19 @@ public:
 		bool reflexUseMarkersToOptimize = false;
 		bool reflexUseFPSLimit = false;
 		float reflexFPSLimit = 60.0f;
-		// DX12 runtime FSR 4.1. Off keeps the original DX11 FSR 3.1 upscaler. Frame generation is unchanged.
+		// 0 keeps DX11 FSR 3.1. 1 selects the DX12 FSR 4.1 upscaler. The menu shows this as a selector.
 		bool fsr4RuntimeEnable = false;
+		// 0 keeps FSR 3 frame generation. 1 selects FSR 4 frame generation (SDK 4.0.1).
+		bool fsr4FrameGen = false;
 	};
 
 	Settings settings;
 	// Session latch for fsr4RuntimeEnable. The checkbox saves immediately and applies on the next launch.
 	bool fsr4RuntimeEnableBoot = false;
+	bool fsr4FrameGenBoot = false;
 	bool fsr4RuntimeDefaultApplied = false;
 	bool fsr4RuntimeEnableInJson = false;
+	bool fsr4FrameGenInJson = false;
 
 	void ApplyFsr4RuntimeDefault(const DXGI_ADAPTER_DESC& a_adapterDesc);
 

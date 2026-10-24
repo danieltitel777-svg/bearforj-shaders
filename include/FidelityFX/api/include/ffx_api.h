@@ -46,10 +46,36 @@ typedef void* ffxContext;
 typedef uint32_t ffxReturnCode_t;
 
 #define FFX_API_EFFECT_MASK 0xffff0000u
+#define FFX_API_BACKEND_MASK 0xff000000u
 #define FFX_API_EFFECT_ID_GENERAL 0x00000000u
-// Upscaler effect id from FidelityFX SDK 2.3.0 (ffx_api.h). Frame generation keeps its own ids.
+// Effect ids from FidelityFX SDK 2.3.0 (ffx_api.h). The mask above is wider than 2.3.0's 0x00ff0000,
+// and these ids still encode to the same values the 2.3.0 headers expect.
 #define FFX_API_EFFECT_ID_UPSCALE 0x00010000u
+#define FFX_API_EFFECT_ID_FRAMEGENERATION 0x00020000u
+#define FFX_API_EFFECT_ID_FRAMEGENERATIONSWAPCHAIN 0x00030000u
 #define FFX_API_MAKE_EFFECT_SUB_ID(effectId, subversion) ((effectId & FFX_API_EFFECT_MASK) | (subversion & ~FFX_API_EFFECT_MASK))
+#define FFX_API_BACKEND_ID_DX12 0x00000000u
+#define FFX_API_MAKE_BACKEND_SUB_ID(backendId, subversion) ((backendId & FFX_API_BACKEND_MASK) | (subversion & ~FFX_API_BACKEND_MASK))
+#define FFX_API_MAKE_BACKEND_EFFECT_SUB_ID(backendId, effectId, subversion) ((subversion & ~FFX_API_EFFECT_MASK) | (effectId & FFX_API_EFFECT_MASK) | (backendId & FFX_API_BACKEND_MASK) | (subversion & ~(FFX_API_BACKEND_MASK | FFX_API_EFFECT_MASK)))
+// The 2.3.0 headers mark the FSR 3 prepare descriptors deprecated. This project builds with /WX,
+// and the FSR 3 frame-generation fallback still dispatches those descriptors.
+#define FFX_DEPRECATION(message)
+#if defined(_MSC_VER) && !defined(__clang__) && !defined(__GNUC__) && !defined(__INTEL_COMPILER)
+#define FFX_PRAGMA_WARNING_PUSH warning( push )
+#define FFX_PRAGMA_WARNING_POP warning( pop )
+#define FFX_PRAGMA_WARNING_DISABLE_DEPRECATIONS warning( disable: 4996 )
+#define FFX_PRAGMA_WARNING_WARN_DEPRECATIONS warning( default: 4996 )
+#elif defined(__clang__) || defined(__GNUC__)
+#define FFX_PRAGMA_WARNING_PUSH GCC diagnostic push
+#define FFX_PRAGMA_WARNING_POP GCC diagnostic pop
+#define FFX_PRAGMA_WARNING_DISABLE_DEPRECATIONS GCC diagnostic ignored "-Wdeprecated"
+#define FFX_PRAGMA_WARNING_WARN_DEPRECATIONS GCC diagnostic warning "-Wdeprecated"
+#else
+#define FFX_PRAGMA_WARNING_PUSH
+#define FFX_PRAGMA_WARNING_POP
+#define FFX_PRAGMA_WARNING_DISABLE_DEPRECATIONS
+#define FFX_PRAGMA_WARNING_WARN_DEPRECATIONS
+#endif
 
 // Base Descriptor types
 typedef uint64_t ffxStructType_t;

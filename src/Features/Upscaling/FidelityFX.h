@@ -23,8 +23,8 @@
 #include "DX12SwapChain.h"
 
 /** @brief Manages AMD FidelityFX upscaling and frame generation.
- *  Upscaling is FSR 4.1 through the DX12 runtime DLL when the driver reports 4.x, otherwise the original DX11 FSR 3.1 path.
- *  Frame generation stays on the FSR 3 frame-generation DLL. */
+ *  Upscaling is FSR 4.1 through the DX12 runtime DLL when that version is selected and the driver reports 4.x, otherwise DX11 FSR 3.1.
+ *  Frame generation uses the SDK 2.3.0 frame-generation DLL. FSR 4 is version 4.0.1; a failed create falls back to the FSR 3 context. */
 class FidelityFX
 {
 public:
@@ -96,6 +96,8 @@ public:
 	Fsr4AdapterSupport GetFsr4AdapterSupport() const;
 	bool IsRuntimeFsr4AutoEligible() const;
 	bool IsRuntimeFsr4FailureLatched() const { return runtimeFsr4FailureLatched; }
+	bool IsFrameGenFsr4() const { return frameGenIsFsr4; }
+	bool IsFrameGenFsr4FailureLatched() const { return frameGenFsr4Failed; }
 	/** @brief "AMD FSR 4" after the driver reports a 4.x provider, otherwise "AMD FSR 3.1". */
 	const char* MenuMethodLabel();
 	/** @brief Queries the runtime DLL for a 4.x upscaler. Safe to call from the menu. */
@@ -103,6 +105,10 @@ public:
 
 private:
 	bool TryRuntimeFsr4Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors, float a_sharpness);
+	bool QueryFsr4Provider(uint64_t a_createDescType, uint32_t a_apiVersion, uint64_t& a_versionId, uint32_t& a_version, std::string& a_name);
+	bool TryCreateFsr4FrameGeneration();
+	bool CreateFsr3FrameGeneration();
+	void DestroyFrameGenerationContext();
 	void LatchRuntimeFsr4Failure(const char* a_reason);
 	void DestroyRuntimeUpscaler();
 	bool EnsureRuntimeUpscalerInterop();
@@ -112,6 +118,8 @@ private:
 	Fsr4AdapterSupport adapterSupport = Fsr4AdapterSupport::Unsupported;
 	bool adapterSupportKnown = false;
 	bool runtimeFsr4FailureLatched = false;
+	bool frameGenIsFsr4 = false;
+	bool frameGenFsr4Failed = false;
 	bool runtimeFsr4Quarantined = false;
 	bool driverReportsFsr4 = false;
 	uint32_t reportedFsr4Version = 0;

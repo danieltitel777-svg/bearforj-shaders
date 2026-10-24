@@ -39,7 +39,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	reflexUseMarkersToOptimize,
 	reflexUseFPSLimit,
 	reflexFPSLimit,
-	fsr4RuntimeEnable);
+	fsr4RuntimeEnable,
+	fsr4FrameGen);
 
 decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChainUpscaling;
 
@@ -274,22 +275,24 @@ void Upscaling::DrawSettings()
 		if (upscaleMethod == UpscaleMethod::kFSR) {
 			ImGui::SliderFloat(T(TKEY("sharpness"), "Sharpness"), &settings.sharpnessFSR, 0.0f, 1.0f, "%.1f");
 
-			if (fidelityFX.IsRuntimeFsr4AutoEligible() || settings.fsr4RuntimeEnable || fsr4RuntimeEnableBoot) {
-				ImGui::Checkbox(T(TKEY("fsr4_runtime_enable"), "AMD FSR 4.1"), &settings.fsr4RuntimeEnable);
-				if (auto _tt = Util::HoverTooltipWrapper()) {
-					ImGui::Text("%s", T(TKEY("fsr4_runtime_enable_tooltip"),
-										  "Uses the DX12 FSR 4.1 runtime on Radeon RX 6000, RX 7000 and RX 9000.\n"
-										  "RX 6000 (Navi 21, 22, 23 and 24, including the RX 6950 XT) is on by default and needs Adrenalin 26.10.1 or newer.\n"
-										  "The method name follows the driver: AMD FSR 4 when the provider is 4.x, otherwise AMD FSR 3.1.\n"
-										  "If FSR 4.1 does not start, this session uses FSR 3.1 and writes that to the log.\n"
-										  "Off keeps the original FSR 3.1 upscaler. Frame generation stays FSR 3.\n"
-										  "Changing this requires a restart."));
-				}
-				if (fsr4RuntimeDefaultApplied && settings.fsr4RuntimeEnable != fsr4RuntimeEnableBoot)
-					ImGui::TextUnformatted(T(TKEY("fsr4_runtime_restart"), "Changing this requires a restart to take effect."));
-				if (fidelityFX.IsRuntimeFsr4FailureLatched())
-					ImGui::TextUnformatted(T(TKEY("fsr4_failed_fallback"), "FSR 4.1 did not start this session. Using FSR 3.1."));
+			const char* fsrUpscaleVersions[] = { "AMD FSR 3.1", "AMD FSR 4" };
+			int fsrUpscaleVersion = settings.fsr4RuntimeEnable ? 1 : 0;
+			if (ImGui::Combo(T(TKEY("fsr_upscale_version"), "Upscaler"), &fsrUpscaleVersion, fsrUpscaleVersions, 2))
+				settings.fsr4RuntimeEnable = fsrUpscaleVersion == 1;
+			if (auto _tt = Util::HoverTooltipWrapper()) {
+				ImGui::Text("%s", T(TKEY("fsr_upscale_version_tooltip"),
+									  "Choose AMD FSR 3.1 or AMD FSR 4 for upscaling.\n"
+									  "AMD FSR 4 uses the DX12 FSR 4.1 runtime on Radeon RX 6000, RX 7000 and RX 9000.\n"
+									  "RX 6000 (Navi 21, 22, 23 and 24, including the RX 6950 XT) selects AMD FSR 4 by default and needs Adrenalin 26.10.1 or newer.\n"
+									  "The method name follows the driver: AMD FSR 4 when the provider is 4.x, otherwise AMD FSR 3.1.\n"
+									  "If AMD FSR 4 does not start, this session uses FSR 3.1 and writes that to the log.\n"
+									  "Frame generation has its own selector.\n"
+									  "Changing this requires a restart."));
 			}
+			if (fsr4RuntimeDefaultApplied && settings.fsr4RuntimeEnable != fsr4RuntimeEnableBoot)
+				ImGui::TextUnformatted(T(TKEY("fsr4_runtime_restart"), "Changing this requires a restart to take effect."));
+			if (fidelityFX.IsRuntimeFsr4FailureLatched())
+				ImGui::TextUnformatted(T(TKEY("fsr4_failed_fallback"), "FSR 4.1 did not start this session. Using FSR 3.1."));
 		} else if (upscaleMethod == UpscaleMethod::kDLSS) {
 			ImGui::Checkbox(T(TKEY("enable_sharpening"), "Enable Sharpening"), &settings.sharpnessEnabledDLSS);
 			if (auto _tt = Util::HoverTooltipWrapper()) {
@@ -363,6 +366,23 @@ void Upscaling::DrawSettings()
 		bool fgEnabled = settings.frameGenerationMode != 0;
 		if (ImGui::Checkbox(T(TKEY("frame_generation"), "Frame Generation"), &fgEnabled))
 			settings.frameGenerationMode = fgEnabled ? 1 : 0;
+
+		const char* fsrFrameGenVersions[] = { "AMD FSR 3", "AMD FSR 4" };
+		int fsrFrameGenVersion = settings.fsr4FrameGen ? 1 : 0;
+		if (ImGui::Combo(T(TKEY("fsr_frame_generation_version"), "Frame Generation Version"), &fsrFrameGenVersion, fsrFrameGenVersions, 2))
+			settings.fsr4FrameGen = fsrFrameGenVersion == 1;
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T(TKEY("fsr_frame_generation_version_tooltip"),
+								  "Choose AMD FSR 3 or AMD FSR 4 for frame generation.\n"
+								  "AMD FSR 4 uses FidelityFX frame generation 4.0.1 from SDK 2.3.0.\n"
+								  "Radeon RX 6000, RX 7000 and RX 9000 select AMD FSR 4 by default.\n"
+								  "If AMD FSR 4 frame generation does not start, this session uses FSR 3 and writes that to the log.\n"
+								  "Changing this requires a restart."));
+		}
+		if (fsr4RuntimeDefaultApplied && settings.fsr4FrameGen != fsr4FrameGenBoot)
+			ImGui::TextUnformatted(T(TKEY("fsr4_runtime_restart"), "Changing this requires a restart to take effect."));
+		if (fidelityFX.IsFrameGenFsr4FailureLatched())
+			ImGui::TextUnformatted(T(TKEY("fsr4_fg_failed_fallback"), "FSR 4 frame generation did not start this session. Using FSR 3."));
 
 		if (!frameGenerationDx12PathActive)
 			ImGui::BeginDisabled();
@@ -499,6 +519,7 @@ void Upscaling::SaveSettings(json& o_json)
 void Upscaling::LoadSettings(json& o_json)
 {
 	fsr4RuntimeEnableInJson = o_json.contains("fsr4RuntimeEnable");
+	fsr4FrameGenInJson = o_json.contains("fsr4FrameGen");
 	settings = o_json;
 
 	// Sanitize loaded settings to ensure enum indices are valid
@@ -544,6 +565,7 @@ void Upscaling::RestoreDefaultSettings()
 {
 	settings = {};
 	fsr4RuntimeEnableInJson = false;
+	fsr4FrameGenInJson = false;
 }
 
 void Upscaling::ApplyFsr4RuntimeDefault(const DXGI_ADAPTER_DESC& a_adapterDesc)
@@ -552,14 +574,22 @@ void Upscaling::ApplyFsr4RuntimeDefault(const DXGI_ADAPTER_DESC& a_adapterDesc)
 	if (fsr4RuntimeDefaultApplied)
 		return;
 
-	if (!fsr4RuntimeEnableInJson && fidelityFX.IsRuntimeFsr4AutoEligible()) {
-		settings.fsr4RuntimeEnable = true;
-		logger::info("[FidelityFX] FSR 4.1 is on by default for this Radeon. Turn off AMD FSR 4.1 to keep FSR 3.1.");
+	if (fidelityFX.IsRuntimeFsr4AutoEligible()) {
+		if (!fsr4RuntimeEnableInJson) {
+			settings.fsr4RuntimeEnable = true;
+			logger::info("[FidelityFX] Upscaling defaults to AMD FSR 4 on this Radeon. Select AMD FSR 3.1 to keep FSR 3.1.");
+		}
+		if (!fsr4FrameGenInJson) {
+			settings.fsr4FrameGen = true;
+			logger::info("[FidelityFX] Frame generation defaults to AMD FSR 4 on this Radeon. Select AMD FSR 3 to keep FSR 3.");
+		}
 	}
 
 	fsr4RuntimeEnableBoot = settings.fsr4RuntimeEnable;
+	fsr4FrameGenBoot = settings.fsr4FrameGen;
 	fsr4RuntimeDefaultApplied = true;
-	logger::info("[FidelityFX] FSR 4.1 runtime is {} for this session", fsr4RuntimeEnableBoot ? "enabled" : "disabled");
+	logger::info("[FidelityFX] FSR 4.1 upscaling is {} for this session", fsr4RuntimeEnableBoot ? "selected" : "not selected");
+	logger::info("[FidelityFX] FSR 4 frame generation is {} for this session", fsr4FrameGenBoot ? "selected" : "not selected");
 }
 
 void Upscaling::DataLoaded()

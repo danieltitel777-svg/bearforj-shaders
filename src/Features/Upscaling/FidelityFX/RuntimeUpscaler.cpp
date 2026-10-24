@@ -99,7 +99,12 @@ namespace
 		uint32_t version = 0;
 	};
 
-	bool QueryFsr4Version(ID3D12Device* a_device, VersionCandidate& a_out)
+	bool NameLooksLikeFsr4(const std::string& a_name)
+	{
+		return a_name.find("4.") != std::string::npos || a_name.find("MLFI") != std::string::npos;
+	}
+
+	bool QueryFsr4Version(ID3D12Device* a_device, uint64_t a_createDescType, uint32_t a_apiVersion, VersionCandidate& a_out)
 	{
 		a_out = {};
 		if (!a_device || !ffxModule.Query)
@@ -108,7 +113,7 @@ namespace
 		uint64_t versionCount = 0;
 		ffxQueryDescGetVersions countQuery{};
 		countQuery.header.type = FFX_API_QUERY_DESC_TYPE_GET_VERSIONS;
-		countQuery.createDescType = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
+		countQuery.createDescType = a_createDescType;
 		countQuery.device = a_device;
 		countQuery.outputCount = &versionCount;
 
@@ -120,7 +125,7 @@ namespace
 		uint64_t returnedCount = versionCount;
 		ffxQueryDescGetVersions versionsQuery{};
 		versionsQuery.header.type = FFX_API_QUERY_DESC_TYPE_GET_VERSIONS;
-		versionsQuery.createDescType = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
+		versionsQuery.createDescType = a_createDescType;
 		versionsQuery.device = a_device;
 		versionsQuery.outputCount = &returnedCount;
 		versionsQuery.versionIds = versionIds.data();
@@ -136,12 +141,12 @@ namespace
 			const std::string name = versionNames[i] ? versionNames[i] : "";
 			const uint32_t low = static_cast<uint32_t>(versionIds[i] & 0xFFFFFFFFull);
 			const bool encodedFsr4 = UpscalerMajor(low) == 4;
-			const bool namedFsr4 = name.find("4.") != std::string::npos;
+			const bool namedFsr4 = NameLooksLikeFsr4(name);
 			if (!encodedFsr4 && !namedFsr4)
 				continue;
 
-			VersionCandidate candidate{ versionIds[i], name, encodedFsr4 ? low : FFX_UPSCALER_VERSION };
-			const bool exact = VersionIdMatches(versionIds[i], FFX_UPSCALER_VERSION) || NameMatchesVersion(name, FFX_UPSCALER_VERSION);
+			VersionCandidate candidate{ versionIds[i], name, encodedFsr4 ? low : a_apiVersion };
+			const bool exact = VersionIdMatches(versionIds[i], a_apiVersion) || NameMatchesVersion(name, a_apiVersion);
 			if (!found || exact || candidate.version > best.version) {
 				best = std::move(candidate);
 				found = true;
@@ -202,6 +207,18 @@ namespace
 			(void)ffxModule.DestroyContext(&created, nullptr);
 		return result == FFX_API_RETURN_OK ? FFX_API_RETURN_ERROR : result;
 	}
+}
+
+bool FidelityFX::QueryFsr4Provider(uint64_t a_createDescType, uint32_t a_apiVersion, uint64_t& a_versionId, uint32_t& a_version, std::string& a_name)
+{
+	auto& swapChain = globals::features::upscaling.dx12SwapChain;
+	VersionCandidate selected{};
+	if (!QueryFsr4Version(swapChain.d3d12Device.get(), a_createDescType, a_apiVersion, selected))
+		return false;
+	a_versionId = selected.id;
+	a_version = selected.version;
+	a_name = std::move(selected.name);
+	return true;
 }
 
 FidelityFX::Fsr4AdapterSupport FidelityFX::GetFsr4AdapterSupport(const DXGI_ADAPTER_DESC& a_adapterDesc)
@@ -281,7 +298,7 @@ void FidelityFX::ProbeRuntimeFsr4()
 	runtimeVersionProbeAttempted = true;
 	VersionCandidate selected{};
 	auto& swapChain = upscaling.dx12SwapChain;
-	if (!QueryFsr4Version(swapChain.d3d12Device.get(), selected)) {
+	if (!QueryFsr4Version(swapChain.d3d12Device.get(), FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE, FFX_UPSCALER_VERSION, selected)) {
 		LatchRuntimeFsr4Failure("driver did not report an FSR 4.x upscaler");
 		return;
 	}
@@ -289,7 +306,7 @@ void FidelityFX::ProbeRuntimeFsr4()
 	reportedFsr4VersionId = selected.id;
 	reportedFsr4Version = selected.version != 0 ? selected.version : FFX_UPSCALER_VERSION;
 	reportedFsr4VersionName = selected.name;
-	driverReportsFsr4 = UpscalerMajor(reportedFsr4Version) == 4 || selected.name.find("4.") != std::string::npos;
+	driverReportsFsr4 = UpscalerMajor(reportedFsr4Version) == 4 || NameLooksLikeFsr4(selected.name);
 	logger::info("[FidelityFX] Driver upscaler provider '{}' id 0x{:X} ({})",
 		reportedFsr4VersionName.empty() ? "unnamed" : reportedFsr4VersionName,
 		reportedFsr4VersionId,
@@ -455,7 +472,7 @@ bool FidelityFX::EnsureRuntimeFsr4Context(uint32_t a_renderWidth, uint32_t a_ren
 		const std::string providerName = providerQuery.versionName ? providerQuery.versionName : "";
 		const uint32_t providerVersion = static_cast<uint32_t>(providerQuery.versionId & 0xFFFFFFFFull);
 		const bool isFsr4 = queryResult == FFX_API_RETURN_OK &&
-		                    (UpscalerMajor(providerVersion) == 4 || providerName.find("4.") != std::string::npos ||
+		                    (UpscalerMajor(providerVersion) == 4 || NameLooksLikeFsr4(providerName) ||
 								VersionIdMatches(providerQuery.versionId, requestedVersion) || NameMatchesVersion(providerName, requestedVersion));
 		if (!isFsr4) {
 			logger::warn("[FidelityFX] Runtime provider '{}' is not FSR 4.x", providerName.empty() ? "unknown" : providerName);

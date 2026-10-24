@@ -57,9 +57,19 @@ void FidelityFX::LoadFFX()
 	}
 }
 
-void FidelityFX::SetupFrameGeneration()
+void FidelityFX::DestroyFrameGenerationContext()
+{
+	if (!frameGenContext)
+		return;
+	if (ffxModule.DestroyContext)
+		(void)ffxModule.DestroyContext(&frameGenContext, nullptr);
+	frameGenContext = nullptr;
+}
+
+bool FidelityFX::CreateFsr3FrameGeneration()
 {
 	auto& swapChain = globals::features::upscaling.dx12SwapChain;
+	DestroyFrameGenerationContext();
 
 	ffx::CreateContextDescFrameGeneration createFg{};
 	createFg.displaySize = { swapChain.swapChainDesc.Width, swapChain.swapChainDesc.Height };
@@ -70,7 +80,96 @@ void FidelityFX::SetupFrameGeneration()
 	ffx::CreateBackendDX12Desc backendDesc{};
 	backendDesc.device = swapChain.d3d12Device.get();
 
-	if (ffx::CreateContext(frameGenContext, nullptr, createFg, backendDesc) != ffx::ReturnCode::Ok)
+	if (ffx::CreateContext(frameGenContext, nullptr, createFg, backendDesc) != ffx::ReturnCode::Ok) {
+		DestroyFrameGenerationContext();
+		return false;
+	}
+
+	frameGenIsFsr4 = false;
+	logger::info("[FidelityFX] FSR 3 frame generation context created");
+	return true;
+}
+
+bool FidelityFX::TryCreateFsr4FrameGeneration()
+{
+	auto& swapChain = globals::features::upscaling.dx12SwapChain;
+	if (!swapChain.d3d12Device || !ffxModule.CreateContext || !ffxModule.DestroyContext)
+		return false;
+
+	DestroyFrameGenerationContext();
+
+	ffx::CreateContextDescFrameGeneration createFg{};
+	createFg.displaySize = { swapChain.swapChainDesc.Width, swapChain.swapChainDesc.Height };
+	createFg.maxRenderSize = createFg.displaySize;
+	createFg.flags = FFX_FRAMEGENERATION_ENABLE_ASYNC_WORKLOAD_SUPPORT;
+	createFg.backBufferFormat = ffxApiGetSurfaceFormatDX12(swapChain.swapChainDesc.Format);
+
+	ffx::CreateBackendDX12Desc backendDesc{};
+	backendDesc.device = swapChain.d3d12Device.get();
+
+	ffx::CreateContextDescFrameGenerationVersion versionDesc{};
+	versionDesc.version = FFX_FRAMEGENERATION_VERSION;
+
+	uint64_t providerId = 0;
+	uint32_t providerVersion = 0;
+	std::string providerName;
+	const bool foundProvider = QueryFsr4Provider(FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION, FFX_FRAMEGENERATION_VERSION, providerId, providerVersion, providerName);
+	if (foundProvider) {
+		logger::info("[FidelityFX] Frame generation provider '{}' id 0x{:X} version 0x{:X}", providerName.empty() ? "unnamed" : providerName, providerId, providerVersion);
+	}
+
+	ffx::CreateContextDescOverrideVersion overrideDesc{};
+	overrideDesc.versionId = providerId;
+
+	const bool tryOverride = foundProvider && providerId != 0;
+	for (int attempt = 0; attempt < (tryOverride ? 2 : 1); ++attempt) {
+		const bool useOverride = tryOverride && attempt == 0;
+		DestroyFrameGenerationContext();
+		const auto result = useOverride ?
+		                        ffx::CreateContext(frameGenContext, nullptr, createFg, backendDesc, versionDesc, overrideDesc) :
+		                        ffx::CreateContext(frameGenContext, nullptr, createFg, backendDesc, versionDesc);
+		if (result != ffx::ReturnCode::Ok || !frameGenContext)
+			continue;
+
+		ffxQueryGetProviderVersion providerQuery{};
+		providerQuery.header.type = FFX_API_QUERY_DESC_TYPE_GET_PROVIDER_VERSION;
+		const auto queryResult = ffxModule.Query ? ffxModule.Query(&frameGenContext, &providerQuery.header) : FFX_API_RETURN_ERROR;
+		const std::string reportedName = providerQuery.versionName ? providerQuery.versionName : "";
+		const uint32_t reportedVersion = static_cast<uint32_t>(providerQuery.versionId & 0xFFFFFFFFull);
+		const uint32_t reportedMajor = (reportedVersion >> 22) & 0x3FFu;
+		const bool namedFsr4 = reportedName.find("4.") != std::string::npos || reportedName.find("MLFI") != std::string::npos;
+		const bool rejected = queryResult == FFX_API_RETURN_OK && reportedMajor != 0 && reportedMajor != 4 && !namedFsr4;
+		if (rejected) {
+			logger::warn("[FidelityFX] Frame generation provider '{}' is not FSR 4", reportedName.empty() ? "unknown" : reportedName);
+			DestroyFrameGenerationContext();
+			continue;
+		}
+
+		frameGenIsFsr4 = true;
+		logger::info("[FidelityFX] FSR 4 frame generation context created ({})",
+			!reportedName.empty() ? reportedName : (providerName.empty() ? "4.0.1" : providerName));
+		return true;
+	}
+
+	DestroyFrameGenerationContext();
+	return false;
+}
+
+void FidelityFX::SetupFrameGeneration()
+{
+	frameGenIsFsr4 = false;
+	frameGenFsr4Failed = false;
+
+	const bool wantFsr4 = globals::features::upscaling.fsr4FrameGenBoot;
+	if (wantFsr4 && TryCreateFsr4FrameGeneration())
+		return;
+
+	if (wantFsr4) {
+		frameGenFsr4Failed = true;
+		logger::warn("[FidelityFX] FSR 4 frame generation did not start (context was not created); falling back to FSR 3");
+	}
+
+	if (!CreateFsr3FrameGeneration())
 		logger::critical("[FidelityFX] Failed to create frame generation context!");
 }
 
@@ -192,54 +291,87 @@ void FidelityFX::Present(bool a_useFrameGeneration, bool a_isHDR)
 	}
 
 	if (a_useFrameGeneration) {
-		ffx::DispatchDescFrameGenerationPrepare dispatchParameters{};
-
-		dispatchParameters.commandList = swapChain.commandLists[swapChain.frameIndex].get();
-
-		dispatchParameters.motionVectorScale.x = renderSize.x;
-		dispatchParameters.motionVectorScale.y = renderSize.y;
-		dispatchParameters.renderSize.width = static_cast<uint32_t>(renderSize.x);
-		dispatchParameters.renderSize.height = static_cast<uint32_t>(renderSize.y);
-
-		dispatchParameters.jitterOffset.x = -upscaling.jitter.x;
-		dispatchParameters.jitterOffset.y = -upscaling.jitter.y;
-
-		dispatchParameters.frameTimeDelta = RE::GetSecondsSinceLastFrame() * 1000.f;
-
-		dispatchParameters.cameraFar = *globals::game::cameraFar;
-		dispatchParameters.cameraNear = *globals::game::cameraNear;
-
-		dispatchParameters.cameraFovAngleVertical = Util::GetVerticalFOVRad();
-		dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
-
-		dispatchParameters.frameID = frameID;
-
-		dispatchParameters.depth = ffxApiGetResourceDX12(swapChain.depthBufferShared12->resource.get());
-		dispatchParameters.motionVectors = ffxApiGetResourceDX12(swapChain.motionVectorBufferShared12->resource.get());
-
-		ffx::DispatchDescFrameGenerationPrepareCameraInfo cameraConfig{};
-
 		auto viewMatrix = globals::game::frameBufferCached.GetCameraViewInverse().Transpose();
-		auto cameraViewToClip = globals::game::frameBufferCached.GetCameraProjUnjittered().Transpose();
+		const float cameraRight[3] = { viewMatrix._11, viewMatrix._12, viewMatrix._13 };
+		const float cameraUp[3] = { viewMatrix._21, viewMatrix._22, viewMatrix._23 };
+		const float cameraForward[3] = { viewMatrix._31, viewMatrix._32, viewMatrix._33 };
+		const auto cameraPosition = globals::game::frameBufferCached.GetCameraPosAdjust();
 
-		cameraConfig.cameraRight[0] = viewMatrix._11;
-		cameraConfig.cameraRight[1] = viewMatrix._12;
-		cameraConfig.cameraRight[2] = viewMatrix._13;
+		if (frameGenIsFsr4) {
+			ffx::DispatchDescFrameGenerationPrepareV2 dispatchParameters{};
+			dispatchParameters.commandList = swapChain.commandLists[swapChain.frameIndex].get();
+			dispatchParameters.motionVectorScale.x = renderSize.x;
+			dispatchParameters.motionVectorScale.y = renderSize.y;
+			dispatchParameters.renderSize.width = static_cast<uint32_t>(renderSize.x);
+			dispatchParameters.renderSize.height = static_cast<uint32_t>(renderSize.y);
+			dispatchParameters.jitterOffset.x = -upscaling.jitter.x;
+			dispatchParameters.jitterOffset.y = -upscaling.jitter.y;
+			dispatchParameters.frameTimeDelta = RE::GetSecondsSinceLastFrame() * 1000.f;
+			dispatchParameters.cameraFar = *globals::game::cameraFar;
+			dispatchParameters.cameraNear = *globals::game::cameraNear;
+			dispatchParameters.cameraFovAngleVertical = Util::GetVerticalFOVRad();
+			dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
+			dispatchParameters.frameID = frameID;
+			dispatchParameters.reset = false;
+			dispatchParameters.depth = ffxApiGetResourceDX12(swapChain.depthBufferShared12->resource.get());
+			dispatchParameters.motionVectors = ffxApiGetResourceDX12(swapChain.motionVectorBufferShared12->resource.get());
+			dispatchParameters.cameraRight[0] = cameraRight[0];
+			dispatchParameters.cameraRight[1] = cameraRight[1];
+			dispatchParameters.cameraRight[2] = cameraRight[2];
+			dispatchParameters.cameraUp[0] = cameraUp[0];
+			dispatchParameters.cameraUp[1] = cameraUp[1];
+			dispatchParameters.cameraUp[2] = cameraUp[2];
+			dispatchParameters.cameraForward[0] = cameraForward[0];
+			dispatchParameters.cameraForward[1] = cameraForward[1];
+			dispatchParameters.cameraForward[2] = cameraForward[2];
+			dispatchParameters.cameraPosition[0] = cameraPosition.x;
+			dispatchParameters.cameraPosition[1] = cameraPosition.y;
+			dispatchParameters.cameraPosition[2] = cameraPosition.z;
+			if (ffx::Dispatch(frameGenContext, dispatchParameters) != ffx::ReturnCode::Ok)
+				logger::critical("[FidelityFX] Failed to dispatch FSR 4 frame generation!");
+		} else {
+			ffx::DispatchDescFrameGenerationPrepare dispatchParameters{};
 
-		cameraConfig.cameraUp[0] = viewMatrix._21;
-		cameraConfig.cameraUp[1] = viewMatrix._22;
-		cameraConfig.cameraUp[2] = viewMatrix._23;
+			dispatchParameters.commandList = swapChain.commandLists[swapChain.frameIndex].get();
 
-		cameraConfig.cameraForward[0] = viewMatrix._31;
-		cameraConfig.cameraForward[1] = viewMatrix._32;
-		cameraConfig.cameraForward[2] = viewMatrix._33;
+			dispatchParameters.motionVectorScale.x = renderSize.x;
+			dispatchParameters.motionVectorScale.y = renderSize.y;
+			dispatchParameters.renderSize.width = static_cast<uint32_t>(renderSize.x);
+			dispatchParameters.renderSize.height = static_cast<uint32_t>(renderSize.y);
 
-		cameraConfig.cameraPosition[0] = globals::game::frameBufferCached.GetCameraPosAdjust().x;
-		cameraConfig.cameraPosition[1] = globals::game::frameBufferCached.GetCameraPosAdjust().y;
-		cameraConfig.cameraPosition[2] = globals::game::frameBufferCached.GetCameraPosAdjust().z;
+			dispatchParameters.jitterOffset.x = -upscaling.jitter.x;
+			dispatchParameters.jitterOffset.y = -upscaling.jitter.y;
 
-		if (ffx::Dispatch(frameGenContext, dispatchParameters, cameraConfig) != ffx::ReturnCode::Ok) {
-			logger::critical("[FidelityFX] Failed to dispatch frame generation!");
+			dispatchParameters.frameTimeDelta = RE::GetSecondsSinceLastFrame() * 1000.f;
+
+			dispatchParameters.cameraFar = *globals::game::cameraFar;
+			dispatchParameters.cameraNear = *globals::game::cameraNear;
+
+			dispatchParameters.cameraFovAngleVertical = Util::GetVerticalFOVRad();
+			dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
+
+			dispatchParameters.frameID = frameID;
+
+			dispatchParameters.depth = ffxApiGetResourceDX12(swapChain.depthBufferShared12->resource.get());
+			dispatchParameters.motionVectors = ffxApiGetResourceDX12(swapChain.motionVectorBufferShared12->resource.get());
+
+			ffx::DispatchDescFrameGenerationPrepareCameraInfo cameraConfig{};
+			cameraConfig.cameraRight[0] = cameraRight[0];
+			cameraConfig.cameraRight[1] = cameraRight[1];
+			cameraConfig.cameraRight[2] = cameraRight[2];
+			cameraConfig.cameraUp[0] = cameraUp[0];
+			cameraConfig.cameraUp[1] = cameraUp[1];
+			cameraConfig.cameraUp[2] = cameraUp[2];
+			cameraConfig.cameraForward[0] = cameraForward[0];
+			cameraConfig.cameraForward[1] = cameraForward[1];
+			cameraConfig.cameraForward[2] = cameraForward[2];
+			cameraConfig.cameraPosition[0] = cameraPosition.x;
+			cameraConfig.cameraPosition[1] = cameraPosition.y;
+			cameraConfig.cameraPosition[2] = cameraPosition.z;
+
+			if (ffx::Dispatch(frameGenContext, dispatchParameters, cameraConfig) != ffx::ReturnCode::Ok) {
+				logger::critical("[FidelityFX] Failed to dispatch frame generation!");
+			}
 		}
 	}
 

@@ -79,9 +79,12 @@ void DX12SwapChain::CreateSwapChain(IDXGIAdapter* adapter, DXGI_SWAP_CHAIN_DESC 
 	ffxSwapChainDesc.hwnd = a_swapChainDesc.OutputWindow;
 	ffxSwapChainDesc.swapchain = &swapChain;
 
+	ffx::CreateContextDescFrameGenerationSwapChainVersionDX12 swapChainVersion{};
+	swapChainVersion.version = FFX_FRAMEGENERATION_SWAPCHAIN_DX12_VERSION;
+
 	auto& fidelityFX = globals::features::upscaling.fidelityFX;
 
-	if (ffx::CreateContext(fidelityFX.swapChainContext, nullptr, ffxSwapChainDesc) != ffx::ReturnCode::Ok) {
+	if (ffx::CreateContext(fidelityFX.swapChainContext, nullptr, ffxSwapChainDesc, swapChainVersion) != ffx::ReturnCode::Ok) {
 		logger::critical("[FidelityFX] Failed to create swap chain context!");
 	}
 
