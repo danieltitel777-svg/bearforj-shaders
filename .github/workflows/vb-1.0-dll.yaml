@@ -90,10 +90,13 @@ jobs:
                   } finally {
                       Pop-Location
                   }
-                  $listing = & tar.exe -tf $zip
-                  if ($listing -notmatch 'SKSE[/\\]Plugins[/\\]CommunityShaders\.dll') {
-                      throw "Zip does not contain SKSE/Plugins/CommunityShaders.dll"
+                  $listing = @(& tar.exe -tf $zip)
+                  $dllEntry = $listing | Where-Object { $_ -match 'SKSE[/\\]Plugins[/\\]CommunityShaders\.dll' }
+                  if (-not $dllEntry) {
+                      $sample = ($listing | Select-Object -First 30) -join "`n"
+                      throw "Zip does not contain SKSE/Plugins/CommunityShaders.dll. First entries:`n$sample"
                   }
+                  Write-Host "ZIP_DLL=$dllEntry"
                   $item = Get-Item $zip
                   $hash = (Get-FileHash -Algorithm MD5 $zip).Hash.ToLower()
                   Write-Host "ZIP_PATH=$($item.FullName)"
