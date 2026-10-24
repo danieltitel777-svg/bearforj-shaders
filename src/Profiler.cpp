@@ -228,6 +228,7 @@ void Profiler::CollectResults()
 		TimerResult result;
 		result.name = known.name;
 		auto it = activeTimers.find(known.name);
+		result.sampledThisFrame = it != activeTimers.end();
 		if (it != activeTimers.end()) {
 			result.gpuTimeMs = it->second.gpuMs;
 			result.cpuTimeMs = it->second.cpuMs;
@@ -235,6 +236,12 @@ void Profiler::CollectResults()
 			result.gpuTimeMs = known.gpu.lastMs;
 			result.cpuTimeMs = known.cpu.lastMs;
 		}
+		result.avgMs = known.gpu.GetAverage();
+		result.p95Ms = known.gpu.GetPercentile(95.0f);
+		result.p99Ms = known.gpu.GetPercentile(99.0f);
+		result.cpuAvgMs = known.cpu.GetAverage();
+		result.cpuP95Ms = known.cpu.GetPercentile(95.0f);
+		result.cpuP99Ms = known.cpu.GetPercentile(99.0f);
 		result.valid = true;
 		result.historyBuffer = known.gpu.history;
 		result.historyHead = known.gpu.head;

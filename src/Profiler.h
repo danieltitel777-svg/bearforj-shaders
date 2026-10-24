@@ -66,7 +66,7 @@ public:
 	{
 		std::string name;
 		float gpuTimeMs = 0.0f;
-		// Rolling statistics, filled in only by GetStatistics.
+		// Rolling statistics. GetResults fills them for the latest snapshot.
 		float avgMs = 0.0f;
 		float p95Ms = 0.0f;
 		float p99Ms = 0.0f;
@@ -74,6 +74,8 @@ public:
 		float cpuAvgMs = 0.0f;
 		float cpuP95Ms = 0.0f;
 		float cpuP99Ms = 0.0f;
+		// True when this timer produced a result in the latest collected frame.
+		bool sampledThisFrame = false;
 		bool valid = false;
 
 		const float* historyBuffer = nullptr;
