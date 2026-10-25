@@ -23,7 +23,7 @@ Texture2D<float4> EIFoamHeightTex : register(t111);
 // Physical Particles spark atlas, 2x2: spark_01 top-left, spark_02 top-right, spark_03 bottom-left, spark_04 bottom-right.
 // Data\Shaders\PhysicalParticles\sparks_atlas.dds. White and semi-transparent. Bound on PS t113.
 Texture2D<float4> EISparkAtlas : register(t113);
-float3 gECView = float3(0, 0, 1);
+static float3 gECView = float3(0, 0, 1);
 
 float2 ECParallaxUv(Texture2D<float4> heightTex, float2 uv, float worldPerTile, float depthUnits)
 {

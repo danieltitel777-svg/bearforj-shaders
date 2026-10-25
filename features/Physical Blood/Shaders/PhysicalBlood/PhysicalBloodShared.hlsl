@@ -10,6 +10,7 @@
 #if defined(PSHADER)
 #	include "Common/SharedData.hlsli"
 #	include "Common/Color.hlsli"
+#	include "Common/ColorManagement.hlsli"
 #	if defined(AIRBORNE_PASS) || defined(SPLAT_PASS)
 #		include "Common/PBRMath.hlsli"
 #	endif
@@ -391,7 +392,7 @@ float4 PSMain(VertexOutput input) : SV_TARGET
 			lerp(0.40f, 0.16f, gloss * lerp(0.55f, 1.0f, wetCore)));
 	}
 	float absorption = lerp(1.0f, 0.76f, saturate(1.0f - radial));
-	float3 albedo = Color::Diffuse(
+	float3 albedo = ColorManagement::DiffuseToWorking(
 		textureAlbedo * (0.78f + input.Variation * 0.18f) * absorption);
 	float3 diffuseIrradiance = ambientLighting +
 		directionalLighting * NdotL * Color::VanillaNormalization();
@@ -400,7 +401,7 @@ float4 PSMain(VertexOutput input) : SV_TARGET
 	float3 color = albedo * diffuseIrradiance + wetSpecular;
 #else
 	float absorption = lerp(1.0f, 0.86f, saturate(1.0f - radial));
-	float3 albedo = Color::Diffuse(
+	float3 albedo = ColorManagement::DiffuseToWorking(
 		textureAlbedo * (0.78f + input.Variation * 0.18f) * absorption);
 	float contactShadow = 1.0f;
 #	if defined(SCREEN_SPACE_SHADOWS)

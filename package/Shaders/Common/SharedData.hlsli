@@ -304,9 +304,17 @@ namespace SharedData
 		float EnvIBLSaturation;
 		float SkyIBLSaturation;
 		float FogAmount;
-		uint DALCMode;       // 0: Luminance Ratio, 1: Color Ratio, 2: DALC + Sky, 3: DALC + Sky (Directional)
+		uint DALCMode;  // 0: Luminance Ratio, 1: Color Ratio, 2: DALC + Sky, 3: DALC + Sky (Directional)
+		uint EffectNormalization;
+		float EffectNormalizationMult;
+		float MinEffectMult;
+		uint SkylightingAffectsEnv;
+		uint EnableReflectionFallback;
+		float ReflectionFallbackDistance;
 		uint ENBSkyFalloff;  // Effects 11 owns IBL: darken sky irradiance from below
 		float pad0;
+		float pad1;
+		float pad2;
 	};
 
 	struct ExtendedTranslucencySettings
@@ -790,7 +798,7 @@ namespace SharedData
 		return int3(uv * BufferDim.xy, 0);
 	}
 
-	int3 ConvertUVToSampleCoord(float2 uv, uint)
+	int3 ConvertUVToSampleCoord(float2 uv, uint eyeIndex)
 	{
 		return ConvertUVToSampleCoord(uv);
 	}

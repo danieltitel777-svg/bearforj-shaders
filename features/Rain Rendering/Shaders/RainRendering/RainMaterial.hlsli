@@ -4,6 +4,7 @@
 #ifdef PSHADER
 #	include "Common/Math.hlsli"
 #	include "Common/Color.hlsli"
+#	include "Common/ColorManagement.hlsli"
 #	include "Common/BRDF.hlsli"
 
 Texture2D<float4> RainNormalOpacity : register(t3);
@@ -51,12 +52,7 @@ namespace RainMaterial
 	/** @brief Reads the same directional light color convention used by scene materials. */
 	float3 DirectionalIrradiance()
 	{
-		bool isLinear = SharedData::linearLightingSettings.isDirLightLinear;
-		float multiplier = SharedData::linearLightingSettings.enableLinearLighting && !isLinear && !SharedData::InInterior ?
-		                       SharedData::linearLightingSettings.dirLightMult :
-		                       1.0f;
-		float3 lightColor = Color::DirectionalLight(max(SharedData::DirLightColor.rgb, 0.0f) / max(multiplier, EPSILON_DIVISION), isLinear) * multiplier;
-		return Color::IrradianceToLinear(lightColor) * Appearance.x * Appearance.y;
+		return Color::DirectionalLight(max(SharedData::DirLightColor.rgb, 0.0f)) * Appearance.x * Appearance.y;
 	}
 
 	float TransmittedHighlight(float3 normal, float3 viewDirection, float3 lightDirection, float roughness)

@@ -490,7 +490,7 @@ float3 GetLightingColor(float3 msPosition, float3 worldPosition, float2 screenPo
 	float3 color = DLightColor.xyz * Color::EffectLightingScale;
 	bool suppressExternalEmittance = SharedData::InInterior && (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::SuppressExternalEmittance);
 	if (suppressExternalEmittance) {
-		color = ShadowSampling::GetAmbientLighting() + ShadowSampling::GetDirectionalLighting();
+		color = ShadowSampling::GetAmbientLighting(worldPosition) + ShadowSampling::GetDirectionalLighting();
 	}
 
 #		if defined(SKYLIGHTING)
@@ -505,12 +505,12 @@ float3 GetLightingColor(float3 msPosition, float3 worldPosition, float2 screenPo
 
 	float3 dirColor;
 	float3 ambientColor;
-	ShadowSampling::ExtractLighting(color, dirColor, ambientColor);
+	ShadowSampling::ExtractLighting(color, worldPosition, dirColor, ambientColor);
 
 #		if defined(EFFECTS11)
 	if (SharedData::enbSettings.EnableParticle) {
 		dirColor = ShadowSampling::GetDirectionalLighting();
-		ambientColor = ShadowSampling::GetAmbientLighting();
+		ambientColor = ShadowSampling::GetAmbientLighting(worldPosition);
 		dirColor *= SharedData::enbSettings.ParticleLightingInfluence;
 		ambientColor *= SharedData::enbSettings.ParticleAmbientInfluence;
 	}
@@ -604,7 +604,7 @@ float3 GetLightingShadow(float3 color, float3 worldPosition, float2 screenPositi
 {
 	float3 dirColor;
 	float3 ambientColor;
-	ShadowSampling::ExtractLighting(color, dirColor, ambientColor);
+	ShadowSampling::ExtractLighting(color, worldPosition, dirColor, ambientColor);
 
 	float shadow = GetViewRayShadow(worldPosition, screenPosition, depth);
 
@@ -850,7 +850,7 @@ PS_OUTPUT main(PS_INPUT input)
 		{
 			float3 volumetricFogTint = BaseColor.xyz;
 			volumetricFogTint /= max(max(max(volumetricFogTint.x, volumetricFogTint.y), volumetricFogTint.z), 1.0);
-			float3 volumetricFogLight = ShadowSampling::GetDirectionalLighting() * volumetricFogShadow + ShadowSampling::GetAmbientLighting();
+			float3 volumetricFogLight = ShadowSampling::GetDirectionalLighting() * volumetricFogShadow + ShadowSampling::GetAmbientLighting(input.WorldPosition.xyz);
 			baseColor.xyz = pow(max(volumetricFogTint * baseTexColor.xyz, 0.0), SharedData::enbSettings.VolumetricFogCurve) * volumetricFogLight * volumetricFogScale * 0.5;
 			lightingInfluence = 0.0;
 		} else {

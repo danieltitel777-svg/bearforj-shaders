@@ -8,7 +8,7 @@ namespace RainRoofOcclusion
 {
 	float Sample(float3 worldPosition, float fadeStart, float fadeEnd)
 	{
-		float3 positionMS = worldPosition - FrameBuffer::CameraPosAdjust[0].xyz;
+		float3 positionMS = worldPosition - FrameBuffer::CameraPosAdjust.xyz;
 		sh2 skyVisibility = Skylighting::SampleNoBiasIncludingInteriors(positionMS);
 		float visibility = Skylighting::CosineLobeVisibility(
 			skyVisibility, float3(0.0f, 0.0f, 1.0f), Skylighting::GetFadeOutFactor(positionMS));

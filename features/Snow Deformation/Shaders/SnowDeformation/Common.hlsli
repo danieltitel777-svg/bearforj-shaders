@@ -88,20 +88,6 @@ float SampleField(float2 windowPosition)
 	return SampleField2(windowPosition).x;
 }
 
-float DisplacedSurface(float2 windowPosition, float groundScale)
-{
-	float2 field = SampleField2(windowPosition);
-	float snow = SnowSurface(BlanketAt(windowPosition), field.x);
-	[branch] if (GroundParams.x > 0.5 && groundScale != 0.0)
-		snow += field.y * groundScale;
-	return snow;
-}
-
-float GradientStep(float2 windowPosition)
-{
-	return lerp(FieldParams1.w, FadeParams.w, WindowFade(windowPosition));
-}
-
 float BlanketAt(float2 windowPosition)
 {
 	float raise = 0.0;
@@ -114,10 +100,26 @@ float BlanketAt(float2 windowPosition)
 	return raise;
 }
 
+
+float GradientStep(float2 windowPosition)
+{
+	return lerp(FieldParams1.w, FadeParams.w, WindowFade(windowPosition));
+}
+
+
 float SnowSurface(float raise, float field)
 {
 	precise float surface = raise + field;
 	return BlanketParams.z > 0.5 ? max(surface, 0.0) : surface;
+}
+
+float DisplacedSurface(float2 windowPosition, float groundScale)
+{
+	float2 field = SampleField2(windowPosition);
+	float snow = SnowSurface(BlanketAt(windowPosition), field.x);
+	[branch] if (GroundParams.x > 0.5 && groundScale != 0.0)
+		snow += field.y * groundScale;
+	return snow;
 }
 
 float4 DisplaceClipPosition(float4 clipPosition, float displacement)

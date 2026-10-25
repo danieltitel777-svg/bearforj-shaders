@@ -1,4 +1,5 @@
 #include "Common/FrameBuffer.hlsli"
+#include "Common/Math.hlsli"
 #include "ScreenSpacePhysicalParticles/ProceduralQuad.hlsli"
 
 // Draws one world-particle render class. Mode 0 tints magic sparks from the

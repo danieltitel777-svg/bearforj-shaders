@@ -402,7 +402,7 @@ PS_OUTPUT main(PS_INPUT input)
 	const float auroraPixelAngle = length(fwidth(auroraDirection));
 	[branch] if (SharedData::proceduralAuroraSettings.Enabled && SharedData::proceduralAuroraSettings.Atmosphere.x > 0.0 && auroraDirection.z > -0.03)
 	{
-		float3 aurora = Color::Sky(ProceduralAurora::Render(auroraDirection, auroraPixelAngle));
+		float3 aurora = ColorManagement::SRGBToWorking(ProceduralAurora::Render(auroraDirection, auroraPixelAngle));
 #					if defined(EFFECTS11)
 		[branch] if (SharedData::enbSettings.Enable)
 			aurora = pow(max(aurora, 0.0), SharedData::enbSettings.AuroraCurve) * SharedData::enbSettings.AuroraIntensity;

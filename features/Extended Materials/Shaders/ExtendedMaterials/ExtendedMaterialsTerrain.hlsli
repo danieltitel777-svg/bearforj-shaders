@@ -381,7 +381,7 @@
 		       LandscapeSeams::HasAnyFlag(LandscapeSeams::AnyParallaxMask);
 #	else
 		return (RuntimeFeatures::IsEnabled(RuntimeFeatures::ExtendedMaterialsFeature) && SharedData::extendedMaterialSettings.EnableTerrainParallax) ||
-		       (Permutation::ExtraFeatureDescriptor & Permutation::ExtraFeatureFlags::THLandHasDisplacement) != 0);
+		       (Permutation::ExtraFeatureDescriptor & Permutation::ExtraFeatureFlags::THLandHasDisplacement) != 0;
 #	endif
 	}
 
