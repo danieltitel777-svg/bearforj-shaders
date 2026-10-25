@@ -186,6 +186,10 @@ public:
 	// Deferred reload systems (public for SettingsTabRenderer access)
 	bool pendingCursorReload = false;
 
+	// Settings pages, public so the Bearforj menu (SYSTEM tab) can draw them.
+	void DrawGeneralSettings();
+	void DrawAdvancedSettings();
+
 	// Display size tracking for cross-session resolution change detection
 	float2 lastDisplaySize{};
 	bool resetLayout = false;
@@ -548,8 +552,6 @@ private:
 
 	Menu() = default;
 
-	void DrawGeneralSettings();
-	void DrawAdvancedSettings();
 	void DrawDisableAtBootSettings();
 	void ApplyWindowLayout();
 	void HandleMenuShortcuts();
