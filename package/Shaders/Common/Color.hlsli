@@ -193,6 +193,16 @@ namespace Color
 	const static float PBRLightingCompensation = Math::PI;
 #endif
 
+	// Vanilla diffuse/specular scale: 1/PI under linear lighting, 1 otherwise.
+	float VanillaNormalization()
+	{
+#if defined(ENABLE_LL)
+		return 1.0f / Math::PI;
+#else
+		return 1.0f;
+#endif
+	}
+
 	// Gamut transform: converts linear sRGB-gamut color to ACEScg when enabled
 	float3 LinearSRGBToWorking(float3 linearSRGB)
 	{

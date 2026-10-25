@@ -175,6 +175,42 @@ namespace SharedData
 		float RippleRadius;
 		float RippleBreadth;
 		float RippleLifetimeRcp;
+
+		uint EnableCharacterRainSpots;
+		float CharacterSpotDensity;
+		float CharacterSpotRadius;
+		float CharacterSpotStrength;
+		float CharacterSpotRoughness;
+		float CharacterSpotNormalStrength;
+		uint CharacterSpotDebug;
+		float CharacterCoatIntensity;
+		uint EnableWetHair;
+		float CharacterRainActivityMultiplier;
+		float CharacterDryTime;
+		uint EnableWeaponRainDrops;
+		uint EnableSkinnedRainStreaks;
+		uint EnableArmorClothingDryingDrops;
+		uint EnableEnvironmentVerticalDrops;
+		float CharacterSpotLifetime;
+		float CharacterSpotInterval;
+		float CharacterDropPause;
+		float EnvironmentDropDryTime;
+		float EnvironmentVerticalSlopeStart;
+		float EnvironmentVerticalSlopeFull;
+		float BearforjWetnessPad0;
+		float BearforjWetnessPad1;
+		float BearforjWetnessPad2;
+
+		// Bearforj volumetric puddles. Appended after character rain so earlier fields keep their offsets.
+		uint EnableVolumetricPuddles;
+		float VolumetricPuddleDepth;
+		float VolumetricPuddleEdgeDarkening;
+		float VolumetricPuddleDistortion;
+
+		float CharacterImpactIntensity;
+		float CharacterRetainedWetness;
+		float EnvironmentRetainedWetness;
+		float CharacterStatePad;
 	};
 
 	struct SkylightingSettings
@@ -268,9 +304,17 @@ namespace SharedData
 		float EnvIBLSaturation;
 		float SkyIBLSaturation;
 		float FogAmount;
-		uint DALCMode;       // 0: Luminance Ratio, 1: Color Ratio, 2: DALC + Sky, 3: DALC + Sky (Directional)
+		uint DALCMode;  // 0: Luminance Ratio, 1: Color Ratio, 2: DALC + Sky, 3: DALC + Sky (Directional)
+		uint EffectNormalization;
+		float EffectNormalizationMult;
+		float MinEffectMult;
+		uint SkylightingAffectsEnv;
+		uint EnableReflectionFallback;
+		float ReflectionFallbackDistance;
 		uint ENBSkyFalloff;  // Effects 11 owns IBL: darken sky irradiance from below
 		float pad0;
+		float pad1;
+		float pad2;
 	};
 
 	struct ExtendedTranslucencySettings
@@ -723,6 +767,25 @@ namespace SharedData
 		SSGISettings ssgiSettings;
 		SSRSettings ssrSettings;
 		RainRenderingSettings rainRenderingSettings;
+
+		struct WaterWavesSettings
+		{
+			float WaveScale;
+			float WaveAmplitude;
+			float WaveChop;
+			float WaveShore;
+			float4 WaveLook;
+			float CameraBelowWaves;
+			float ShoreOriginX;
+			float ShoreOriginY;
+			float ShoreCellSize;
+			float ShoreCellCount;
+			float WindSpeed;
+			float WindAngle;
+			float Pad0;
+		};
+
+		WaterWavesSettings waterWavesSettings;
 		uint4 RuntimeFeatureFlags;
 	};
 
@@ -735,7 +798,7 @@ namespace SharedData
 		return int3(uv * BufferDim.xy, 0);
 	}
 
-	int3 ConvertUVToSampleCoord(float2 uv, uint)
+	int3 ConvertUVToSampleCoord(float2 uv, uint eyeIndex)
 	{
 		return ConvertUVToSampleCoord(uv);
 	}

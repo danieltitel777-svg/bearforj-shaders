@@ -107,7 +107,7 @@ float4 main(PS_INPUT input) : SV_Target
 	float3 viewDirection = normalize(positionWS);
 	float3 lightDirection = SharedData::DirLightDirection.xyz;
 
-	float3 ambient = ShadowSampling::GetAmbientLighting();
+	float3 ambient = ShadowSampling::GetAmbientLighting(positionWS);
 	float3 directional = ShadowSampling::GetDirectionalLighting();
 
 #if defined(EFFECTS11)

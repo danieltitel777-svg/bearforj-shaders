@@ -1,4 +1,5 @@
 #include "Menu.h"
+#include "Menu/BearforjMenu.h"
 #include "Menu/FontAtlasState.h"
 
 #ifndef DIRECTINPUT_VERSION
@@ -805,6 +806,7 @@ void Menu::DrawSettings()
 		windowFlags |= ImGuiWindowFlags_NoTitleBar;
 	}
 
+	BearforjMenu::PushWindowStyle();
 	Util::BeginWithRoundedClose(title.c_str(), &IsEnabled, windowFlags);
 	{
 		// Update docking state tracking
@@ -812,29 +814,14 @@ void Menu::DrawSettings()
 		wasDocked = isDocked;
 
 		HandleMenuShortcuts();
-		MenuHeaderRenderer::RenderHeader(isDocked);
-
-		// Static storage for menu state - must persist across frames
-		static size_t selectedMenu = 0;
-		static std::map<std::string, bool> categoryExpansionStates;
-
-		// Render feature list using extracted component
-		FeatureListRenderer::RenderFeatureList(
-			selectedMenu,
-			featureSearch,
-			focusFeatureSearch,
-			pendingFeatureSelection,
-			categoryExpansionStates,
-			[&]() { DrawGeneralSettings(); },
-			[&]() { DrawAdvancedSettings(); },
-			MenuHeaderRenderer::GetStatusBarHeight());
-
-		MenuHeaderRenderer::RenderStatusBar();
+		// Bearforj 0.6 look over the vb menu: header, tabs, feature list, settings, footer.
+		BearforjMenu::Render(*this);
 
 		// Draw global popups (needs to be called once per frame)
 		Util::DrawClearShaderCacheConfirmation();
 	}
 	ImGui::End();
+	BearforjMenu::PopWindowStyle();
 
 	popupOpenLastFrame = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
 }

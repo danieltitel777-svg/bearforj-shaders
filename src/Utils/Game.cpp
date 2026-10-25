@@ -201,6 +201,14 @@ namespace Util
 		return (GetEyePosition(0) + GetEyePosition(1)) * 0.5f;
 	}
 
+	RE::BSGraphics::ViewData GetCameraData(int eyeIndex)
+	{
+		auto* shadowState = globals::game::shadowState;
+		if (!REL::Module::IsVR())
+			return shadowState->GetRuntimeData().cameraData.getEye();
+		return shadowState->GetVRRuntimeData().cameraData.getEye(eyeIndex);
+	}
+
 	float4 GetCameraData()
 	{
 		static float& cameraNear = (*(float*)(REL::RelocationID(517032, 403540).address() + 0x40));

@@ -44,6 +44,8 @@
 
 namespace
 {
+	Hooks::DirtyStatesObserver dirtyStatesObserver{};
+
 	using ShaderBytecode = std::vector<std::uint8_t>;
 
 	std::unordered_map<void*, std::shared_ptr<const ShaderBytecode>> ShaderBytecodeMap;
@@ -620,6 +622,13 @@ void Hooks::BSGraphics_SetDirtyStates::thunk(bool isCompute)
 	globals::state->Draw();
 	if (!isCompute)
 		VanillaBinding::BindDrawResources();
+	if (dirtyStatesObserver)
+		dirtyStatesObserver();
+}
+
+void Hooks::SetDirtyStatesObserver(DirtyStatesObserver a_observer) noexcept
+{
+	dirtyStatesObserver = a_observer;
 }
 
 struct ID3D11Device_CreateVertexShader

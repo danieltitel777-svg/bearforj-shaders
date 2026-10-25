@@ -313,7 +313,7 @@ namespace Util
 		if (pending.empty() || !globals::game::graphicsState)
 			return;
 		static uint32_t lastFrame = UINT32_MAX;
-		const auto frame = globals::game::graphicsState->GetFrameCount();
+		const auto frame = globals::game::graphicsState->frameCount;
 		if (lastFrame == frame)
 			return;
 		lastFrame = frame;

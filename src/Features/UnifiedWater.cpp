@@ -17,6 +17,8 @@
 
 namespace
 {
+	UnifiedWater::PostSetupGeometryObserver postSetupGeometryObserver{};
+
 	bool IsInteriorCellActive()
 	{
 		const auto tes = RE::TES::GetSingleton();
@@ -826,6 +828,18 @@ void UnifiedWater::BSWaterShader_SetupGeometry::thunk(RE::BSShader* waterShader,
 	}
 
 	func(waterShader, pass, renderFlags);
+	if (postSetupGeometryObserver)
+		postSetupGeometryObserver();
+}
+
+void UnifiedWater::InstallSetupGeometryHook()
+{
+	// PostPostLoad already installed BSWaterShader::SetupGeometry. Water Waves wraps that thunk.
+}
+
+void UnifiedWater::SetPostSetupGeometryObserver(PostSetupGeometryObserver a_observer) noexcept
+{
+	postSetupGeometryObserver = a_observer;
 }
 
 void UnifiedWater::TESWaterSystem_UpdateDisplacementMeshPosition::thunk(RE::TESWaterSystem* waterSystem)

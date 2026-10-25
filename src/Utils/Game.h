@@ -38,6 +38,8 @@ namespace Util
 
 	float4 TryGetWaterData(float offsetX, float offsetY);
 	float4 GetCameraData();
+	/** @brief Per-eye camera matrices. Flat builds ignore the index. */
+	RE::BSGraphics::ViewData GetCameraData(int eyeIndex);
 	bool GetTemporal();
 	// Toggle the ISTemporalAA scene-resolve flag (companion to GetTemporal).
 	void SetTemporal(bool enabled);

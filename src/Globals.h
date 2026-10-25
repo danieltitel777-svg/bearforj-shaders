@@ -58,6 +58,11 @@ struct NightEye;
 struct FurShells;
 struct LandscapeSeams;
 struct SnowDeformation;
+struct WaterWaves;
+struct ScreenSpacePhysicalParticlesFeature;
+struct PhysicalBlood;
+struct PhysicalLeaves;
+struct PhysicalWorldParticles;
 struct SceneManager;
 
 class State;
@@ -168,6 +173,11 @@ namespace globals
 		extern FurShells furShells;
 		extern LandscapeSeams landscapeSeams;
 		extern SnowDeformation snowDeformation;
+		extern WaterWaves waterWaves;
+		extern ScreenSpacePhysicalParticlesFeature screenSpacePhysicalParticles;
+		extern PhysicalBlood physicalBlood;
+		extern PhysicalLeaves physicalLeaves;
+		extern PhysicalWorldParticles physicalWorldParticles;
 		extern SceneManager sceneManager;
 
 	}
@@ -192,41 +202,110 @@ namespace globals
 		float4 DynamicResolutionParams2;
 	};
 
-	/** @brief Cached snapshot of per-frame camera data, captured between Map/Unmap of the per-frame constant buffer. */
+	/** @brief VR per-frame camera buffer. Packoffsets c0 to c86, one pair of matrices per eye. */
+	struct FrameBufferVR
+	{
+		Matrix CameraView[2];
+		Matrix CameraProj[2];
+		Matrix CameraViewProj[2];
+		Matrix CameraViewProjUnjittered[2];
+		Matrix CameraPreviousViewProjUnjittered[2];
+		Matrix CameraProjUnjittered[2];
+		Matrix CameraProjUnjitteredInverse[2];
+		Matrix CameraViewInverse[2];
+		Matrix CameraViewProjInverse[2];
+		Matrix CameraProjInverse[2];
+		float4 CameraPosAdjust[2];
+		float4 CameraPreviousPosAdjust[2];
+		float4 FrameParams;
+		float4 DynamicResolutionParams1;
+		float4 DynamicResolutionParams2;
+	};
+
+	/**
+	 * @brief Cached snapshot of per-frame camera data, captured between Map/Unmap of the per-frame constant buffer.
+	 * Flat and VR layouts are stored separately. Eye 0 is the only flat matrix; VR indexes the stereo pair.
+	 */
 	struct FrameBufferCache
 	{
-		FrameBuffer data;
+		FrameBuffer nonVR{};
+		FrameBufferVR vr{};
 
 		/** Gets the camera view matrix. */
-		const Matrix& GetCameraView() const { return data.CameraView; }
+		const Matrix& GetCameraView(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraView[eyeIndex] : nonVR.CameraView;
+		}
 		/** Gets the camera projection matrix. */
-		const Matrix& GetCameraProj() const { return data.CameraProj; }
+		const Matrix& GetCameraProj(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraProj[eyeIndex] : nonVR.CameraProj;
+		}
 		/** Gets the combined camera view-projection matrix. */
-		const Matrix& GetCameraViewProj() const { return data.CameraViewProj; }
+		const Matrix& GetCameraViewProj(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraViewProj[eyeIndex] : nonVR.CameraViewProj;
+		}
 		/** Gets the unjittered camera view-projection matrix. */
-		const Matrix& GetCameraViewProjUnjittered() const { return data.CameraViewProjUnjittered; }
+		const Matrix& GetCameraViewProjUnjittered(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraViewProjUnjittered[eyeIndex] : nonVR.CameraViewProjUnjittered;
+		}
 		/** Gets the previous frame's unjittered view-projection matrix. */
-		const Matrix& GetCameraPreviousViewProjUnjittered() const { return data.CameraPreviousViewProjUnjittered; }
+		const Matrix& GetCameraPreviousViewProjUnjittered(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraPreviousViewProjUnjittered[eyeIndex] : nonVR.CameraPreviousViewProjUnjittered;
+		}
 		/** Gets the unjittered camera projection matrix. */
-		const Matrix& GetCameraProjUnjittered() const { return data.CameraProjUnjittered; }
+		const Matrix& GetCameraProjUnjittered(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraProjUnjittered[eyeIndex] : nonVR.CameraProjUnjittered;
+		}
 		/** Gets the inverse of the unjittered camera projection matrix. */
-		const Matrix& GetCameraProjUnjitteredInverse() const { return data.CameraProjUnjitteredInverse; }
+		const Matrix& GetCameraProjUnjitteredInverse(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraProjUnjitteredInverse[eyeIndex] : nonVR.CameraProjUnjitteredInverse;
+		}
 		/** Gets the inverse camera view matrix. */
-		const Matrix& GetCameraViewInverse() const { return data.CameraViewInverse; }
+		const Matrix& GetCameraViewInverse(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraViewInverse[eyeIndex] : nonVR.CameraViewInverse;
+		}
 		/** Gets the inverse camera view-projection matrix. */
-		const Matrix& GetCameraViewProjInverse() const { return data.CameraViewProjInverse; }
+		const Matrix& GetCameraViewProjInverse(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraViewProjInverse[eyeIndex] : nonVR.CameraViewProjInverse;
+		}
 		/** Gets the inverse camera projection matrix. */
-		const Matrix& GetCameraProjInverse() const { return data.CameraProjInverse; }
+		const Matrix& GetCameraProjInverse(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraProjInverse[eyeIndex] : nonVR.CameraProjInverse;
+		}
 		/** Gets the camera position adjustment vector. */
-		const float4& GetCameraPosAdjust() const { return data.CameraPosAdjust; }
+		const float4& GetCameraPosAdjust(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraPosAdjust[eyeIndex] : nonVR.CameraPosAdjust;
+		}
 		/** Gets the previous frame's camera position adjustment vector. */
-		const float4& GetCameraPreviousPosAdjust() const { return data.CameraPreviousPosAdjust; }
+		const float4& GetCameraPreviousPosAdjust(uint32_t eyeIndex = 0) const
+		{
+			return REL::Module::IsVR() ? vr.CameraPreviousPosAdjust[eyeIndex] : nonVR.CameraPreviousPosAdjust;
+		}
 		/** Gets the frame parameters (timer, frame count, etc.). */
-		const float4& GetFrameParams() const { return data.FrameParams; }
+		const float4& GetFrameParams() const
+		{
+			return REL::Module::IsVR() ? vr.FrameParams : nonVR.FrameParams;
+		}
 		/** Gets the first set of dynamic resolution parameters. */
-		const float4& GetDynamicResolutionParams1() const { return data.DynamicResolutionParams1; }
+		const float4& GetDynamicResolutionParams1() const
+		{
+			return REL::Module::IsVR() ? vr.DynamicResolutionParams1 : nonVR.DynamicResolutionParams1;
+		}
 		/** Gets the second set of dynamic resolution parameters. */
-		const float4& GetDynamicResolutionParams2() const { return data.DynamicResolutionParams2; }
+		const float4& GetDynamicResolutionParams2() const
+		{
+			return REL::Module::IsVR() ? vr.DynamicResolutionParams2 : nonVR.DynamicResolutionParams2;
+		}
 	};
 
 	namespace game

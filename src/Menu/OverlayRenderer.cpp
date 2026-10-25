@@ -1,4 +1,5 @@
 #include "OverlayRenderer.h"
+#include "BearforjMenu.h"
 #include "BackgroundBlur.h"
 #include "Plugin.h"
 #include "SetupRenderer.h"
@@ -340,8 +341,8 @@ void OverlayRenderer::RenderShaderCompilationStatus(const std::function<const ch
 			ImGui::End();
 			return;
 		}
-		ImGui::TextUnformatted(progressTitle.c_str());
-		ImGui::ProgressBar(percent, ImVec2(0.0f, 0.0f), progressOverlay.c_str());
+		// Bearforj: static Mish Mish beside the bar, status line under it.
+		BearforjMenu::DrawCompileOverlay(percent, progressOverlay.c_str(), progressTitle.c_str());
 		if (state->IsDeveloperMode()) {
 			int32_t threadLimit = shaderCache->backgroundCompilation ? shaderCache->backgroundCompilationThreadCount : shaderCache->compilationThreadCount;
 			int compilationRunning = (int)shaderCache->compilationPool.get_tasks_running();

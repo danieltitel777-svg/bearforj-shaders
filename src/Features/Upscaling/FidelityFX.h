@@ -93,13 +93,17 @@ public:
 	 */
 	void Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_depth, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors, float a_sharpness);
 
-	/** @brief AMD adapter classes FSR 4.1.1 can run on: RDNA 3 discrete (RX 7000) and RDNA 4 (RX 9000). */
+	/** @brief AMD adapter classes FSR 4.1.1 can run on: discrete RX 6000, RX 7000, and RX 9000. */
 	enum class Fsr4AdapterSupport
 	{
 		Unsupported,
+		RadeonRx6000,
 		RadeonRx7000,
 		RadeonRx9000
 	};
+
+	/** @brief "AMD FSR 4" after the driver reports a 4.x provider, otherwise "AMD FSR 3.1". */
+	const char* MenuMethodLabel() const;
 
 	// Runtime upscaler provider (amd_fidelityfx_upscaler_dx12.dll): on eligible AMD hardware,
 	// dispatches via the runtime DLL instead of the host FSR3 SDK. See RuntimeUpscaler.cpp.

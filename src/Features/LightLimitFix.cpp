@@ -7,7 +7,7 @@
 #include "I18n/I18n.h"
 #include "Menu.h"
 #include "Menu/ThemeManager.h"
-#include "Shadercache.h"
+#include "ShaderCache.h"
 #include "State.h"
 #include "Utils/ExternalEmittance.h"
 

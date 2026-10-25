@@ -2,6 +2,8 @@
 
 #include "Buffer.h"
 
+#include <cstddef>
+
 /** @brief Adds dynamic weather-driven wetness, puddle formation, shore wetness, and raindrop effects. */
 struct WetnessEffects : Feature
 {
@@ -62,7 +64,43 @@ public:
 		float RippleRadius = 1.f;
 		float RippleBreadth = .5f;
 		float RippleLifetime = .5f;
+
+		// Open Shaders CharacterRainSpots. Defaults are that source's values.
+		// Actor drying is Advanced Skin WetFadeTime. CharacterDryTime remains so
+		// the constant-buffer layout does not shift; it is not a slider.
+		uint EnableCharacterRainSpots = true;
+		float CharacterSpotDensity = 1.0f;
+		float CharacterSpotRadius = 0.75f;
+		float CharacterSpotStrength = 1.0f;
+		float CharacterSpotRoughness = 0.1f;
+		float CharacterSpotNormalStrength = 0.75f;
+		uint CharacterSpotDebug = 0u;
+		float CharacterCoatIntensity = 5.0f;
+		uint EnableWetHair = true;
+		float CharacterRainActivityMultiplier = 2.5f;
+		float CharacterDryTime = 10.0f;  // unused layout slot; see comment above
+		uint EnableWeaponRainDrops = true;
+		uint EnableSkinnedRainStreaks = true;
+		uint EnableArmorClothingDryingDrops = true;
+		uint EnableEnvironmentVerticalDrops = true;
+		float CharacterSpotLifetime = 3.0f;
+		float CharacterSpotInterval = 4.0f;
+		float CharacterDropPause = 0.35f;
+		float EnvironmentDropDryTime = 10.0f;
+		float EnvironmentVerticalSlopeStart = 0.15f;
+		float EnvironmentVerticalSlopeFull = 0.75f;
+		float BearforjWetnessPad0 = 0.0f;
+		float BearforjWetnessPad1 = 0.0f;
+		float BearforjWetnessPad2 = 0.0f;
+
+		// Volumetric puddles. Depth is in parallax height units ((sample - 0.5) * HeightScale).
+		// Enable 0 keeps the original puddle math. Skylighting is required so roofs stay dry.
+		uint EnableVolumetricPuddles = 1u;
+		float VolumetricPuddleDepth = 0.5f;
+		float VolumetricPuddleEdgeDarkening = 0.55f;
+		float VolumetricPuddleDistortion = 0.035f;
 	};
+	static_assert(sizeof(Settings) == 224);
 
 	struct alignas(16) PerFrame
 	{
@@ -72,8 +110,14 @@ public:
 		float Wetness;
 		float PuddleWetness;
 		Settings settings;
+		float CharacterImpactIntensity;
+		float CharacterRetainedWetness;
+		float EnvironmentRetainedWetness;
+		float CharacterStatePad;
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
+	static_assert(offsetof(PerFrame, settings) == 80);
+	static_assert(sizeof(PerFrame) == 320);
 
 	struct DebugSettings
 	{
@@ -120,8 +164,20 @@ public:
 
 	/** @brief Updates wetness state and binds the per-frame constant buffer. */
 	virtual void Prepass() override;
+	/** @brief Loads hair_sss.dds and the puddle raindrop texture. */
+	virtual void SetupResources() override;
 	/** @brief Detects Splashes of Storms mod presence for compatibility handling. */
 	virtual void PostPostLoad() override;
+	virtual void DataLoaded() override;
+	virtual void GameLoaded() override;
+
+	bool ShouldClassifyCharacterRainSurfaces() const
+	{
+		return settings.EnableWetnessEffects && settings.EnableCharacterRainSpots;
+	}
+
+	/** @brief Current rain intensity (0–1) copied for Advanced Skin's per-actor coat. */
+	float ActorRainWetness() const { return actorRainWetness; }
 
 	/** @brief Draws the ImGui settings panel for wetness effects configuration. */
 	virtual void DrawSettings() override;
@@ -177,9 +233,14 @@ public:
 
 private:
 	void DrawWeatherAnalysis() const;
+	void DrawBearforjWetnessSettings();
+	void AdvanceRetainedWetness(PerFrame& a_data) const;
 
 	size_t rainTimer = 0;  // milliseconds; size_t for precision
 	bool splashesOfStormsLoaded = false;
+	mutable float actorRainWetness = 0.0f;
+	mutable float environmentSurfaceWetness = 0.0f;
+	mutable std::uint32_t retainedWetnessFrame = 0xffffffffu;
 
 	// Weather wetness calculation result for debug display
 	struct WeatherWetnessResult

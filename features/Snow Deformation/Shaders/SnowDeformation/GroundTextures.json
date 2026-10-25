@@ -1,0 +1,53 @@
+{
+  "notes": "Default landscape diffuse file names for Bottled SnowDeformation ground prints. Match is by file name, so a same-path retexture (including PBR copies) still matches. No new textures are shipped. Each type has its own depth in game units (snow print depth defaults to 6). mud, dirt, sand and riverbed default to 2.4; road defaults to 0.72. Sources: STEP terrain normal-map list (textures/landscape/*_n.dds and textures/landscape/roads/road01_n.dds, road01snow01_n.dds), the Skyrim LOD atlas (dirt02.dds, dirtcliffs01.dds, roads/road01.dds, roads/road01snow01.dds), and the terrain retexture notes that name roads/road01fallforest01.dds and roads/road01reach01.dds as the Rift and Reach main-road files. The exact extra filenames edited with Moder were not in this repository; add them to a type here or in the menu. riverbed is riverbededge.dds, the only listed file that is not a mud, dirt, sand or road name. coastbeach is the sand type.",
+  "types": [
+    {
+      "id": "mud",
+      "depth": 2.4,
+      "textures": [
+        "rivermud.dds"
+      ]
+    },
+    {
+      "id": "dirt",
+      "depth": 2.4,
+      "textures": [
+        "dirt01.dds",
+        "dirt02.dds",
+        "dirtpath01.dds",
+        "dirtsnowpath01.dds",
+        "fallforestdirt01.dds",
+        "frozenmarshdirtslopes01.dds",
+        "reachdirt01.dds",
+        "volcanictundradirt01.dds",
+        "volcanictundradirt02.dds",
+        "dirtcliffs01.dds"
+      ]
+    },
+    {
+      "id": "sand",
+      "depth": 2.4,
+      "textures": [
+        "coastbeach01.dds",
+        "coastbeach02.dds"
+      ]
+    },
+    {
+      "id": "riverbed",
+      "depth": 2.4,
+      "textures": [
+        "riverbededge.dds"
+      ]
+    },
+    {
+      "id": "road",
+      "depth": 0.72,
+      "textures": [
+        "road01.dds",
+        "road01fallforest01.dds",
+        "road01reach01.dds",
+        "road01snow01.dds"
+      ]
+    }
+  ]
+}

@@ -151,6 +151,10 @@ public:
 	// Static UI helper methods
 	static void SetupImGuiStyle(const class Menu& menu);
 	static void InitDefaultFontConfig(ImFontConfig& config);
+	static constexpr const char* kBearforjMonoName = "BearforjMono";
+	static ImFont* FindMonoFont();
+	static ImFont* AddBearforjMonoFont(float size);
+	static void MergeCyrillicFallback(ImFont* font, const std::string& fontFile, float size);
 	static bool ReloadFont(const class Menu& menu, float& cachedFontSize);
 	static void ForceApplyDefaultTheme();  // Force Default.json colors to ImGui (bypass hardcoded defaults)
 

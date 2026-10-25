@@ -2,6 +2,7 @@
 #include "Common/Hash.hlsli"
 #include "Common/Math.hlsli"
 #include "Common/SharedData.hlsli"
+#include "RainRendering/RainColorCompat.hlsli"
 #include "Common/StereoSampling.hlsli"
 #include "RainRendering/RainConstants.hlsli"
 #include "RainRendering/RainDistribution.hlsli"
@@ -140,7 +141,7 @@ bool RainCapsuleOutsidePlane(float4 plane, float3 startPosition, float3 endPosit
 
 bool RainStreakIntersectsEyeFrustum(float3 position, float3 axis, float halfLength, float radius, uint eyeIndex)
 {
-	float3 cameraPosition = FrameBuffer::CameraPosAdjust[eyeIndex].xyz;
+	float3 cameraPosition = FrameBuffer::CameraPosAdjust.xyz;
 	float3 startPosition = position - axis * halfLength - cameraPosition;
 	float3 endPosition = position + axis * halfLength - cameraPosition;
 	[unroll] for (uint planeIndex = 0u; planeIndex < 6u; ++planeIndex)
@@ -520,7 +521,7 @@ struct RainVertexOutput
 
 float2 ProjectWorldVectorToPixels(float3 worldVector, float4 centerClip, uint eyeIndex)
 {
-	float4 vectorClip = mul(FrameBuffer::CameraViewProj[eyeIndex], float4(worldVector, 0.0f));
+	float4 vectorClip = mul(FrameBuffer::CameraViewProj, float4(worldVector, 0.0f));
 	float2 projected =
 		(vectorClip.xy * centerClip.w - centerClip.xy * vectorClip.w) /
 		max(centerClip.w * centerClip.w, EPSILON_DIVISION);
@@ -576,11 +577,11 @@ RainVertexOutput RainVS(uint vertexID : SV_VertexID, uint instanceID : SV_Instan
 	float3 worldPosition = drop.PositionLength.xyz +
 	                       streakAxis * (corner.x * drop.PositionLength.w * 0.5f) +
 	                       sideAxis * (corner.y * drop.VelocityWidth.w * 0.5f);
-	float3 cameraRelativePosition = worldPosition - FrameBuffer::CameraPosAdjust[eyeIndex].xyz;
-	float4 clipPosition = mul(FrameBuffer::CameraViewProj[eyeIndex], float4(cameraRelativePosition, 1.0f));
+	float3 cameraRelativePosition = worldPosition - FrameBuffer::CameraPosAdjust.xyz;
+	float4 clipPosition = mul(FrameBuffer::CameraViewProj, float4(cameraRelativePosition, 1.0f));
 	output.EyeClip = float2(clipPosition.w + clipPosition.x, clipPosition.w - clipPosition.x);
 	if (Glassy.x > 0.5f) {
-		float4 centerClip = mul(FrameBuffer::CameraViewProj[eyeIndex], float4(drop.PositionLength.xyz - FrameBuffer::CameraPosAdjust[eyeIndex].xyz, 1.0f));
+		float4 centerClip = mul(FrameBuffer::CameraViewProj, float4(drop.PositionLength.xyz - FrameBuffer::CameraPosAdjust.xyz, 1.0f));
 		float2 projectedSide = ProjectWorldVectorToPixels(
 			sideAxis * drop.VelocityWidth.w * 0.5f, centerClip, eyeIndex);
 		float halfWidth = length(projectedSide);

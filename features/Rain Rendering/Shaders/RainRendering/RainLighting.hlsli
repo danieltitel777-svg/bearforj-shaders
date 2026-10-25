@@ -7,9 +7,6 @@ namespace LightLimitFix
 {
 #	include "LightLimitFix/Common.hlsli"
 }
-#	ifdef RAIN_INVERSE_SQUARE
-#		include "InverseSquareLighting/InverseSquareLighting.hlsli"
-#	endif
 StructuredBuffer<LightLimitFix::Light> RainLights : register(t35);
 StructuredBuffer<uint> RainLightIndices : register(t36);
 StructuredBuffer<LightLimitFix::LightGrid> RainLightCells : register(t37);
@@ -33,13 +30,13 @@ namespace RainLighting
 #if defined(RAIN_LOCAL_LIGHTS) && defined(COMPUTESHADER)
 		[branch] if (LocalLighting.x <= 0.0f || RainLightGrid.w == 0u || any(RainLightGrid.xyz == 0u) || headDistance >= LocalLighting.y) return result;
 		uint eyeIndex = 0u;
-		float3 relativePosition = worldPosition - FrameBuffer::CameraPosAdjust[0].xyz;
-		float3 viewPosition = FrameBuffer::WorldToView(relativePosition, true, 0);
-		float2 uv = FrameBuffer::ViewToUV(viewPosition, true, 0);
+		float3 relativePosition = worldPosition - FrameBuffer::CameraPosAdjust.xyz;
+		float3 viewPosition = FrameBuffer::WorldToView(relativePosition, true);
+		float2 uv = FrameBuffer::ViewToUV(viewPosition, true);
 #	ifdef VR
 		if (viewPosition.z <= 0.0f || any(uv < 0.0f) || any(uv >= 1.0f)) {
 			eyeIndex = 1u;
-			relativePosition = worldPosition - FrameBuffer::CameraPosAdjust[1].xyz;
+			relativePosition = worldPosition - FrameBuffer::CameraPosAdjust.xyz;
 			viewPosition = FrameBuffer::WorldToView(relativePosition, true, 1);
 			uv = FrameBuffer::ViewToUV(viewPosition, true, 1);
 		}
@@ -71,20 +68,16 @@ namespace RainLighting
 			if (lightIndex >= min(RainLightGrid.w, lightCount))
 				continue;
 			LightLimitFix::Light light = RainLights[lightIndex];
-			if ((light.lightFlags & (LightLimitFix::LightFlags::Disabled | LightLimitFix::LightFlags::Spot)) != 0u)
+			if ((light.lightFlags & LightLimitFix::LightFlags::Disabled) != 0u)
 				continue;
 			// Room-restricted lights need per-drop room membership before they can illuminate rain.
 			if ((light.lightFlags & LightLimitFix::LightFlags::PortalStrict) != 0u && any(light.roomFlags != 0u))
 				continue;
-			float3 toLight = light.positionWS[eyeIndex].xyz - relativePosition;
+			float3 toLight = light.positionWS.xyz - relativePosition;
 			float lightDistance = length(toLight);
 			if (lightDistance >= light.radius)
 				continue;
-#	ifdef RAIN_INVERSE_SQUARE
-			float attenuation = InverseSquareLighting::GetAttenuation(max(lightDistance, 1.0f), light);
-#	else
 			float attenuation = saturate(1.0f - lightDistance * lightDistance * light.invRadius * light.invRadius);
-#	endif
 			float3 lightDirection = toLight / max(lightDistance, 1.0f);
 			float3 lightColor = Color::PointLight(light.color, (light.lightFlags & LightLimitFix::LightFlags::Linear) != 0u, light.lightFlags);
 			float3 irradiance = Color::IrradianceToLinear(max(lightColor, 0.0f)) * max(light.fade, 0.0f) * attenuation;

@@ -66,7 +66,7 @@ public:
 	{
 		std::string name;
 		float gpuTimeMs = 0.0f;
-		// Rolling statistics, filled in only by GetStatistics.
+		// Rolling statistics. GetResults fills them for the latest snapshot.
 		float avgMs = 0.0f;
 		float p95Ms = 0.0f;
 		float p99Ms = 0.0f;
@@ -74,6 +74,8 @@ public:
 		float cpuAvgMs = 0.0f;
 		float cpuP95Ms = 0.0f;
 		float cpuP99Ms = 0.0f;
+		// True when this timer produced a result in the latest collected frame.
+		bool sampledThisFrame = false;
 		bool valid = false;
 
 		const float* historyBuffer = nullptr;
@@ -144,6 +146,9 @@ public:
 
 	/** @brief Gets the total CPU time in milliseconds for the last collected frame. */
 	float GetCpuTotalTimeMs() const { return cpuTotalTimeMs; }
+
+	/** @brief Frames collected since the last timer reset. Stress tests sample each profiler frame once. */
+	uint64_t GetCollectedFrameCount() const noexcept { return collectedFrames; }
 
 	/** @brief Resets all timer history and results. */
 	void ClearTimers()

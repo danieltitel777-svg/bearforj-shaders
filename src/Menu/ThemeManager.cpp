@@ -334,6 +334,56 @@ void ThemeManager::InitDefaultFontConfig(ImFontConfig& config)
 	config.RasterizerMultiply = Constants::FCONF_RASTERIZER_MULTIPLY;
 }
 
+ImFont* ThemeManager::FindMonoFont()
+{
+	ImGuiIO& io = ImGui::GetIO();
+	if (!io.Fonts)
+		return nullptr;
+	for (ImFont* font : io.Fonts->Fonts) {
+		if (!font)
+			continue;
+		for (const ImFontConfig* src : font->Sources) {
+			if (src && !src->MergeMode && std::strcmp(src->Name, kBearforjMonoName) == 0)
+				return font;
+		}
+	}
+	return nullptr;
+}
+
+ImFont* ThemeManager::AddBearforjMonoFont(float size)
+{
+	ImGuiIO& io = ImGui::GetIO();
+	const auto path = Util::PathHelpers::GetFontsPath() / "IBMPlexMono" / "IBMPlexMono-Regular.ttf";
+	std::error_code ec;
+	if (!io.Fonts || !std::filesystem::exists(path, ec))
+		return nullptr;
+	ImFontConfig cfg;
+	InitDefaultFontConfig(cfg);
+	ImFormatString(cfg.Name, IM_ARRAYSIZE(cfg.Name), "%s", kBearforjMonoName);
+	return io.Fonts->AddFontFromFileTTF(path.string().c_str(), size, &cfg);
+}
+
+void ThemeManager::MergeCyrillicFallback(ImFont* font, const std::string& fontFile, float size)
+{
+	if (!font)
+		return;
+	// Shipped fonts without Cyrillic glyphs (checked with fontTools): Crimson Pro, Sanguis.
+	if (fontFile.find("CrimsonPro") == std::string::npos && fontFile.find("Sanguis") == std::string::npos && fontFile.find("Cinzel") == std::string::npos)
+		return;
+	static const ImWchar cyrillic[] = { 0x0400, 0x052F, 0x2DE0, 0x2DFF, 0xA640, 0xA69F, 0x2116, 0x2116, 0 };
+	const auto path = Util::PathHelpers::GetFontsPath() / "IBMPlexSerif" / "IBMPlexSerif-Regular.ttf";
+	std::error_code ec;
+	if (!std::filesystem::exists(path, ec))
+		return;
+	ImFontConfig cfg;
+	InitDefaultFontConfig(cfg);
+	cfg.MergeMode = true;
+	cfg.DstFont = font;
+	cfg.GlyphRanges = cyrillic;
+	if (!ImGui::GetIO().Fonts->AddFontFromFileTTF(path.string().c_str(), size, &cfg, cyrillic))
+		logger::warn("[Fonts] Cyrillic fallback merge failed for {}", fontFile);
+}
+
 bool ThemeManager::ReloadFont(const Menu& menu, float& cachedFontSize)
 {
 	// Thread-safe reentrancy guard using atomic flag
@@ -438,6 +488,7 @@ bool ThemeManager::ReloadFont(const Menu& menu, float& cachedFontSize)
 					ImFontConfig cfg = font_config;
 					auto* font = io.Fonts->AddFontFromFileTTF(fontPath.string().c_str(), roundedSize, &cfg);
 					if (font) {
+						MergeCyrillicFallback(font, effective.File, roundedSize);
 						atlasCache.emplace(cacheKey, font);
 						loadedFont = font;
 					}
@@ -617,6 +668,8 @@ bool ThemeManager::ReloadFont(const Menu& menu, float& cachedFontSize)
 						baseFont = io.Fonts->AddFontDefault();
 					}
 
+					MergeCyrillicFallback(baseFont, roleFile, roleSize);
+
 					tryMergeGlyphSet(baseFont, roleSize, primaryCJKFontPaths, primaryGlyphRanges, std::format("active locale '{}' glyphs", locale), role);
 					for (const auto& merge : supplementalGlyphMerges) {
 						tryMergeGlyphSet(baseFont, roleSize, merge.fontPaths, merge.glyphRanges.Data, std::format("locale display '{}'", merge.locale), role);
@@ -637,6 +690,9 @@ bool ThemeManager::ReloadFont(const Menu& menu, float& cachedFontSize)
 			}
 		}
 	}
+
+	// Bearforj mono font, added after every Clear(); looked up per frame via FindMonoFont().
+	AddBearforjMonoFont(std::round(atlas.cachedFontPixelSizesByRole[static_cast<size_t>(Menu::FontRole::Body)] * 0.85f));
 
 	if (atlas.wantsFontPreviewAtlas) {
 		const float previewFontSize = atlas.cachedFontPixelSizesByRole[static_cast<size_t>(Menu::FontRole::Body)];

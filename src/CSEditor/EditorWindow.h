@@ -516,7 +516,9 @@ private:
 	bool showSettingsWindow = false;
 	std::string settingsSelectedCategory = "Flags";
 
-	// Widget focus tracking for Ctrl+W
+	// Widget focus tracking for Ctrl+W. The pointer matches Bottled and mainline.
+	// The form key still finds the widget after that object is rebuilt.
+	Widget* lastFocusedWidget = nullptr;
 	std::optional<FormEditSources::FormKey> lastFocusedWidgetKey;
 
 	/** @brief Locks the current weather once any in-progress transition finishes, unless the user already locked one. */

@@ -117,6 +117,34 @@ struct UnifiedWater : OverlayFeature
 
 	/** @brief Installs engine hooks for water mesh replacement and worldspace handling. */
 	virtual void PostPostLoad() override;
+
+	using PostSetupGeometryObserver = void (*)();
+
+	/** @brief Returns the current Unified Water flowmap shader-resource view. */
+	ID3D11ShaderResourceView* GetFlowmapSRV() const
+	{
+		RE::NiPointer<RE::NiSourceTexture> texture;
+		return flowmap && flowmap->TryGetFlowmap(texture) && texture && texture->rendererTexture ? texture->rendererTexture->resourceView : nullptr;
+	}
+
+	/**
+	 * @brief Returns the world-cell mapping of the current flowmap.
+	 * @return True when a nonempty flowmap is available.
+	 */
+	static void InstallSetupGeometryHook();
+	static void SetPostSetupGeometryObserver(PostSetupGeometryObserver a_observer) noexcept;
+
+	bool GetFlowmapMapping(float& a_offsetX, float& a_offsetY, float& a_width, float& a_height) const
+	{
+		if (!flowmap || flowmap->GetWidth() <= 0 || flowmap->GetHeight() <= 0)
+			return false;
+		a_offsetX = static_cast<float>(flowmap->GetOffsetX());
+		a_offsetY = static_cast<float>(flowmap->GetOffsetY());
+		a_width = static_cast<float>(flowmap->GetWidth());
+		a_height = static_cast<float>(flowmap->GetHeight());
+		return true;
+	}
+
 	bool RequiresRestartForToggle() const override { return true; }
 	std::string_view GetRuntimeToggleNote() const override
 	{

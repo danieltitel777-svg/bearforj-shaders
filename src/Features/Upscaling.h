@@ -48,7 +48,7 @@ public:
 		kDLSS
 	};
 
-	static constexpr uint32_t kFsr4RuntimeSelectionSchemaVersion = 1;
+	static constexpr uint32_t kFsr4RuntimeSelectionSchemaVersion = 2;
 	static constexpr uint32_t kAntiLag2RenderedFPSLimit = 60;
 	static constexpr uint32_t kGameplayMinRenderedFPSLimit = 20;
 	static constexpr uint32_t kGameplayMaxRenderedFPSLimit = 240;
